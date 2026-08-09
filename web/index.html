@@ -209,8 +209,32 @@
 			(Like : dxc.nc7j.com:7373)
 		</div>
 		<div class="settings-element">
+			<span class="settings-label">Rig Model (hamlib -m):</span><input id="RIGMODEL"
+					class="settings_input sbitx-text-input" type="text" size="6" />
+			(e.g. 2057 for QMX)
+		</div>
+		<div class="settings-element">
+			<span class="settings-label">Rig Device:</span><input id="RIGDEVICE"
+					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;" />
+			(e.g. /dev/ttyUSB0 -- case-sensitive)
+		</div>
+		<div class="settings-element">
+			<span class="settings-label">Capture Device:</span><input id="CAPTUREDEV"
+					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;" />
+		</div>
+		<div class="settings-element">
+			<span class="settings-label">Playback Device:</span><input id="PLAYBACKDEV"
+					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;" />
+			(Capture/Playback Device changes take effect after a restart)
+		</div>
+		<div class="settings-element">
 			<span class="settings-label"></span>
-			<button id="settings_save" class="logger-button">Update</button>		
+			<button id="rig_connect" class="logger-button">Connect to Rig</button>
+		</div>
+
+		<div class="settings-element">
+			<span class="settings-label"></span>
+			<button id="settings_save" class="logger-button">Update</button>
 		</div>
 	</div><!-- end of help text -->
   		<div id="login_panel">
@@ -2053,7 +2077,20 @@ function save_settings(){
 	websocket_send("PASSKEY " + el("PASSKEY").value);
 	websocket_send("SIDETONE " + el("SIDETONE").value);
 	websocket_send("TELNETURL " + el("TELNETURL").value);
+	websocket_send("RIGMODEL " + el("RIGMODEL").value);
+	websocket_send("RIGDEVICE " + el("RIGDEVICE").value);
+	websocket_send("CAPTUREDEV " + el("CAPTUREDEV").value);
+	websocket_send("PLAYBACKDEV " + el("PLAYBACKDEV").value);
 	$("#settings_panel").hide();
+}
+
+// starts (or restarts) rigctld for whatever RIGMODEL/RIGDEVICE are
+// currently set to, and reconnects to it -- only meaningful when the
+// daemon was started with radio=generic in hw_settings.ini
+function connect_rig(){
+	websocket_send("RIGMODEL " + el("RIGMODEL").value);
+	websocket_send("RIGDEVICE " + el("RIGDEVICE").value);
+	websocket_send("RIGCONNECT 1");
 }
 
 /* recorder panel */
@@ -2481,6 +2518,7 @@ $("#logbook-search").on("input", logbook_search);
 //settings buttons
 $("#settings-open").on("click", open_settings);
 $("#settings_save").on("click", save_settings);
+$("#rig_connect").on("click", connect_rig);
 
 //recorder buttons
 $("#recorder-open").on("click", open_recorder);

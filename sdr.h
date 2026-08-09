@@ -101,6 +101,15 @@ extern float fft_bins[];
 extern int spectrum_plot[];
 extern struct filter *ssb;
 
+// generic hamlib-rig backend (bypasses the SDR I/Q chain and si5351/i2c
+// tuning entirely -- see rig_generic.c / sound_generic.c). Selected via
+// radio=generic in hw_settings.ini instead of the default zBitx SDR path.
+extern int generic_rig_mode;
+extern char generic_rigctld_host[64];
+extern int generic_rigctld_port;
+extern char generic_capture_device[64];
+extern char generic_playback_device[64];
+
 //vfo definitions
 
 #define MAX_PHASE_COUNT (16385)
@@ -189,6 +198,7 @@ struct rx {
 };
 
 extern struct rx *rx_list;
+extern struct rx *tx_list;
 extern int freq_hdr;
 
 void set_lo(int frequency);

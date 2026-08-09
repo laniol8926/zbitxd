@@ -47,6 +47,7 @@ The initial sync between the gui values, the core radio values, settings, et al 
 #include "logbook.h"
 #include "hist_disp.h"
 #include "configure.h"
+#include "rig_generic.h"
 
 void change_band(char *request);
 
@@ -466,6 +467,21 @@ struct field main_controls[] = {
 		"", 0, 32, 1, 0},
 	{"#xota", NULL, 1000, -1000, 400, 149, "xOTA", 40, "", FIELD_SELECTION,
 		"NONE/IOTA/SOTA/POTA", 0, 0, 0, COMMON_CONTROL},
+
+	// Generic-rig backend (radio=generic in hw_settings.ini): which rig
+	// and audio devices to use, settable from the web UI instead of
+	// hand-editing config files, so different operators/radios can
+	// reconnect without SSH access. See rig_generic.c/sound_generic.c.
+	{"#rig_model", NULL, 1000, -1000, 400, 149, "RIGMODEL", 70, "2057", FIELD_TEXT,
+		"", 1,10,1,0},
+	{"#rig_device", NULL, 1000, -1000, 400, 149, "RIGDEVICE", 70, "/dev/ttyUSB0", FIELD_TEXT,
+		"", 1,40,1,0},
+	{"#capture_device", NULL, 1000, -1000, 400, 149, "CAPTUREDEV", 70, "default", FIELD_TEXT,
+		"", 1,40,1,0},
+	{"#playback_device", NULL, 1000, -1000, 400, 149, "PLAYBACKDEV", 70, "default", FIELD_TEXT,
+		"", 1,40,1,0},
+	{"#rig_connect", NULL, 1000, -1000, 400, 149, "RIGCONNECT", 40, "", FIELD_BUTTON,
+		"", 0,0,0,0},
 
 	//moving global variables into fields 	
   { "#vfo_a_freq", NULL, 1000, -1000, 50, 50, "VFOA", 40, "14000000", FIELD_NUMBER,
@@ -2929,8 +2945,12 @@ void do_control_action(char *cmd){
 		modem_abort();
 		tx_off();
 	}
-	else if (!strcmp(request, "TX")){	
+	else if (!strcmp(request, "TX")){
 		tx_on(TX_SOFT);
+	}
+	else if (!strcmp(request, "RIGCONNECT")){
+		if (generic_rig_mode)
+			rig_generic_connect(field_str("RIGMODEL"), field_str("RIGDEVICE"));
 	}
 	else if (!strcmp(request, "WEB")){
 		open_url("http://127.0.0.1:8080");
@@ -3397,6 +3417,15 @@ void cmd_exec(char *cmd){
 		struct field *f = get_field("#ft8_tx1st");
 		const bool on = !strcmp(args, "EVEN");
 		set_field(f->cmd, on ? "ON" : "OFF");
+	}
+	// device/file paths are case-sensitive (a rig serial port or ALSA
+	// device name) -- skip the generic uppercase-the-value handling
+	// below, which is correct for callsigns/grids but would silently
+	// break these
+	else if (!strcmp(exec, "RIGDEVICE") || !strcmp(exec, "CAPTUREDEV") || !strcmp(exec, "PLAYBACKDEV")) {
+		struct field *f = get_field_by_label(exec);
+		if (f)
+			set_field(f->cmd, args);
 	}
 	// the normal case, finally
 	else {

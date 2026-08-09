@@ -22,8 +22,8 @@
 #include "si5351.h"
 #include "ini.h"
 #include "configure.h"
-
-int set_field(char*, char*); // This should be moved to a .h file
+#include "rig_generic.h"
+#include "sound_generic.h"
 
 #define DEBUG 0
 
@@ -50,6 +50,16 @@ FILE* pf_debug = NULL;
 
 int sbitx_version = -1;
 int fwdpower, vswr;
+
+// generic hamlib-rig backend selection (see sdr.h for the field descriptions)
+int generic_rig_mode = 0;
+char generic_rigctld_host[64] = "127.0.0.1";
+// 4532 is hamlib.c's own hardcoded port (zbitxd emulating a controllable
+// rig for *other* hamlib software) -- deliberately different here so our
+// outbound rigctld client doesn't collide with it
+int generic_rigctld_port = 4533;
+char generic_capture_device[64] = "default";
+char generic_playback_device[64] = "default";
 float fft_bins[MAX_BINS]; // spectrum ampltiudes
 int spectrum_plot[MAX_BINS];
 fftw_complex* fft_spectrum;
@@ -353,6 +363,15 @@ void set_rx1(int frequency)
 	last_frequency = frequency;
 	if (frequency == freq_hdr)
 		return;
+
+	if (generic_rig_mode) {
+		// the rig does its own filtering/tuning -- no LPF relays or
+		// si5351 to drive, just tell it the frequency over CAT
+		rig_generic_set_freq(frequency);
+		freq_hdr = frequency;
+		return;
+	}
+
 	radio_tune_to(frequency);
 	freq_hdr = frequency;
 	if (sbitx_version < 4)
@@ -1033,6 +1052,17 @@ static int hw_settings_handler(void* user, const char* section,
 		si570_xtal = atoi(value);
 	if (!strcmp(name, "hw"))
 		sbitx_version = atoi(value);
+
+	if (!strcmp(name, "radio"))
+		generic_rig_mode = !strcmp(value, "generic");
+	if (!strcmp(name, "rigctld_host"))
+		strncpy(generic_rigctld_host, value, sizeof(generic_rigctld_host) - 1);
+	if (!strcmp(name, "rigctld_port"))
+		generic_rigctld_port = atoi(value);
+	if (!strcmp(name, "capture_device"))
+		strncpy(generic_capture_device, value, sizeof(generic_capture_device) - 1);
+	if (!strcmp(name, "playback_device"))
+		strncpy(generic_playback_device, value, sizeof(generic_playback_device) - 1);
 }
 
 static void read_hw_ini()
@@ -1346,6 +1376,11 @@ void tr_switch_v4(int tx_on)
 
 void tr_switch(int tx_on)
 {
+	if (generic_rig_mode) {
+		rig_generic_set_ptt(tx_on);
+		return;
+	}
+
 	switch (sbitx_version) {
 	case SBITX_DE:
 		tr_switch_de(tx_on);
@@ -1368,23 +1403,27 @@ void setup(char* audio_output_device)
 
 	read_hw_ini();
 
-	// setup the LPF and the gpio pins
-	pinMode(TX_LINE, OUTPUT);
-	pinMode(RX_LINE, OUTPUT);
-	pinMode(LPF_A, OUTPUT);
-	pinMode(LPF_B, OUTPUT);
-	pinMode(LPF_C, OUTPUT);
-	pinMode(LPF_D, OUTPUT);
-	digitalWrite(LPF_A, LOW);
-	digitalWrite(LPF_B, LOW);
-	digitalWrite(LPF_C, LOW);
-	digitalWrite(LPF_D, LOW);
-	digitalWrite(TX_LINE, LOW);
-	digitalWrite(RX_LINE, HIGH);
+	if (!generic_rig_mode) {
+		// setup the LPF and the gpio pins -- zBitx SDR board only, a
+		// generic rig has its own filtering/relays behind CAT control
+		pinMode(TX_LINE, OUTPUT);
+		pinMode(RX_LINE, OUTPUT);
+		pinMode(LPF_A, OUTPUT);
+		pinMode(LPF_B, OUTPUT);
+		pinMode(LPF_C, OUTPUT);
+		pinMode(LPF_D, OUTPUT);
+		digitalWrite(LPF_A, LOW);
+		digitalWrite(LPF_B, LOW);
+		digitalWrite(LPF_C, LOW);
+		digitalWrite(LPF_D, LOW);
+		digitalWrite(TX_LINE, LOW);
+		digitalWrite(RX_LINE, HIGH);
+	}
 
 	fft_init();
 	vfo_init_phase_table();
-	setup_oscillators();
+	if (!generic_rig_mode)
+		setup_oscillators();
 	q_init(&qremote, 8000);
 
 	modem_init();
@@ -1395,18 +1434,25 @@ void setup(char* audio_output_device)
 	tx_list->tuned_bin = 512;
 	tx_init(7000000, MODE_LSB, -3000, -150);
 
-	// detect the version of sbitx if not read from hw_settings
-	if (sbitx_version == -1) {
-		uint8_t response[4];
-		if (i2cbb_read_i2c_block_data(0x8, 0, 4, response) == -1)
-			sbitx_version = SBITX_DE;
-		else
-			sbitx_version = SBITX_V2;
-	}
-	printf("hw version: %d\n", sbitx_version);
+	if (generic_rig_mode) {
+		// no zBitx board to identify -- CAT/audio both go to the
+		// generic rig backend instead
+		rig_generic_init();
+		sound_generic_start();
+	} else {
+		// detect the version of sbitx if not read from hw_settings
+		if (sbitx_version == -1) {
+			uint8_t response[4];
+			if (i2cbb_read_i2c_block_data(0x8, 0, 4, response) == -1)
+				sbitx_version = SBITX_DE;
+			else
+				sbitx_version = SBITX_V2;
+		}
+		printf("hw version: %d\n", sbitx_version);
 
-	setup_audio_codec();
-	sound_thread_start("plughw:0,0");
+		setup_audio_codec();
+		sound_thread_start("plughw:0,0");
+	}
 
 	sleep(1); // why? to allow the aloop to initialize?
 
