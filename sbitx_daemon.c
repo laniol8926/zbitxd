@@ -482,6 +482,11 @@ struct field main_controls[] = {
 		"", 1,40,1,0},
 	{"#rig_connect", NULL, 1000, -1000, 400, 149, "RIGCONNECT", 40, "", FIELD_BUTTON,
 		"", 0,0,0,0},
+	// forces an immediate settings save (see save_user_settings()'s 30s
+	// throttle) -- sent by the settings panel's "Update" button so an
+	// explicit save doesn't silently get lost on a quick page reload
+	{"#settings_save_trigger", NULL, 1000, -1000, 400, 149, "SETTINGS_SAVE", 40, "", FIELD_BUTTON,
+		"", 0,0,0,0},
 
 	//moving global variables into fields 	
   { "#vfo_a_freq", NULL, 1000, -1000, 50, 50, "VFOA", 40, "14000000", FIELD_NUMBER,
@@ -2951,6 +2956,9 @@ void do_control_action(char *cmd){
 	else if (!strcmp(request, "RIGCONNECT")){
 		if (generic_rig_mode)
 			rig_generic_connect(field_str("RIGMODEL"), field_str("RIGDEVICE"));
+	}
+	else if (!strcmp(request, "SETTINGS_SAVE")){
+		save_user_settings(1);
 	}
 	else if (!strcmp(request, "WEB")){
 		open_url("http://127.0.0.1:8080");

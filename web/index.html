@@ -2081,6 +2081,11 @@ function save_settings(){
 	websocket_send("RIGDEVICE " + el("RIGDEVICE").value);
 	websocket_send("CAPTUREDEV " + el("CAPTUREDEV").value);
 	websocket_send("PLAYBACKDEV " + el("PLAYBACKDEV").value);
+	// force an immediate save -- normal field changes are throttled to
+	// once per 30s to reduce SD-card wear, which silently discards
+	// anything changed then re-read (e.g. on a quick page reload) before
+	// that window elapses. An explicit "Update" click should stick right away.
+	websocket_send("SETTINGS_SAVE 1");
 	$("#settings_panel").hide();
 }
 
@@ -2090,6 +2095,7 @@ function save_settings(){
 function connect_rig(){
 	websocket_send("RIGMODEL " + el("RIGMODEL").value);
 	websocket_send("RIGDEVICE " + el("RIGDEVICE").value);
+	websocket_send("SETTINGS_SAVE 1");
 	websocket_send("RIGCONNECT 1");
 }
 
