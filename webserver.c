@@ -12,6 +12,7 @@
 #include "logbook.h"
 #include "hist_disp.h"
 #include "configure.h"
+#include "rig_generic.h"
 
 static const char *s_listen_on = "ws://0.0.0.0:8080";
 static const char *s_web_root = SHAREDIR "/web";
@@ -125,6 +126,16 @@ void get_macro_labels(struct mg_connection *c){
 	web_respond(c, out);
 }
 
+// hamlib's full rig catalog for the generic-rig backend's rig-picker
+// (web UI datalist) -- see rig_generic_list()
+void get_riglist(struct mg_connection *c){
+	static char riglist[16384];
+	char out[16400];
+	rig_generic_list(riglist, sizeof(riglist));
+	snprintf(out, sizeof(out), "RIGLIST %s", riglist);
+	mg_ws_send(c, out, strlen(out), WEBSOCKET_OP_TEXT);
+}
+
 char request[200];
 int request_index = 0;
 
@@ -170,6 +181,8 @@ static void web_despatcher(struct mg_connection *c, struct mg_ws_message *wm){
 		get_logs(c, value);
 	else if (!strcmp(field, "macros_list"))
 		get_macros_list(c);
+	else if (!strcmp(field, "riglist"))
+		get_riglist(c);
 	else if (!strcmp(field, "refresh"))
 		get_updates(c, 1);
 	else{

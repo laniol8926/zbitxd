@@ -473,7 +473,7 @@ struct field main_controls[] = {
 	// hand-editing config files, so different operators/radios can
 	// reconnect without SSH access. See rig_generic.c/sound_generic.c.
 	{"#rig_model", NULL, 1000, -1000, 400, 149, "RIGMODEL", 70, "2057", FIELD_TEXT,
-		"", 1,10,1,0},
+		"", 1,60,1,0},
 	{"#rig_device", NULL, 1000, -1000, 400, 149, "RIGDEVICE", 70, "/dev/ttyUSB0", FIELD_TEXT,
 		"", 1,40,1,0},
 	{"#capture_device", NULL, 1000, -1000, 400, 149, "CAPTUREDEV", 70, "default", FIELD_TEXT,
@@ -2955,8 +2955,14 @@ void do_control_action(char *cmd){
 		tx_on(TX_SOFT);
 	}
 	else if (!strcmp(request, "RIGCONNECT")){
-		if (generic_rig_mode)
-			rig_generic_connect(field_str("RIGMODEL"), field_str("RIGDEVICE"));
+		if (generic_rig_mode) {
+			// RIGMODEL may be a bare id ("2057") or a picked
+			// datalist entry ("2057 QRP Labs QMX") -- atoi() only
+			// wants the leading digits either way
+			char model_id[16];
+			snprintf(model_id, sizeof(model_id), "%d", atoi(field_str("RIGMODEL")));
+			rig_generic_connect(model_id, field_str("RIGDEVICE"));
+		}
 	}
 	else if (!strcmp(request, "SETTINGS_SAVE")){
 		save_user_settings(1);

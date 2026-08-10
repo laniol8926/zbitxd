@@ -7,6 +7,7 @@
 // hamlib apps control the zBitx), which isn't reusable here.
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
@@ -105,6 +106,74 @@ static void rig_send_command(const char *cmd)
 void rig_generic_init(void)
 {
 	rig_ensure_connected();
+}
+
+// `rigctl --list` output is a fixed-width table, but manufacturer/model
+// names can themselves contain single spaces (e.g. "N2ADR James
+// Ahlstrom", "FT-1000MP MARK-V"), so columns are found by runs of 2+
+// spaces rather than fixed offsets -- more robust against hamlib
+// changing its exact column widths across versions.
+void rig_generic_list(char *out, size_t out_size)
+{
+	FILE *pf;
+	char line[256];
+	size_t used = 0;
+	int first = 1;
+
+	out[0] = 0;
+	pf = popen("rigctl --list", "r");
+	if (!pf)
+		return;
+
+	while (fgets(line, sizeof(line), pf)) {
+		if (first) {
+			first = 0;
+			continue; // header row
+		}
+
+		char *p = line;
+		while (*p == ' ')
+			p++;
+		if (*p < '0' || *p > '9')
+			continue; // not a data row
+
+		int id = atoi(p);
+		while (*p >= '0' && *p <= '9')
+			p++;
+		while (*p == ' ')
+			p++; // skip to Mfg -- don't count this run as a column boundary
+
+		char name[128];
+		int ni = 0, boundaries = 0, space_run = 0;
+		for (; *p && *p != '\n'; p++) {
+			if (*p == ' ') {
+				space_run++;
+				if (space_run == 2)
+					boundaries++;
+				if (boundaries >= 2)
+					break;
+			} else {
+				if (space_run >= 1 && ni > 0)
+					name[ni++] = ' ';
+				space_run = 0;
+				if (ni < (int)sizeof(name) - 1)
+					name[ni++] = *p;
+			}
+		}
+		name[ni] = 0;
+
+		char entry[192];
+		int n = snprintf(entry, sizeof(entry), "%d %s\n", id, name);
+		if (n <= 0)
+			continue;
+		if (used + (size_t)n >= out_size)
+			break;
+		memcpy(out + used, entry, (size_t)n);
+		used += (size_t)n;
+	}
+	out[used] = 0;
+
+	pclose(pf);
 }
 
 static void rigctld_stop(void)

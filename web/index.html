@@ -210,8 +210,10 @@
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Rig Model (hamlib -m):</span><input id="RIGMODEL"
-					class="settings_input sbitx-text-input" type="text" size="6" />
-			(e.g. 2057 for QMX)
+					class="settings_input sbitx-text-input" type="text" size="30"
+					style="text-transform:none;" list="rig_model_options" autocomplete="off" />
+			<datalist id="rig_model_options"></datalist>
+			(type to search hamlib's rig list, or enter a bare model number)
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Rig Device:</span><input id="RIGDEVICE"
@@ -2065,10 +2067,35 @@ function open_logbook(event){
 
 /* settings panel */
 
+var rig_list_loaded = false;
+
+// populates the RIGMODEL datalist from a "riglist" response -- one
+// "<id> <Manufacturer> <Model>" entry per line. Selecting a suggestion
+// fills the whole string into the input; the server only needs the
+// leading digits when actually connecting (see RIGCONNECT/atoi()), so
+// this can just be the whole readable line.
+function populate_rig_list(text){
+	var list = el("rig_model_options");
+	list.innerHTML = "";
+	var lines = text.split("\n");
+	for (var i = 0; i < lines.length; i++){
+		var line = lines[i];
+		if (!line.length)
+			continue;
+		var opt = document.createElement("option");
+		opt.value = line;
+		list.appendChild(opt);
+	}
+}
+
 function open_settings(){
 	open_panel("settings_panel");
 	//set the focs to the pin
 	el("PASSKEY").focus();
+	if (!rig_list_loaded) {
+		websocket_send("riglist");
+		rig_list_loaded = true;
+	}
 }
 
 function save_settings(){
@@ -2358,6 +2385,9 @@ function response_handler(response){
 			break;
 		case 'CONSOLE':
 			update_data(args);
+			break;
+		case 'RIGLIST':
+			populate_rig_list(args);
 			break;
 		case 'SPECTRUM':
 		case 'WATERFALL':
