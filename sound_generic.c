@@ -14,6 +14,7 @@
 #include <fftw3.h>
 #include <alsa/asoundlib.h>
 #include "sdr.h"
+#include "sdr_ui.h"
 #include "sound_generic.h"
 
 // modem_next_sample()/ft8_next_sample() are tuned for 96ksps -- see the
@@ -22,6 +23,16 @@
 // rate here instead of resampling.
 #define GENERIC_SAMPLE_RATE 96000
 #define GENERIC_BUF_FRAMES  960 // 10ms per read/write
+
+// ceiling for the existing DRIVE control (0-100, field label "DRIVE",
+// cmd "tx_power") to scale against, at DRIVE=100. ft8_next_sample()'s
+// peak output is ~0.143 (a unit sinf() tone / 7 -- see synth_gfsk() and
+// ft8_next_sample() in modem_ft8.c), so this ceiling puts DRIVE=100 at
+// roughly 25% of S32 full scale -- a reasonably strong but not
+// maxed-out starting point, confirmed keying/transmitting on a real
+// QMX (2026-08-10). Tune DRIVE from the web UI to taste; no rebuild
+// needed for that.
+#define GENERIC_TX_SCALE_AT_MAX_DRIVE 3750000000.0f
 
 static pthread_t capture_thread, playback_thread;
 static volatile int running = 0;
@@ -98,18 +109,15 @@ static void *playback_thread_fn(void *arg)
 		return NULL;
 
 	while (running) {
+		// read once per buffer, not per sample -- DRIVE only needs to
+		// track UI changes at human speed, not audio-sample speed
+		float drive_scale = (field_int("DRIVE") / 100.0f) * GENERIC_TX_SCALE_AT_MAX_DRIVE;
 		for (int i = 0; i < GENERIC_BUF_FRAMES; i++) {
 			// Runs continuously; modem_next_sample() returns 0
 			// (silence) on its own whenever nothing is queued to
 			// transmit, so this doesn't need to gate on in_tx.
-			//
-			// XXX: scaling factor is a first guess, roughly matching
-			// the magnitude the existing SDR TX path applies before
-			// its own upconversion (sbitx.c: i_sample = ... / 3) --
-			// needs calibrating against the real rig's mic/line
-			// input level once this runs on actual hardware.
 			float sample = modem_next_sample(tx_list->mode);
-			buf[i] = (int32_t)(sample * 200000000.0f);
+			buf[i] = (int32_t)(sample * drive_scale);
 		}
 		snd_pcm_sframes_t n = snd_pcm_writei(pcm, buf, GENERIC_BUF_FRAMES);
 		if (n == -EPIPE)

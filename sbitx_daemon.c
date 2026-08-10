@@ -1977,8 +1977,9 @@ int do_macro(struct field *f, int event, int a, int b, int c){
 	if(event == FIELD_UPDATE){
 		int fn_key = atoi(f->cmd+3); // skip past the '#mf' and read the function key number
 
+		buff[0] = 0;
 	 	macro_exec(fn_key, buff);
-	
+
 		mode = get_field("r1:mode")->value;
 
 		if (!strncmp(get_field("r1:mode")->value, "FT", 2) && strlen(buff)){
