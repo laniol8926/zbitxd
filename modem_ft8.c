@@ -38,6 +38,15 @@ ftx_message_t ftx_xota_msg;
 static int ft8_rx_buff_index = 0;
 static int ft8_tx_buff_index = 0;
 static int ft8_tx_nsamples = 0;
+// ft8_tx_buffer/ft8_tx_nsamples/ft8_tx_buff_index are written by
+// ftx_start_tx() (main thread, via ft8_poll()) and read by
+// ft8_next_sample() -- with the generic-rig backend, that read now
+// happens from a separate playback thread (sound_generic.c), which
+// wasn't a concern when everything ran on one thread. Without this,
+// ft8_next_sample() can observe a torn/stale mix of old and new buffer
+// contents mid-transmission (confirmed on real hardware: tone samples
+// interleaved with stretches of near-zero mid-message).
+static pthread_mutex_t ft8_tx_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int ft8_do_decode = 0;
 static int ft8_do_tx = 0;
 static int ft8_pitch = 0;
@@ -885,6 +894,7 @@ static void ftx_start_tx(int offset_ms){
 	int freq = field_int("TX_PITCH");
 	if (freq != ft8_pitch)
 		ft8_pitch = freq;
+	pthread_mutex_lock(&ft8_tx_state_mutex);
 	ft8_tx_nsamples = sbitx_ftx_msg_audio(freq,  ft8_tx_buffer);
 
 	snprintf(hmst_wallclock_time_sprint(buf), sizeof(buf) - 8, "  TX     %4d ~ %s\n",
@@ -902,6 +912,7 @@ static void ftx_start_tx(int offset_ms){
 	if (offset_ms < 1000)
 		offset_ms = 0;
 	ft8_tx_buff_index = offset_ms * 96;
+	pthread_mutex_unlock(&ft8_tx_state_mutex);
 	LOG(LOG_DEBUG, "%05d ftx_start_tx: starting @index %d based on offset_ms %d '%s'\n",
 		wallclock_day_ms % 60000, ft8_tx_buff_index, offset_ms, ft8_xota ? ft8_xota_text : ft8_tx_text);
 }
@@ -1078,12 +1089,14 @@ void ft8_poll(int tx_is_on){
 
 float ft8_next_sample(){
 		float sample = 0;
+		pthread_mutex_lock(&ft8_tx_state_mutex);
 		if (ft8_tx_buff_index/8 < ft8_tx_nsamples){
 			sample = ft8_tx_buffer[ft8_tx_buff_index/8]/7;
 			ft8_tx_buff_index++;
 		}
 		else //stop transmitting ft8
 			ft8_tx_nsamples = 0;
+		pthread_mutex_unlock(&ft8_tx_state_mutex);
 		return sample;
 }
 
