@@ -248,6 +248,17 @@
 			<span class="settings-label"></span>
 			<button id="settings_save" class="logger-button">Update</button>
 		</div>
+
+		<div class="settings-element">
+			<span class="settings-label"></span>
+			<button id="tune_toggle" class="logger-button">Tune</button>
+			(keys the transmitter with a steady tone -- click again to stop)
+		</div>
+		<div class="settings-element">
+			<span class="settings-label"></span>
+			<button id="web_reboot" class="logger-button">Reboot</button>
+			<button id="web_shutdown" class="logger-button">Shutdown</button>
+		</div>
 	</div><!-- end of help text -->
   		<div id="login_panel">
 				<div class="help_text">
@@ -2144,6 +2155,26 @@ function connect_rig(){
 	websocket_send("RIGCONNECT 1");
 }
 
+/* tune / reboot / shutdown */
+
+var tune_on = false;
+
+function toggle_tune(){
+	tune_on = !tune_on;
+	websocket_send("TUNE " + (tune_on ? "ON" : "OFF"));
+	el("tune_toggle").innerHTML = tune_on ? "Stop Tune" : "Tune";
+}
+
+function do_web_reboot(){
+	if (confirm("Reboot the Pi now? This will end your session and disconnect the radio until it comes back up."))
+		websocket_send("WEB_REBOOT 1");
+}
+
+function do_web_shutdown(){
+	if (confirm("Shut down the Pi now? You'll need physical/remote access to power it back on."))
+		websocket_send("WEB_SHUTDOWN 1");
+}
+
 /* recorder panel */
 
 var record_started = -1;
@@ -2579,6 +2610,9 @@ $("#logbook-search").on("input", logbook_search);
 $("#settings-open").on("click", open_settings);
 $("#settings_save").on("click", save_settings);
 $("#rig_connect").on("click", connect_rig);
+$("#tune_toggle").on("click", toggle_tune);
+$("#web_reboot").on("click", do_web_reboot);
+$("#web_shutdown").on("click", do_web_shutdown);
 
 //recorder buttons
 $("#recorder-open").on("click", open_recorder);

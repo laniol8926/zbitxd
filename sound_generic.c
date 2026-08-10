@@ -170,20 +170,40 @@ static void *playback_thread_fn(void *arg)
 	if (!pcm)
 		return NULL;
 
+	static double tune_phase = 0;
+
 	while (running) {
 		// read once per buffer, not per sample -- DRIVE only needs to
 		// track UI changes at human speed, not audio-sample speed
 		float drive_scale = (field_int("DRIVE") / 100.0f) * GENERIC_TX_SCALE_AT_MAX_DRIVE;
+		int is_tune = (tx_list->mode == MODE_TUNE);
+		double tune_freq = is_tune ? (double)field_int("TX_PITCH") : 0;
+
 		for (int i = 0; i < GENERIC_BUF_FRAMES; i++) {
-			// modem_next_sample() is calibrated for 96ksps; this device
-			// only runs at 48ksps, so pull two logical samples per real
-			// output frame and keep one -- 2:1 decimation, matching real
-			// elapsed time (and so tone pitch) rather than an unverified
-			// automatic resample. Runs continuously; modem_next_sample()
-			// returns 0 (silence) on its own whenever nothing is queued
-			// to transmit, so this doesn't need to gate on in_tx.
-			float sample = modem_next_sample(tx_list->mode);
-			modem_next_sample(tx_list->mode); // discarded half of the pair
+			float sample;
+			if (is_tune) {
+				// modem_next_sample() only knows FT8/FT4/CW -- MODE_TUNE
+				// falls through to silence there (that's what a real QMX
+				// keying with "no audio" symptom traced back to). The
+				// SDR's own TUNE tone lives entirely inside sbitx.c's
+				// upconversion loop, which this backend bypasses, so
+				// generate a plain steady tone directly here instead.
+				sample = (float)(0.143 * sin(tune_phase));
+				tune_phase += 2.0 * M_PI * tune_freq / GENERIC_PLAYBACK_RATE;
+				if (tune_phase > 2.0 * M_PI)
+					tune_phase -= 2.0 * M_PI;
+			} else {
+				// modem_next_sample() is calibrated for 96ksps; this
+				// device only runs at 48ksps, so pull two logical
+				// samples per real output frame and keep one -- 2:1
+				// decimation, matching real elapsed time (and so tone
+				// pitch) rather than an unverified automatic resample.
+				// Runs continuously; modem_next_sample() returns 0
+				// (silence) on its own whenever nothing is queued to
+				// transmit, so this doesn't need to gate on in_tx.
+				sample = modem_next_sample(tx_list->mode);
+				modem_next_sample(tx_list->mode); // discarded half of the pair
+			}
 			buf[i] = (int32_t)(sample * drive_scale);
 		}
 		snd_pcm_sframes_t n = snd_pcm_writei(pcm, buf, GENERIC_BUF_FRAMES);

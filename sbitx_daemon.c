@@ -494,8 +494,12 @@ struct field main_controls[] = {
 	// explicit save doesn't silently get lost on a quick page reload
 	{"#settings_save_trigger", NULL, 1000, -1000, 400, 149, "SETTINGS_SAVE", 40, "", FIELD_BUTTON,
 		"", 0,0,0,0},
+	{"#web_reboot", NULL, 1000, -1000, 400, 149, "WEB_REBOOT", 40, "", FIELD_BUTTON,
+		"", 0,0,0,0},
+	{"#web_shutdown", NULL, 1000, -1000, 400, 149, "WEB_SHUTDOWN", 40, "", FIELD_BUTTON,
+		"", 0,0,0,0},
 
-	//moving global variables into fields 	
+	//moving global variables into fields
   { "#vfo_a_freq", NULL, 1000, -1000, 50, 50, "VFOA", 40, "14000000", FIELD_NUMBER,
     "", 500000,30000000,1,0},
   {"#vfo_b_freq", NULL, 1000, -1000, 50, 50, "VFOB", 40, "7000000", FIELD_NUMBER,
@@ -2973,6 +2977,20 @@ void do_control_action(char *cmd){
 	}
 	else if (!strcmp(request, "SETTINGS_SAVE")){
 		save_user_settings(1);
+	}
+	else if (!strcmp(request, "WEB_REBOOT")){
+		// zbitx_poll()'s existing SHUTDOWN handling is only reachable
+		// from the physical zBitx front panel over i2c, which doesn't
+		// exist in generic-rig mode -- these are the web-UI-reachable
+		// equivalents. The browser confirms before ever sending this.
+		save_user_settings(1);
+		printf("Rebooting system (requested from web UI)...\n");
+		system("sudo /sbin/shutdown -r now");
+	}
+	else if (!strcmp(request, "WEB_SHUTDOWN")){
+		save_user_settings(1);
+		printf("Shutting down system (requested from web UI)...\n");
+		system("sudo /sbin/shutdown -h now");
 	}
 	else if (!strcmp(request, "WEB")){
 		open_url("http://127.0.0.1:8080");
