@@ -474,8 +474,15 @@ struct field main_controls[] = {
 	// reconnect without SSH access. See rig_generic.c/sound_generic.c.
 	{"#rig_model", NULL, 1000, -1000, 400, 149, "RIGMODEL", 70, "2057", FIELD_TEXT,
 		"", 1,60,1,0},
+	// /dev/serial/by-id/* paths (preferred -- stable across reboots)
+	// run quite long, e.g. "/dev/serial/by-id/usb-QRP_Labs_QMX..." --
+	// generous max to fit those, not just a bare /dev/ttyACM0
 	{"#rig_device", NULL, 1000, -1000, 400, 149, "RIGDEVICE", 70, "/dev/ttyUSB0", FIELD_TEXT,
-		"", 1,40,1,0},
+		"", 1,100,1,0},
+	// blank (min=0) means "let rigctld use its own default for this
+	// rig model" -- not every rig runs CAT at 9600
+	{"#rig_baud", NULL, 1000, -1000, 400, 149, "RIGBAUD", 70, "", FIELD_TEXT,
+		"", 0,10,1,0},
 	{"#capture_device", NULL, 1000, -1000, 400, 149, "CAPTUREDEV", 70, "default", FIELD_TEXT,
 		"", 1,40,1,0},
 	{"#playback_device", NULL, 1000, -1000, 400, 149, "PLAYBACKDEV", 70, "default", FIELD_TEXT,
@@ -2961,7 +2968,7 @@ void do_control_action(char *cmd){
 			// wants the leading digits either way
 			char model_id[16];
 			snprintf(model_id, sizeof(model_id), "%d", atoi(field_str("RIGMODEL")));
-			rig_generic_connect(model_id, field_str("RIGDEVICE"));
+			rig_generic_connect(model_id, field_str("RIGDEVICE"), field_str("RIGBAUD"));
 		}
 	}
 	else if (!strcmp(request, "SETTINGS_SAVE")){

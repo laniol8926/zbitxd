@@ -217,16 +217,26 @@
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Rig Device:</span><input id="RIGDEVICE"
+					class="settings_input sbitx-text-input" type="text" size="30" style="text-transform:none;"
+					list="rig_device_options" autocomplete="off" />
+			<datalist id="rig_device_options"></datalist>
+			(prefer a /dev/serial/by-id/... entry -- stable across reboots/replugging)
+		</div>
+		<div class="settings-element">
+			<span class="settings-label">Rig Baud:</span><input id="RIGBAUD"
 					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;" />
-			(e.g. /dev/ttyUSB0 -- case-sensitive)
+			(blank = rigctld's own default for the selected model; not every rig uses 9600)
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Capture Device:</span><input id="CAPTUREDEV"
-					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;" />
+					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;"
+					list="audio_device_options" autocomplete="off" />
+			<datalist id="audio_device_options"></datalist>
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Playback Device:</span><input id="PLAYBACKDEV"
-					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;" />
+					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;"
+					list="audio_device_options" autocomplete="off" />
 			(Capture/Playback Device changes take effect after a restart)
 		</div>
 		<div class="settings-element">
@@ -2067,15 +2077,15 @@ function open_logbook(event){
 
 /* settings panel */
 
-var rig_list_loaded = false;
+var rig_lists_loaded = false;
 
-// populates the RIGMODEL datalist from a "riglist" response -- one
-// "<id> <Manufacturer> <Model>" entry per line. Selecting a suggestion
-// fills the whole string into the input; the server only needs the
-// leading digits when actually connecting (see RIGCONNECT/atoi()), so
-// this can just be the whole readable line.
-function populate_rig_list(text){
-	var list = el("rig_model_options");
+// populates a <datalist> from a newline-separated list of entries.
+// Selecting a suggestion fills the whole entry text into the input --
+// for RIGMODEL the server only needs the leading digits when actually
+// connecting (see RIGCONNECT/atoi()), so the full readable string is
+// fine to store as-is.
+function populate_datalist(list_id, text){
+	var list = el(list_id);
 	list.innerHTML = "";
 	var lines = text.split("\n");
 	for (var i = 0; i < lines.length; i++){
@@ -2088,13 +2098,19 @@ function populate_rig_list(text){
 	}
 }
 
+function populate_rig_list(text){
+	populate_datalist("rig_model_options", text);
+}
+
 function open_settings(){
 	open_panel("settings_panel");
 	//set the focs to the pin
 	el("PASSKEY").focus();
-	if (!rig_list_loaded) {
+	if (!rig_lists_loaded) {
 		websocket_send("riglist");
-		rig_list_loaded = true;
+		websocket_send("seriallist");
+		websocket_send("audiolist");
+		rig_lists_loaded = true;
 	}
 }
 
@@ -2106,6 +2122,7 @@ function save_settings(){
 	websocket_send("TELNETURL " + el("TELNETURL").value);
 	websocket_send("RIGMODEL " + el("RIGMODEL").value);
 	websocket_send("RIGDEVICE " + el("RIGDEVICE").value);
+	websocket_send("RIGBAUD " + el("RIGBAUD").value);
 	websocket_send("CAPTUREDEV " + el("CAPTUREDEV").value);
 	websocket_send("PLAYBACKDEV " + el("PLAYBACKDEV").value);
 	// force an immediate save -- normal field changes are throttled to
@@ -2122,6 +2139,7 @@ function save_settings(){
 function connect_rig(){
 	websocket_send("RIGMODEL " + el("RIGMODEL").value);
 	websocket_send("RIGDEVICE " + el("RIGDEVICE").value);
+	websocket_send("RIGBAUD " + el("RIGBAUD").value);
 	websocket_send("SETTINGS_SAVE 1");
 	websocket_send("RIGCONNECT 1");
 }
@@ -2388,6 +2406,12 @@ function response_handler(response){
 			break;
 		case 'RIGLIST':
 			populate_rig_list(args);
+			break;
+		case 'SERIALLIST':
+			populate_datalist("rig_device_options", args);
+			break;
+		case 'AUDIOLIST':
+			populate_datalist("audio_device_options", args);
 			break;
 		case 'SPECTRUM':
 		case 'WATERFALL':

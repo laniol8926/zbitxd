@@ -136,6 +136,24 @@ void get_riglist(struct mg_connection *c){
 	mg_ws_send(c, out, strlen(out), WEBSOCKET_OP_TEXT);
 }
 
+// currently-present serial devices, for the Rig Device picker
+void get_seriallist(struct mg_connection *c){
+	static char list[4096];
+	char out[4200];
+	rig_generic_list_serial_devices(list, sizeof(list));
+	snprintf(out, sizeof(out), "SERIALLIST %s", list);
+	mg_ws_send(c, out, strlen(out), WEBSOCKET_OP_TEXT);
+}
+
+// currently-present ALSA cards, for the Capture/Playback Device pickers
+void get_audiolist(struct mg_connection *c){
+	static char list[4096];
+	char out[4200];
+	rig_generic_list_audio_devices(list, sizeof(list));
+	snprintf(out, sizeof(out), "AUDIOLIST %s", list);
+	mg_ws_send(c, out, strlen(out), WEBSOCKET_OP_TEXT);
+}
+
 char request[200];
 int request_index = 0;
 
@@ -183,6 +201,10 @@ static void web_despatcher(struct mg_connection *c, struct mg_ws_message *wm){
 		get_macros_list(c);
 	else if (!strcmp(field, "riglist"))
 		get_riglist(c);
+	else if (!strcmp(field, "seriallist"))
+		get_seriallist(c);
+	else if (!strcmp(field, "audiolist"))
+		get_audiolist(c);
 	else if (!strcmp(field, "refresh"))
 		get_updates(c, 1);
 	else{

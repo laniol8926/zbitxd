@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <dirent.h>
 #include <sys/socket.h>
 #include <sys/wait.h>
 #include <netinet/tcp.h>
@@ -185,19 +186,135 @@ static void rigctld_stop(void)
 	}
 }
 
-void rig_generic_connect(const char *model, const char *device)
+// /dev/serial/by-id/* gives stable, device-identity-based names (survive
+// reboots/replugging in a different order); /dev/ttyACM0-style names are
+// assigned by enumeration order and can point at a different physical
+// device from one boot to the next. Lists by-id entries if any exist,
+// otherwise falls back to raw /dev/ttyACM*/ttyUSB* so there's still
+// something to pick from.
+void rig_generic_list_serial_devices(char *out, size_t out_size)
+{
+	DIR *d;
+	struct dirent *e;
+	size_t used = 0;
+
+	out[0] = 0;
+
+	d = opendir("/dev/serial/by-id");
+	if (d) {
+		while ((e = readdir(d))) {
+			if (e->d_name[0] == '.')
+				continue;
+			char entry[320];
+			int n = snprintf(entry, sizeof(entry), "/dev/serial/by-id/%s\n", e->d_name);
+			if (n <= 0 || used + (size_t)n >= out_size)
+				continue;
+			memcpy(out + used, entry, (size_t)n);
+			used += (size_t)n;
+		}
+		closedir(d);
+	}
+
+	if (used == 0) {
+		d = opendir("/dev");
+		if (!d)
+			return;
+		while ((e = readdir(d))) {
+			if (strncmp(e->d_name, "ttyACM", 6) && strncmp(e->d_name, "ttyUSB", 6))
+				continue;
+			char entry[280];
+			int n = snprintf(entry, sizeof(entry), "/dev/%s\n", e->d_name);
+			if (n <= 0 || used + (size_t)n >= out_size)
+				continue;
+			memcpy(out + used, entry, (size_t)n);
+			used += (size_t)n;
+		}
+		closedir(d);
+	}
+	out[used] = 0;
+}
+
+// `aplay -l`'s simple "card N: NAME [...]" listing turned into ready-to-use
+// plughw:NAME,0 device strings for the Capture/Playback Device fields.
+void rig_generic_list_audio_devices(char *out, size_t out_size)
+{
+	FILE *pf;
+	char line[256];
+	size_t used = 0;
+
+	out[0] = 0;
+	pf = popen("aplay -l 2>/dev/null", "r");
+	if (!pf)
+		return;
+
+	while (fgets(line, sizeof(line), pf)) {
+		char *p = strstr(line, "card ");
+		if (p != line)
+			continue; // only lines starting with "card "
+		char *colon = strchr(p, ':');
+		if (!colon)
+			continue;
+		char *name_start = strchr(colon, ' ');
+		if (!name_start)
+			continue;
+		name_start++;
+		// the bare card name ends at the first space or '[' -- what
+		// follows (e.g. "[USB Interface mchf], device 0: ...") is a
+		// human-readable description, not part of the actual card
+		// identifier plughw: expects
+		char *name_end = name_start;
+		while (*name_end && *name_end != ' ' && *name_end != '[' && *name_end != ',')
+			name_end++;
+		if (name_end == name_start)
+			continue;
+
+		char card[128];
+		size_t len = (size_t)(name_end - name_start);
+		if (len >= sizeof(card))
+			len = sizeof(card) - 1;
+		memcpy(card, name_start, len);
+		card[len] = 0;
+
+		char entry[192];
+		int n = snprintf(entry, sizeof(entry), "plughw:%s,0\n", card);
+		if (n <= 0 || used + (size_t)n >= out_size)
+			continue;
+		memcpy(out + used, entry, (size_t)n);
+		used += (size_t)n;
+	}
+	out[used] = 0;
+
+	pclose(pf);
+}
+
+void rig_generic_connect(const char *model, const char *device, const char *baud)
 {
 	char port_str[16];
+	char *argv[10];
+	int i = 0;
 
 	rig_drop();
 	rigctld_stop();
 
 	snprintf(port_str, sizeof(port_str), "%d", generic_rigctld_port);
 
+	argv[i++] = "rigctld";
+	argv[i++] = "-m";
+	argv[i++] = (char *)model;
+	argv[i++] = "-r";
+	argv[i++] = (char *)device;
+	if (baud && baud[0]) {
+		argv[i++] = "-s";
+		argv[i++] = (char *)baud;
+	}
+	argv[i++] = "-t";
+	argv[i++] = port_str;
+	argv[i] = NULL;
+
 	rigctld_pid = fork();
 	if (rigctld_pid == 0) {
-		execlp("rigctld", "rigctld", "-m", model, "-r", device, "-t", port_str, (char *)NULL);
-		// only reached if execlp() itself failed
+		execvp("rigctld", argv);
+		// only reached if execvp() itself failed
 		fprintf(stderr, "rig_generic: failed to exec rigctld: %s\n", strerror(errno));
 		_exit(1);
 	} else if (rigctld_pid < 0) {
