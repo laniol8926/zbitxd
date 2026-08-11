@@ -209,144 +209,125 @@ static snd_pcm_t *open_pcm(const char *device, snd_pcm_stream_t stream, unsigned
 
 static void *capture_thread_fn(void *arg)
 {
-	snd_pcm_t *pcm = open_pcm(generic_capture_device, SND_PCM_STREAM_CAPTURE, GENERIC_SAMPLE_RATE);
 	int32_t buf[GENERIC_BUF_FRAMES];
 
 	(void)arg;
-	if (!pcm)
-		return NULL;
 
+	// Used to give up and exit the whole thread the moment open_pcm()
+	// failed once (e.g. a bad CAPTUREDEV string from AUDIO_CONNECT, or
+	// the rig's USB audio dropping out) -- that permanently killed the
+	// waterfall/decode with no recovery short of a service restart,
+	// confirmed live (AUDIO_CONNECT sent "default", which doesn't
+	// resolve on this Pi -- "cannot open default (capture)" -- and
+	// decoding never came back). Loop and retry instead, since for
+	// portable field use a cable can come loose and get reseated later.
 	while (running) {
-		snd_pcm_sframes_t n = snd_pcm_readi(pcm, buf, GENERIC_BUF_FRAMES);
-		if (n < 0) {
-			int err = snd_pcm_recover(pcm, (int)n, 0);
-			if (err < 0) {
-				// recover() itself failed -- e.g. the USB audio
-				// interface dropped off entirely -- not just an
-				// xrun snd_pcm_recover() can paper over. readi()
-				// on a dead fd returns instantly, so retrying
-				// unthrottled here previously filled 25GB of
-				// syslog in under two days; back off instead.
-				fprintf(stderr, "sound_generic: capture error: %s (recover failed: %s)\n",
-					snd_strerror((int)n), snd_strerror(err));
-				usleep(200000);
-			}
+		snd_pcm_t *pcm = open_pcm(generic_capture_device, SND_PCM_STREAM_CAPTURE, GENERIC_SAMPLE_RATE);
+		if (!pcm) {
+			sleep(2);
 			continue;
 		}
-		modem_rx(rx_list->mode, buf, (int)n);
-		gen_spectrum_update(buf, (int)n);
+
+		while (running) {
+			snd_pcm_sframes_t n = snd_pcm_readi(pcm, buf, GENERIC_BUF_FRAMES);
+			if (n < 0) {
+				int err = snd_pcm_recover(pcm, (int)n, 0);
+				if (err < 0) {
+					// recover() itself failed -- e.g. the USB audio
+					// interface dropped off entirely -- not just an
+					// xrun snd_pcm_recover() can paper over. Reopen
+					// from scratch rather than retrying reads on a
+					// dead handle forever.
+					fprintf(stderr, "sound_generic: capture error: %s (recover failed: %s), reopening\n",
+						snd_strerror((int)n), snd_strerror(err));
+					break;
+				}
+				continue;
+			}
+			modem_rx(rx_list->mode, buf, (int)n);
+			gen_spectrum_update(buf, (int)n);
+		}
+
+		snd_pcm_close(pcm);
 	}
 
-	snd_pcm_close(pcm);
 	return NULL;
-}
-
-// AI5II temporary diagnostic: dump the first ~25s of actual generated
-// playback audio (post-scaling, exactly what reaches the QMX) to a WAV
-// file for objective analysis, instead of continued guess-and-check.
-static void ai5ii_write_wav_header(FILE *f, int sample_rate, int channels, int bits_per_sample, uint32_t data_bytes)
-{
-	uint32_t riff_size = 36 + data_bytes;
-	uint16_t block_align = channels * bits_per_sample / 8;
-	uint32_t byte_rate = sample_rate * block_align;
-	uint32_t fmt_size = 16;
-	uint16_t audio_format = 1;
-	uint16_t ch = channels, bps = bits_per_sample;
-	uint32_t sr = sample_rate;
-
-	fseek(f, 0, SEEK_SET);
-	fwrite("RIFF", 1, 4, f);
-	fwrite(&riff_size, 4, 1, f);
-	fwrite("WAVE", 1, 4, f);
-	fwrite("fmt ", 1, 4, f);
-	fwrite(&fmt_size, 4, 1, f);
-	fwrite(&audio_format, 2, 1, f);
-	fwrite(&ch, 2, 1, f);
-	fwrite(&sr, 4, 1, f);
-	fwrite(&byte_rate, 4, 1, f);
-	fwrite(&block_align, 2, 1, f);
-	fwrite(&bps, 2, 1, f);
-	fwrite("data", 1, 4, f);
-	fwrite(&data_bytes, 4, 1, f);
 }
 
 static void *playback_thread_fn(void *arg)
 {
-	snd_pcm_t *pcm = open_pcm(generic_playback_device, SND_PCM_STREAM_PLAYBACK, GENERIC_PLAYBACK_RATE);
 	int32_t buf[GENERIC_BUF_FRAMES];
-	FILE *ai5ii_dump = fopen("/tmp/tx_dump.wav", "wb");
-	uint32_t ai5ii_dump_bytes = 0;
-	const uint32_t ai5ii_dump_max_bytes = GENERIC_PLAYBACK_RATE * sizeof(int32_t) * 25;
-	if (ai5ii_dump)
-		fseek(ai5ii_dump, 44, SEEK_SET);
 
 	(void)arg;
-	if (!pcm)
-		return NULL;
 
 	static double tune_phase = 0;
 
+	// See capture_thread_fn()'s matching comment -- open_pcm() failing
+	// once (bad PLAYBACKDEV, USB audio dropout) used to exit this thread
+	// for good, silently taking TX audio out with it until a service
+	// restart.
 	while (running) {
-		// read once per buffer, not per sample -- DRIVE only needs to
-		// track UI changes at human speed, not audio-sample speed
-		float drive_scale = (field_int("DRIVE") / 100.0f) * GENERIC_TX_SCALE_AT_MAX_DRIVE;
-		int is_tune = (tx_list->mode == MODE_TUNE);
-		double tune_freq = is_tune ? (double)field_int("TX_PITCH") : 0;
-
-		for (int i = 0; i < GENERIC_BUF_FRAMES; i++) {
-			float sample;
-			if (is_tune) {
-				// modem_next_sample() only knows FT8/FT4/CW -- MODE_TUNE
-				// falls through to silence there (that's what a real QMX
-				// keying with "no audio" symptom traced back to). The
-				// SDR's own TUNE tone lives entirely inside sbitx.c's
-				// upconversion loop, which this backend bypasses, so
-				// generate a plain steady tone directly here instead.
-				sample = (float)(0.143 * sin(tune_phase));
-				tune_phase += 2.0 * M_PI * tune_freq / GENERIC_PLAYBACK_RATE;
-				if (tune_phase > 2.0 * M_PI)
-					tune_phase -= 2.0 * M_PI;
-			} else {
-				// modem_next_sample() is calibrated for 96ksps; this
-				// device only runs at 48ksps, so pull two logical
-				// samples per real output frame and keep one -- 2:1
-				// decimation, matching real elapsed time (and so tone
-				// pitch) rather than an unverified automatic resample.
-				// Runs continuously; modem_next_sample() returns 0
-				// (silence) on its own whenever nothing is queued to
-				// transmit, so this doesn't need to gate on in_tx.
-				sample = modem_next_sample(tx_list->mode);
-				modem_next_sample(tx_list->mode); // discarded half of the pair
-			}
-			buf[i] = (int32_t)(sample * drive_scale);
+		snd_pcm_t *pcm = open_pcm(generic_playback_device, SND_PCM_STREAM_PLAYBACK, GENERIC_PLAYBACK_RATE);
+		if (!pcm) {
+			sleep(2);
+			continue;
 		}
-		snd_pcm_sframes_t n = snd_pcm_writei(pcm, buf, GENERIC_BUF_FRAMES);
-		if (n < 0) {
-			fprintf(stderr, "sound_generic: playback xrun/error (%s), recovering\n", snd_strerror((int)n));
-			n = snd_pcm_recover(pcm, (int)n, 0);
-			if (n >= 0)
+
+		int fatal = 0;
+		while (running && !fatal) {
+			// read once per buffer, not per sample -- DRIVE only needs to
+			// track UI changes at human speed, not audio-sample speed
+			float drive_scale = (field_int("DRIVE") / 100.0f) * GENERIC_TX_SCALE_AT_MAX_DRIVE;
+			int is_tune = (tx_list->mode == MODE_TUNE);
+			double tune_freq = is_tune ? (double)field_int("TX_PITCH") : 0;
+
+			for (int i = 0; i < GENERIC_BUF_FRAMES; i++) {
+				float sample;
+				if (is_tune) {
+					// modem_next_sample() only knows FT8/FT4/CW -- MODE_TUNE
+					// falls through to silence there (that's what a real QMX
+					// keying with "no audio" symptom traced back to). The
+					// SDR's own TUNE tone lives entirely inside sbitx.c's
+					// upconversion loop, which this backend bypasses, so
+					// generate a plain steady tone directly here instead.
+					sample = (float)(0.143 * sin(tune_phase));
+					tune_phase += 2.0 * M_PI * tune_freq / GENERIC_PLAYBACK_RATE;
+					if (tune_phase > 2.0 * M_PI)
+						tune_phase -= 2.0 * M_PI;
+				} else {
+					// modem_next_sample() is calibrated for 96ksps; this
+					// device only runs at 48ksps, so pull two logical
+					// samples per real output frame and keep one -- 2:1
+					// decimation, matching real elapsed time (and so tone
+					// pitch) rather than an unverified automatic resample.
+					// Runs continuously; modem_next_sample() returns 0
+					// (silence) on its own whenever nothing is queued to
+					// transmit, so this doesn't need to gate on in_tx.
+					sample = modem_next_sample(tx_list->mode);
+					modem_next_sample(tx_list->mode); // discarded half of the pair
+				}
+				buf[i] = (int32_t)(sample * drive_scale);
+			}
+			snd_pcm_sframes_t n = snd_pcm_writei(pcm, buf, GENERIC_BUF_FRAMES);
+			if (n < 0) {
+				fprintf(stderr, "sound_generic: playback xrun/error (%s), recovering\n", snd_strerror((int)n));
+				int err = snd_pcm_recover(pcm, (int)n, 0);
+				if (err < 0) {
+					fprintf(stderr, "sound_generic: playback recover failed: %s, reopening\n",
+						snd_strerror(err));
+					fatal = 1;
+					break;
+				}
 				// don't just drop this chunk of TX audio -- a string of
 				// dropped chunks mid-transmission is exactly what would
 				// produce "brief burst of audio, then nothing"
 				snd_pcm_writei(pcm, buf, GENERIC_BUF_FRAMES);
-		}
-
-		if (ai5ii_dump && ai5ii_dump_bytes < ai5ii_dump_max_bytes) {
-			size_t to_write = sizeof(buf);
-			if (ai5ii_dump_bytes + to_write > ai5ii_dump_max_bytes)
-				to_write = ai5ii_dump_max_bytes - ai5ii_dump_bytes;
-			fwrite(buf, 1, to_write, ai5ii_dump);
-			ai5ii_dump_bytes += to_write;
-			if (ai5ii_dump_bytes >= ai5ii_dump_max_bytes) {
-				ai5ii_write_wav_header(ai5ii_dump, GENERIC_PLAYBACK_RATE, 1, 32, ai5ii_dump_bytes);
-				fclose(ai5ii_dump);
-				ai5ii_dump = NULL;
-				fprintf(stderr, "sound_generic: TX audio dump complete (/tmp/tx_dump.wav)\n");
 			}
 		}
+
+		snd_pcm_close(pcm);
 	}
 
-	snd_pcm_close(pcm);
 	return NULL;
 }
 

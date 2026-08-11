@@ -1438,6 +1438,19 @@ void setup(char* audio_output_device)
 		// no zBitx board to identify -- CAT/audio both go to the
 		// generic rig backend instead
 		rig_generic_init();
+		// hw_settings.ini's [generic_rig] capture_device/playback_device
+		// (read above by read_hw_ini()) only ever set the C globals --
+		// the #capture_device/#playback_device FIELDs the web UI actually
+		// displays kept their compiled-in "default" placeholder regardless
+		// of what device was really opened. That let AUDIO_CONNECT
+		// silently resubmit the stale "default" text and tear down a
+		// working device -- confirmed live (real device was
+		// "plughw:mchf,0", UI still showed "default", AUDIO_CONNECT killed
+		// both capture and playback with "cannot open default"). A
+		// user_settings.ini entry saved later still wins, since that's
+		// parsed after this.
+		set_field("#capture_device", generic_capture_device);
+		set_field("#playback_device", generic_playback_device);
 		sound_generic_start();
 	} else {
 		// detect the version of sbitx if not read from hw_settings
