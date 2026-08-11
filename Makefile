@@ -55,7 +55,12 @@ adduser:
 	# root:dialout) in the generic-rig backend -- without this rigctld
 	# hangs with no CAT response and no error at all under systemd
 	-adduser $(OWNER) dialout
-	-echo "$(OWNER) ALL=NOPASSWD: /sbin/shutdown -h now" >/etc/sudoers.d/999_zbitxd
+	# only -h (shutdown) was ever whitelisted here, so the web UI's
+	# Reboot button's "sudo /sbin/shutdown -r now" silently failed under
+	# systemd (no TTY for the password sudo then demands) -- confirmed
+	# via "sudo -u zbitxd sudo -n /sbin/shutdown -r now" -> "a password
+	# is required". Both commands the daemon actually runs need listing.
+	-printf '%s\n' "$(OWNER) ALL=NOPASSWD: /sbin/shutdown -h now" "$(OWNER) ALL=NOPASSWD: /sbin/shutdown -r now" >/etc/sudoers.d/999_zbitxd
 	-chmod 440 /etc/sudoers.d/999_zbitxd
 
 install: adduser
