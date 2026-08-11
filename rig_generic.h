@@ -8,6 +8,16 @@ void rig_generic_init(void);
 void rig_generic_set_freq(long freq_hz);
 void rig_generic_set_ptt(int on);
 
+// Sends a CAT mode change for the app's own mode name ("USB", "FT8", or
+// "FT4" -- see sbitx.c's sdr_request() "r1:mode" case, the only caller).
+// Not a single fixed string: which rigctld mode string actually means
+// "digital" depends on which specific rig is connected (tracked from the
+// model id passed to rig_generic_connect()) -- e.g. a QMX has its own
+// dedicated PKTUSB digital mode, distinct from voice USB, while other
+// rigs (RS-978, QDX) have no such distinction and just use USB for both.
+// See project notes for the full per-rig reasoning.
+void rig_generic_set_mode(const char *app_mode);
+
 // Spawns (or respawns, if already running) rigctld for the given hamlib
 // model number, serial device, and optional baud rate (pass "" or NULL
 // to let rigctld pick its own default for that model), e.g.

@@ -26,6 +26,23 @@
 static int rig_sock = -1;
 static pid_t rigctld_pid = -1;
 
+// hamlib model id of whichever rig is currently connected (set in
+// rig_generic_connect()) -- rig_generic_set_mode() needs this to know
+// which CAT mode string actually means "digital" for this specific rig.
+static int rig_generic_model_id = 0;
+
+// QRP Labs QMX (hamlib model 2057): the only rig looked at so far with a
+// dedicated digital CAT mode (PKTUSB) distinct from voice USB -- confirmed
+// via `rigctl --dump-caps -m 2057`, mode list is CW/CWR/PKTUSB/PKTLSB
+// only, no plain USB/LSB at all (as of hamlib 4.7.1/4.7.2/current master).
+// This app's own generic-rig backend always captures from the QMX's own
+// built-in USB audio interface, which is what PKTUSB corresponds to --
+// running digital via an external interface (e.g. a Digirig wired to the
+// QMX's audio-out/mic jacks, CAT still over the QMX's own USB) would be a
+// different setup this backend doesn't use, so that distinction doesn't
+// change this mapping.
+#define RIG_MODEL_QRPLABS_QMX_ID 2057
+
 static int rig_connect(void)
 {
 	struct addrinfo hints, *res = NULL;
@@ -102,6 +119,35 @@ static void rig_send_command(const char *cmd)
 
 	if (strncmp(buf, "RPRT 0", 6))
 		fprintf(stderr, "rig_generic: unexpected reply to '%s': %s", cmd, buf);
+}
+
+void rig_generic_set_mode(const char *app_mode)
+{
+	char cmd[64];
+	const char *cat_mode;
+
+	if (!strcmp(app_mode, "FT8") || !strcmp(app_mode, "FT4")) {
+		// QMX: dedicated digital mode. Every other rig looked at so far
+		// (RS-978: no separate digital mode, shares USB with voice;
+		// QDX: no voice capability at all, so no USB/PKTUSB distinction
+		// to make in the first place) just uses USB for digital too.
+		cat_mode = (rig_generic_model_id == RIG_MODEL_QRPLABS_QMX_ID) ? "PKTUSB" : "USB";
+	} else {
+		// voice (app mode "USB") -- sent as-is. Not every connected rig
+		// can actually do this (the QMX's hamlib capability table has
+		// no voice mode at all as of this writing, pending either a
+		// hamlib update or a local ts480.c patch; QDX has no SSB
+		// modulator/mic input in hardware at all) -- this layer sends
+		// the CAT command regardless and lets the radio/hamlib backend
+		// reject it if it can't actually be done, rather than trying
+		// to hide that per-rig limitation here.
+		cat_mode = "USB";
+	}
+
+	// passband 0 = let rigctld use that mode's own default passband
+	// width for the connected rig, rather than guessing a width here
+	snprintf(cmd, sizeof(cmd), "M %s 0", cat_mode);
+	rig_send_command(cmd);
 }
 
 void rig_generic_init(void)
@@ -296,6 +342,7 @@ void rig_generic_connect(const char *model, const char *device, const char *baud
 	rig_drop();
 	rigctld_stop();
 
+	rig_generic_model_id = atoi(model);
 	snprintf(port_str, sizeof(port_str), "%d", generic_rigctld_port);
 
 	argv[i++] = "rigctld";

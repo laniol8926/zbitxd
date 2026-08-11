@@ -1513,6 +1513,11 @@ void sdr_request(char* request, char* response)
 		// set the tx mode to that of the rx1
 		tx_list->mode = rx_list->mode;
 
+		if (generic_rig_mode)
+			// the rig does its own demod/filtering -- tell it the new
+			// mode over CAT instead of any local filter/oscillator work
+			rig_generic_set_mode(value);
+
 		// An interesting but non-essential note:
 		// the sidebands inverted twice, to come out correctly after all
 		// conisder that the second oscillator is set to 27.025 MHz and
