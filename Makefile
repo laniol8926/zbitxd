@@ -51,6 +51,10 @@ adduser:
 	-adduser --system --group --home $(DESTDIR)/$(STATEDIR) --disabled-password $(OWNER)
 	-adduser $(OWNER) audio
 	-adduser $(OWNER) gpio
+	# needed for CAT over a USB-serial rig (e.g. /dev/ttyACM0, owned
+	# root:dialout) in the generic-rig backend -- without this rigctld
+	# hangs with no CAT response and no error at all under systemd
+	-adduser $(OWNER) dialout
 	-echo "$(OWNER) ALL=NOPASSWD: /sbin/shutdown -h now" >/etc/sudoers.d/999_zbitxd
 	-chmod 440 /etc/sudoers.d/999_zbitxd
 
@@ -61,6 +65,12 @@ install: adduser
 	install -d --owner=$(OWNER) --group=$(OWNER) $(DESTDIR)/$(STATEDIR)
 	install -m 644 --owner=$(OWNER) --group=$(OWNER) data/default_hw_settings.ini $(DESTDIR)/$(STATEDIR)
 	install -m 644 --owner=$(OWNER) --group=$(OWNER) data/default_settings.ini $(DESTDIR)/$(STATEDIR)
+	# STATEDIR can already exist with files owned by whoever ran the
+	# daemon manually before it ever ran as its own systemd user (e.g.
+	# left over from testing as a login user) -- the daemon then
+	# segfaults on startup with no useful error. Force ownership of
+	# everything already in there, not just the two files just installed.
+	chown -R $(OWNER):$(OWNER) $(DESTDIR)/$(STATEDIR)
 	install -d $(DESTDIR)/$(PREFIX)/lib/systemd/system/
 	install -m 644 systemd/zbitxd.service $(DESTDIR)/$(PREFIX)/lib/systemd/system
 	ln -sf /var/lib/zbitxd/grids.txt /usr/local/share/zbitxd/web/grids.txt
