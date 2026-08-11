@@ -66,17 +66,19 @@
 		<div class="sbitxv3-control" id="dial">
     		<span id="current_freq">A:00.000.000</span> 
 			<span id="other_freq">B: 00.000.000</span>
-		</div><!-- funny html that breaks the line inside the button tag to 
-		prevent spaces between the elements 
-		--><button class="sbitxv3-btn" id="80M" type="submit">80M<span id="S80" class="selband"></span></button
-			><button class="sbitxv3-btn" id="40M" type="submit">40M<span id="S40" class="selband"></span></button
-			><button class="sbitxv3-btn" id="30M" type="submit">30M<span id="S30" class="selband"></span></button
-			><button class="sbitxv3-btn" id="20M" type="submit">20M<span id="S20" class="selband"></span></button
-			><button class="sbitxv3-btn" id="17M" type="submit">17M<span id="S17" class="selband"></span></button
-			><button class="sbitxv3-btn" id="15M" type="submit">15M<span id="S15" class="selband"></span></button
-			><button class="sbitxv3-btn" id="12M" type="submit">12M<span id="S12" class="selband"></span></button
-			><button class="sbitxv3-btn" id="10M" type="submit">10M<span id="S10" class="selband"></span></button
-		><div class="sbitxv3-control rx-control">
+		</div><div class="sbitxv3-control">
+				<div class="sbitxv3-label">BAND</div>
+				<select class="sbitxv3-selection sbitx-selection" id="BAND">
+					<option value="80M">80M</option>
+					<option value="40M">40M</option>
+					<option value="30M">30M</option>
+					<option value="20M">20M</option>
+					<option value="17M">17M</option>
+					<option value="15M">15M</option>
+					<option value="12M">12M</option>
+					<option value="10M">10M</option>
+				</select><span id="band_store" class="selband"></span>
+			</div><div class="sbitxv3-control rx-control">
 			<div class="sbitxv3-label">AGC </div>
 			<select class="sbitxv3-selection sbitx-selection" id="AGC">
 				<option value="FAST">FAST</option>
@@ -1349,9 +1351,16 @@ function sbitx_button_clicked(event){
 
 function sbitx_selection_changed(event){
 	var e = event.currentTarget;
+	if (e.id == "BAND"){
+		// no server-side "BAND" field -- one FIELD_BUTTON per band,
+		// same as the old per-band buttons this replaced, each
+		// matching its own value exactly ("80M" etc) as the command
+		websocket_send(e.value);
+		return;
+	}
 	var id_reading = e.id + "_reading";
 	websocket_send(e.id + " " + e.value);
-	draw_dial(); 
+	draw_dial();
 }
 
 function sbitx_slider_update(e){
@@ -2348,13 +2357,19 @@ function ui_tick(){
 		logbook_request(-logbook_top_row_id);
 }
 
+// must match band_stack[]'s order in sbitx_daemon.c exactly -- SELBAND
+// encodes (band index * 10 + stack slot) using that array's real
+// indices. 60M has no #BAND option (matches the old button layout,
+// which never had one either) so it's only here to keep the indices
+// aligned with the server's.
+const BAND_STACK_ORDER = ["80M","60M","40M","30M","20M","17M","15M","12M","10M"];
+
 function show_selected_band_store(args) {
-	const elts = document.querySelectorAll('.selband');
-	const ix = Math.floor(args/10);
+	const band_name = BAND_STACK_ORDER[Math.floor(args/10)];
 	const store = args%10+1;
-	for (let i = 0; i < elts.length; i++) {
-		elts[i].innerHTML = " " + ((i == ix) ? store : ".");
-	}
+	if (el("BAND").querySelector('option[value="' + band_name + '"]'))
+		el("BAND").value = band_name;
+	el("band_store").innerHTML = " " + store;
 }
 
 function mode_set(new_mode){
@@ -2581,7 +2596,7 @@ window.addEventListener("click", on_click);
 $(".sbitx-btn").on("click", sbitx_button_clicked);
 $(".sbitxv3-btn").on("click", sbitx_button_clicked);
 //$(".sbitxv3-control").on("click", sbitxv3_control_clicked);
-$(".sbitx-selection").on("change", sbitx_selection_changed);	
+$(".sbitx-selection").on("change", sbitx_selection_changed);
 $(".sbitx-slider").on("input", sbitx_slider_changed);
 $(".sbitx-toggle").on("click", sbitx_toggle_clicked);
 $(".sbitx-keystroke td").on("click", sbitx_onscreen_key);

@@ -464,8 +464,14 @@ struct field main_controls[] = {
     "", 100,99999,100, 0},
   { "mouse_pointer", NULL, 1000, -1000, 50, 50, "MP", 40, "LEFT", FIELD_SELECTION,
     "BLANK/LEFT/RIGHT/CROSSHAIR", 0,0,0,0},
+  // max = (band_stack[] length - 1)*10 + (STACK_DEPTH - 1) -- band_stack
+  // has 9 entries (80/60/40/30/20/17/15/12/10M), so the highest real
+  // encoded value is 8*10+3 = 83, not the old 73 (looks like it was set
+  // for an 8-band band_stack before 60M was added -- selecting 10M's 4th
+  // memory slot, index 8 stack 3 = 83, was getting silently clamped to
+  // 73 and decoded client-side as a different band entirely).
   { "#selband", NULL, 1000, -1000, 50, 50, "SELBAND", 40, "", FIELD_NUMBER,
-    "", 0,73,1, 0},
+    "", 0,83,1, 0},
 
 	// Settings Panel
 	{"#mycallsign", NULL, 1000, -1000, 400, 149, "MYCALLSIGN", 70, "CALL", FIELD_TEXT, 
@@ -2933,7 +2939,15 @@ void change_band(char *request){
 
 	struct field *bandswitch = get_field_by_label(band_stack[new_band].name);
 	sprintf(bandswitch->value, "%d", band_stack[new_band].index+1);
-	set_field("#selband", buff);
+	// SELBAND is (band index * 10 + stack slot), decoded client-side to
+	// show which of the per-band memory slots is active -- `buff` above
+	// still held the frequency string from a few lines up, so this was
+	// silently sending the raw frequency instead of the intended small
+	// encoded value every single time (the store-slot indicator could
+	// never have worked). Needs its own buffer.
+	char selband_buf[8];
+	sprintf(selband_buf, "%d", new_band * 10 + stack);
+	set_field("#selband", selband_buf);
 	q_empty(&q_web);// inserted by llh 
   console_init(); // inserted by llh 
   // this fixes bug with filter settings not being applied after a band change, not sure why it's a bug - k3ng 2022-09-03
