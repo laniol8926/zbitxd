@@ -2197,14 +2197,27 @@ function toggle_tune(){
 	el("tune_toggle").innerHTML = tune_on ? "Stop Tune" : "Tune";
 }
 
+// shutdown -h/-r now takes several real seconds (stopping services,
+// unmounting, etc.) with no feedback from the server in between --
+// clicking OK looked like it did nothing, tempting a second click.
+// Disabling + relabeling the button immediately makes the click's
+// effect visible right away and blocks that second click outright.
 function do_web_reboot(){
-	if (confirm("Reboot the Pi now? This will end your session and disconnect the radio until it comes back up."))
+	if (confirm("Reboot the Pi now? This will end your session and disconnect the radio until it comes back up.")){
 		websocket_send("WEB_REBOOT 1");
+		var btn = el("web_reboot");
+		btn.disabled = true;
+		btn.innerHTML = "Rebooting...";
+	}
 }
 
 function do_web_shutdown(){
-	if (confirm("Shut down the Pi now? You'll need physical/remote access to power it back on."))
+	if (confirm("Shut down the Pi now? You'll need physical/remote access to power it back on.")){
 		websocket_send("WEB_SHUTDOWN 1");
+		var btn = el("web_shutdown");
+		btn.disabled = true;
+		btn.innerHTML = "Shutting down...";
+	}
 }
 
 /* recorder panel */

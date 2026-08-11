@@ -685,6 +685,13 @@ body {
 	display: none;
 }
 
+/* .sbitxv3-btn's fixed 40px width fits short labels (SET, WIPE, LOG) but
+   clips "Reboot"/"Shutdown" -- same class otherwise, just wide enough for
+   the longer of the two so both buttons line up. */
+#web_reboot, #web_shutdown {
+	width: 78px;
+}
+
 #settings-open {
 	position:relative;
 }
