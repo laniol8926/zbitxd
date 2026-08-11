@@ -2088,8 +2088,6 @@ function open_logbook(event){
 
 /* settings panel */
 
-var rig_lists_loaded = false;
-
 // populates a <datalist> from a newline-separated list of entries.
 // Selecting a suggestion fills the whole entry text into the input --
 // for RIGMODEL the server only needs the leading digits when actually
@@ -2117,12 +2115,16 @@ function open_settings(){
 	open_panel("settings_panel");
 	//set the focs to the pin
 	el("PASSKEY").focus();
-	if (!rig_lists_loaded) {
-		websocket_send("riglist");
-		websocket_send("seriallist");
-		websocket_send("audiolist");
-		rig_lists_loaded = true;
-	}
+	// re-fetch every time rather than once-per-session: a "only if not
+	// already loaded" guard is fragile against any request landing
+	// before the socket is truly ready, and silently leaves the
+	// datalist empty (with the browser's own native autofill history
+	// showing instead) for the rest of the page's life with no
+	// retry -- these lists are small, refetching each open is cheap
+	// and guarantees correctness instead.
+	websocket_send("riglist");
+	websocket_send("seriallist");
+	websocket_send("audiolist");
 }
 
 function save_settings(){
