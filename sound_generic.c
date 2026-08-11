@@ -24,7 +24,16 @@
 // generated at 12ksps, we need to feed the sdr with 96 ksps"). Used for
 // capture, which is confirmed working well via real decode on the air.
 #define GENERIC_SAMPLE_RATE 96000
-#define GENERIC_BUF_FRAMES  960 // 10ms per read/write
+// Must be a multiple of 1024 (decimation_factor(8) * n_bins(128)) --
+// modem_cw.c's cw_rx() hard-asserts if the sample count it's called with
+// isn't. The SDR's own native capture path happens to call modem_rx() with
+// exactly MAX_BINS/2 (1024) samples, satisfying this by construction; this
+// backend has no such built-in alignment, and used to crash the whole
+// daemon (assert(0), taking down every connected client) the moment a
+// user switched to a band whose remembered mode was CW/CWR -- confirmed by
+// reproducing it directly. 1024 (~10.67ms at 96ksps) is the smallest valid
+// choice.
+#define GENERIC_BUF_FRAMES  1024
 
 // The QMX's USB audio hardware only natively supports 48000 Hz (confirmed
 // via `aplay -D hw:qmxaudio,0 --dump-hw-params`), not 96000. Requesting
