@@ -218,12 +218,19 @@ static void *capture_thread_fn(void *arg)
 
 	while (running) {
 		snd_pcm_sframes_t n = snd_pcm_readi(pcm, buf, GENERIC_BUF_FRAMES);
-		if (n == -EPIPE) {
-			snd_pcm_prepare(pcm);
-			continue;
-		}
 		if (n < 0) {
-			fprintf(stderr, "sound_generic: capture error: %s\n", snd_strerror((int)n));
+			int err = snd_pcm_recover(pcm, (int)n, 0);
+			if (err < 0) {
+				// recover() itself failed -- e.g. the USB audio
+				// interface dropped off entirely -- not just an
+				// xrun snd_pcm_recover() can paper over. readi()
+				// on a dead fd returns instantly, so retrying
+				// unthrottled here previously filled 25GB of
+				// syslog in under two days; back off instead.
+				fprintf(stderr, "sound_generic: capture error: %s (recover failed: %s)\n",
+					snd_strerror((int)n), snd_strerror(err));
+				usleep(200000);
+			}
 			continue;
 		}
 		modem_rx(rx_list->mode, buf, (int)n);
