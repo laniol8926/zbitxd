@@ -422,9 +422,27 @@ select, select option, input {
 	left: 200px;
 	top: 0px;
 	border: solid 1px white;
-	background-color: black; 
+	background-color: black;
 	opacity: 1;
 	z-index: 1;
+}
+
+#connect_panel {
+	padding-bottom: 10px;
+	position: fixed;
+	left: 200px;
+	top: 0px;
+	border: solid 1px white;
+	background-color: black;
+	opacity: 1;
+	z-index: 2;
+	max-width: 600px;
+}
+
+.connect-panel-intro {
+	margin: 8px;
+	color: #ccc;
+	max-width: 560px;
 }
 
 .settings-element {
