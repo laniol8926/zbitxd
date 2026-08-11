@@ -43,6 +43,21 @@ static int rig_generic_model_id = 0;
 // change this mapping.
 #define RIG_MODEL_QRPLABS_QMX_ID 2057
 
+// A system-packaged libhamlib4 (e.g. Debian's, often years behind) and a
+// newer from-source build can both register under the identical
+// "libhamlib.so.4" SONAME; the dynamic linker's cache then picks
+// whichever was indexed first, silently, regardless of which one a
+// given rigctld binary was actually built/tested against -- confirmed on
+// the dev box: a plain `rigctld -m 2057 ...` resolved to the apt lib and
+// reported "Unknown rig num 2057" even though a from-source build with
+// real QMX support was sitting right there in /usr/local. Forcing this
+// specific binary + its own lib dir sidesteps that regardless of
+// whatever else is installed system-wide. Falls back to a bare PATH
+// lookup (previous behaviour) if this build isn't present, e.g. on a
+// box that only has the system package.
+#define RIGCTLD_PREFERRED_PATH "/usr/local/bin/rigctld"
+#define RIGCTLD_PREFERRED_LIBDIR "/usr/local/lib"
+
 static int rig_connect(void)
 {
 	struct addrinfo hints, *res = NULL;
@@ -360,8 +375,13 @@ void rig_generic_connect(const char *model, const char *device, const char *baud
 
 	rigctld_pid = fork();
 	if (rigctld_pid == 0) {
-		execvp("rigctld", argv);
-		// only reached if execvp() itself failed
+		if (access(RIGCTLD_PREFERRED_PATH, X_OK) == 0) {
+			setenv("LD_LIBRARY_PATH", RIGCTLD_PREFERRED_LIBDIR, 1);
+			execv(RIGCTLD_PREFERRED_PATH, argv);
+		} else {
+			execvp("rigctld", argv);
+		}
+		// only reached if exec itself failed
 		fprintf(stderr, "rig_generic: failed to exec rigctld: %s\n", strerror(errno));
 		_exit(1);
 	} else if (rigctld_pid < 0) {
