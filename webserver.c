@@ -158,7 +158,13 @@ char request[200];
 int request_index = 0;
 
 static void web_despatcher(struct mg_connection *c, struct mg_ws_message *wm){
-	if (wm->data.len > 99)
+	// every message is "<cookie>\n<field> <value>" -- a 40-char cookie
+	// plus a field like RIGDEVICE (max 100 chars, to fit a
+	// /dev/serial/by-id/... path) already exceeds the old 99-byte cap
+	// here, so long device paths were silently dropped with no
+	// response and no log line at all. Tie the check to the actual
+	// buffer size instead of a stale magic number.
+	if (wm->data.len > sizeof(request) - 1)
 		return;
 
 	strncpy(request, wm->data.ptr, wm->data.len);	
@@ -177,7 +183,15 @@ static void web_despatcher(struct mg_connection *c, struct mg_ws_message *wm){
 		web_respond(c, "quit Invalid request on websocket");
 		c->is_draining = 1;
 	}
-	else if (strlen(field) > 100 || strlen(field) <  2 || strlen(cookie) > 40 || strlen(cookie) < 4){
+	// space-separated commands (the common case -- no '=' in the
+	// message) have no delimiter for strtok(NULL, "=") to stop at, so
+	// `field` ends up holding "fieldname value" together, not just the
+	// name -- e.g. RIGDEVICE's own value alone is allowed up to 100
+	// chars (to fit a /dev/serial/by-id/... path), which combined with
+	// the field name can never fit a 100-char cap. Bounded by the
+	// request buffer itself (with room for the cookie+newline already
+	// consumed ahead of it), not a separate arbitrary number.
+	else if (strlen(field) > sizeof(request) - 20 || strlen(field) <  2 || strlen(cookie) > 40 || strlen(cookie) < 4){
 		printf("Ill formed request on websocket\n");
 		web_respond(c, "quit Illformed request");
 		c->is_draining = 1;
