@@ -255,25 +255,30 @@ static int tx_mode = MODE_USB;
 #define BAND12M 7 
 #define BAND10M 8  
 
+// CW/CWR dropped from the app (unusable decode quality, confirmed on real
+// air traffic -- see project notes) -- each band's 4 remembered stack
+// positions now use only USB/FT8, with the FT8 slot pointed at that band's
+// real, standard FT8 calling frequency (not just carried over from the old
+// CW/voice-era frequencies) wherever a clean match exists.
 struct band band_stack[] = {
-	{"80M", 3500000, 4000000, 0, 
-		{3500000,3574000,3600000,3700000},{MODE_CW, MODE_LSB, MODE_CW,MODE_LSB}},
-	{"60M", 5250000, 5500000, 0, 
-		{5251500, 5354000,5357000,5360000},{MODE_CW, MODE_USB, MODE_USB, MODE_USB}},
+	{"80M", 3500000, 4000000, 0,
+		{3500000,3573000,3600000,3700000},{MODE_USB, MODE_FT8, MODE_USB, MODE_USB}},
+	{"60M", 5250000, 5500000, 0,
+		{5251500, 5354000,5357000,5360000},{MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 	{"40M", 7000000,7300000, 0,
-		{7000000,7040000,7074000,7150000},{MODE_CW, MODE_CW, MODE_USB, MODE_LSB}},
+		{7000000,7040000,7074000,7150000},{MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 	{"30M", 10100000, 10150000, 0,
-		{10100000, 10100000, 10136000, 10150000}, {MODE_CW, MODE_CW, MODE_USB, MODE_USB}},
+		{10100000, 10100000, 10136000, 10150000}, {MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 	{"20M", 14000000, 14400000, 0,
-		{14000000, 14400000, 14074000, 14200000}, {MODE_CW, MODE_CW, MODE_USB, MODE_USB}},
+		{14000000, 14400000, 14074000, 14200000}, {MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 	{"17M", 18068000, 18168000, 0,
-		{18068000, 18100000, 18110000, 18160000}, {MODE_CW, MODE_CW, MODE_USB, MODE_USB}},
+		{18068000, 18100000, 18110000, 18160000}, {MODE_USB, MODE_FT8, MODE_USB, MODE_USB}},
 	{"15M", 21000000, 21500000, 0,
-		{21100000, 21500000, 21074000, 21250000}, {MODE_CW, MODE_CW, MODE_USB, MODE_USB}},
+		{21100000, 21500000, 21074000, 21250000}, {MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 	{"12M", 24890000, 24990000, 0,
-		{24890000, 24910000, 24950000, 24990000}, {MODE_CW, MODE_CW, MODE_USB, MODE_USB}},
+		{24890000, 24915000, 24950000, 24990000}, {MODE_USB, MODE_FT8, MODE_USB, MODE_USB}},
 	{"10M", 28000000, 29700000, 0,
-		{28000000, 28000000, 28074000, 28250000}, {MODE_CW, MODE_CW, MODE_USB, MODE_USB}},
+		{28000000, 28000000, 28074000, 28250000}, {MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 };
 
 
@@ -375,8 +380,13 @@ struct field main_controls[] = {
 	{"#split", NULL, 680, 50, 40, 40, "SPLIT", 40, "OFF", FIELD_TOGGLE, 
 		"ON/OFF", 0,0,0,COMMON_CONTROL},
 
-	{ "r1:mode", NULL, 5, 5, 40, 40, "MODE", 40, "USB", FIELD_SELECTION, 
-		"USB/LSB/CW/CWR/FT8/FT4/AM/DIGI/2TONE", 0,0,0, COMMON_CONTROL},
+	// CW/CWR and the other zBitx-hardware-era modes (LSB/AM/DIGI/2TONE)
+	// dropped -- CW's decode quality on real air traffic was confirmed
+	// unusable, and the rest were dead weight even before that (only
+	// FT4/FT8/CW/CWR ever reached a real decoder in modem_rx()). Focus
+	// is voice (USB) + the two digital modes actually built into the app.
+	{ "r1:mode", NULL, 5, 5, 40, 40, "MODE", 40, "USB", FIELD_SELECTION,
+		"USB/FT8/FT4", 0,0,0, COMMON_CONTROL},
 	{ "#bw", do_bandwidth, 495, 5, 40, 40, "BW", 40, "", FIELD_NUMBER, 
 		"", 50, 5000, 50,COMMON_CONTROL},
 
@@ -2857,7 +2867,7 @@ int is_in_tx(){
 /* handle the ui request and update the controls */
 
 void change_band(char *request){
-	int i, old_band, new_band; 
+	int i, old_band, new_band;
 	int max_bands = sizeof(band_stack)/sizeof(struct band);
 	long new_freq, old_freq;
 	char buff[100];
@@ -2911,7 +2921,7 @@ void change_band(char *request){
 	field_set("FREQ", buff);
 
 	mode_name(band_stack[new_band].mode[stack], resp);
-	field_set("MODE", resp);	
+	field_set("MODE", resp);
 	update_field(get_field("r1:mode"));
 
 	struct field *bandswitch = get_field_by_label(band_stack[new_band].name);

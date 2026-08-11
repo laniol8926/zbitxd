@@ -59,13 +59,8 @@
 			<div class="sbitxv3-label">MODE</div>
 			<select class="sbitxv3-selection sbitx-selection" id="MODE">
 				<option value="USB">USB</option>
-				<option value="LSB">LSB</option>
-				<option value="CW">CW</option>
-				<option value="CWR">CWR</option>
-				<option value="FT4">FT4</option>
 				<option value="FT8">FT8</option>
-				<option value="DIGITAL">DIGITAL</option> 
-				<option value="2TONE">2TONE</option>
+				<option value="FT4">FT4</option>
 			</select>
 		</div>
 		<div class="sbitxv3-control" id="dial">
@@ -2351,17 +2346,7 @@ function mode_set(new_mode){
 
 	$(".mode-panel").hide();
 	switch(new_mode){
-		case 'CW':
-		case 'CWR':
-			wf.height=150;
-			sp.height = 100;
-			cw_open(new_mode);
-			$("#CW_ui").show();
-			logger_set_macro("CW1");
-		break;
-		case "LSB":
 		case "USB":
-		case "2TONE":
 			wf.height=150;
 			sp.height = 100;
 			$("#Voice_ui").show();
