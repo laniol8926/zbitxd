@@ -56,6 +56,12 @@ select, select option, input {
 	width: 200px;
 	background-color: black;
 	padding-top: 30px;
+	/* hidden until show_main()/show_login() explicitly set it -- see the
+	   same reasoning on .sbitx-panel below; without this, everything the
+	   main UI shows (this, #pan_adapter, #maincontrols, #more_keys) is
+	   visible from first paint and flashes before show_login() runs at
+	   the very end of the page's script */
+	display: none;
 }
 
 #restore-btn {
@@ -441,7 +447,7 @@ select, select option, input {
 
 .connect-panel-intro {
 	margin: 8px;
-	color: #ccc;
+	color: white;
 	max-width: 560px;
 }
 
@@ -495,6 +501,9 @@ select, select option, input {
 /* waterfall and spectrum */
 #pan_adapter {
 	margin-bottom: 3px;
+	/* see #sidebar's comment -- avoids a flash of the main window before
+	   show_login() runs */
+	display: none;
 }
 
 #spectrum canvas {
@@ -671,6 +680,9 @@ body {
 	top: 0;
 	background: black;
 	z-index: 1;
+	/* see #sidebar's comment -- avoids a flash of the main window before
+	   show_login() runs */
+	display: none;
 }
 
 #settings-open {
@@ -808,6 +820,9 @@ body {
 
 #more_keys{
 	text-align: left;
+	/* see #sidebar's comment -- avoids a flash of the main window before
+	   show_login() runs */
+	display: none;
 }
 
 #dial-dropdown {
