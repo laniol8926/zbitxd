@@ -452,6 +452,12 @@ select, select option, input {
 	padding: 0;
 	background: black;
 	border-collapse: collapse;
+	/* hidden until show_login()/open_panel() explicitly shows one --
+	   without this, panels (settings_panel especially, which is
+	   position:fixed + opacity:1) are visible from the first paint
+	   and only get hidden once show_login() runs at the very end of
+	   the page's script, causing a brief flash on every page load */
+	display: none;
 }
 
 .sbitx-panel-title {
