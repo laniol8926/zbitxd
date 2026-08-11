@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <unistd.h>
 #include <pthread.h>
 #include <math.h>
 #include <complex.h>
@@ -63,7 +64,19 @@ static snd_pcm_t *open_pcm(const char *device, snd_pcm_stream_t stream, unsigned
 	snd_pcm_uframes_t period_size = GENERIC_BUF_FRAMES;
 	int err;
 
-	err = snd_pcm_open(&handle, device, stream, 0);
+	// on a stop/start restart (AUDIO_CONNECT switching devices live), the
+	// just-closed handle's USB-audio-class device can briefly still show
+	// as busy at the kernel level even after snd_pcm_close() returns --
+	// confirmed by reproducing "Device or resource busy" immediately
+	// after a restart, then succeeding on a bare retry a few seconds
+	// later. A few short retries absorbs that race without making a
+	// genuinely wrong/missing device silently hang.
+	for (int attempt = 0; attempt < 10; attempt++) {
+		err = snd_pcm_open(&handle, device, stream, 0);
+		if (err != -EBUSY)
+			break;
+		usleep(200000);
+	}
 	if (err < 0) {
 		fprintf(stderr, "sound_generic: cannot open %s (%s): %s\n",
 			device, stream == SND_PCM_STREAM_CAPTURE ? "capture" : "playback",
@@ -248,4 +261,10 @@ void sound_generic_stop(void)
 	running = 0;
 	pthread_join(capture_thread, NULL);
 	pthread_join(playback_thread, NULL);
+}
+
+void sound_generic_restart(void)
+{
+	sound_generic_stop();
+	sound_generic_start();
 }

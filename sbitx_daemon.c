@@ -48,6 +48,7 @@ The initial sync between the gui values, the core radio values, settings, et al 
 #include "hist_disp.h"
 #include "configure.h"
 #include "rig_generic.h"
+#include "sound_generic.h"
 
 void change_band(char *request);
 
@@ -497,6 +498,12 @@ struct field main_controls[] = {
 	{"#web_reboot", NULL, 1000, -1000, 400, 149, "WEB_REBOOT", 40, "", FIELD_BUTTON,
 		"", 0,0,0,0},
 	{"#web_shutdown", NULL, 1000, -1000, 400, 149, "WEB_SHUTDOWN", 40, "", FIELD_BUTTON,
+		"", 0,0,0,0},
+	// restarts just the capture/playback threads against whatever
+	// CAPTUREDEV/PLAYBACKDEV currently are -- deliberately separate
+	// from RIGCONNECT, since CAT and audio are genuinely different
+	// USB devices for some rigs (e.g. an FT-857D's external sound card)
+	{"#audio_connect", NULL, 1000, -1000, 400, 149, "AUDIO_CONNECT", 40, "", FIELD_BUTTON,
 		"", 0,0,0,0},
 
 	//moving global variables into fields
@@ -2974,6 +2981,25 @@ void do_control_action(char *cmd){
 			snprintf(model_id, sizeof(model_id), "%d", atoi(field_str("RIGMODEL")));
 			rig_generic_connect(model_id, field_str("RIGDEVICE"), field_str("RIGBAUD"));
 		}
+	}
+	// CAPTUREDEV/PLAYBACKDEV previously only updated the persisted
+	// field value -- generic_capture_device/generic_playback_device
+	// (what sound_generic.c's threads actually open) were only ever
+	// set once, from hw_settings.ini at startup, so editing these
+	// fields silently did nothing at runtime. Keep the live globals in
+	// sync as soon as the field changes; AUDIO_CONNECT (below) is what
+	// actually makes the running threads pick up the new value.
+	else if (!strncmp(request, "CAPTUREDEV ", 11) && generic_rig_mode) {
+		strncpy(generic_capture_device, request + 11, sizeof(generic_capture_device) - 1);
+		generic_capture_device[sizeof(generic_capture_device) - 1] = 0;
+	}
+	else if (!strncmp(request, "PLAYBACKDEV ", 12) && generic_rig_mode) {
+		strncpy(generic_playback_device, request + 12, sizeof(generic_playback_device) - 1);
+		generic_playback_device[sizeof(generic_playback_device) - 1] = 0;
+	}
+	else if (!strcmp(request, "AUDIO_CONNECT")){
+		if (generic_rig_mode)
+			sound_generic_restart();
 	}
 	else if (!strcmp(request, "SETTINGS_SAVE")){
 		save_user_settings(1);

@@ -237,11 +237,12 @@
 			<span class="settings-label">Playback Device:</span><input id="PLAYBACKDEV"
 					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;"
 					list="audio_device_options" autocomplete="off" />
-			(Capture/Playback Device changes take effect after a restart)
 		</div>
 		<div class="settings-element">
 			<span class="settings-label"></span>
 			<button id="rig_connect" class="logger-button">Connect to Rig</button>
+			<button id="audio_connect" class="logger-button">Connect Audio</button>
+			(separate from Connect to Rig -- CAT and audio can be different USB devices, e.g. an FT-857D's external sound card)
 		</div>
 
 		<div class="settings-element">
@@ -2157,6 +2158,18 @@ function connect_rig(){
 	websocket_send("RIGCONNECT 1");
 }
 
+// restarts just the capture/playback threads for whatever
+// CAPTUREDEV/PLAYBACKDEV are currently set to -- separate from
+// connect_rig() since CAT and audio can be genuinely different USB
+// devices (e.g. an FT-857D's external sound card vs. its own CAT
+// adapter)
+function connect_audio(){
+	websocket_send("CAPTUREDEV " + el("CAPTUREDEV").value);
+	websocket_send("PLAYBACKDEV " + el("PLAYBACKDEV").value);
+	websocket_send("SETTINGS_SAVE 1");
+	websocket_send("AUDIO_CONNECT 1");
+}
+
 /* tune / reboot / shutdown */
 
 var tune_on = false;
@@ -2612,6 +2625,7 @@ $("#logbook-search").on("input", logbook_search);
 $("#settings-open").on("click", open_settings);
 $("#settings_save").on("click", save_settings);
 $("#rig_connect").on("click", connect_rig);
+$("#audio_connect").on("click", connect_audio);
 $("#tune_toggle").on("click", toggle_tune);
 $("#web_reboot").on("click", do_web_reboot);
 $("#web_shutdown").on("click", do_web_shutdown);
