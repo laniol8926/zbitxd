@@ -57,6 +57,90 @@
 static pthread_t capture_thread, playback_thread;
 static volatile int running = 0;
 
+// Waterfall/spectrum for the generic-rig backend. The SDR's own spectrum
+// pipeline (sbitx.c's rx_linear()/sound_process()) does FFT-based SSB
+// extraction from a real IF-sampled ADC signal, with bin indexing
+// calibrated to that specific IF scheme -- not applicable here, since a
+// generic rig hands over audio that's already been demodulated to baseband
+// by the radio itself. This is a separate, simpler real-audio spectrum:
+// FFT the captured audio directly and write magnitude-in-dB into the same
+// spectrum_plot[]/fft_bins[] globals web_get_spectrum() already reads, so
+// no client-side (index.html) changes are needed.
+//
+// web_get_spectrum() reads spectrum_plot[] centered on bin (3*MAX_BINS)/4
+// (=1536 at MAX_BINS=2048) as the 0 Hz/dial-frequency reference, with
+// increasing bin index = increasing audio frequency. A real (not I/Q)
+// audio signal's magnitude spectrum is inherently symmetric around 0 Hz --
+// there's no way to recover which sideband a signal came from once it's
+// already been demodulated to plain audio -- so both sides of bin 1536 are
+// written with the same value; this only looks "mirrored" compared to the
+// SDR's own asymmetric panorama because that's genuinely all the
+// information a mono audio stream carries.
+static fftw_complex *gen_fft_in = NULL, *gen_fft_out = NULL;
+static fftw_plan gen_fft_plan;
+static int32_t gen_spec_buf[MAX_BINS];
+static int gen_spectrum_ready = 0;
+
+// how far from center (bin 1536) to compute/write -- capped by having only
+// MAX_BINS/4 (512) bins of headroom above 1536 before running off the end
+// of spectrum_plot[]/fft_bins[] (both sized MAX_BINS=2048)
+#define GENERIC_SPEC_HALF_BINS (MAX_BINS / 4 - 1)
+#define GENERIC_SPEC_CENTER_BIN ((3 * MAX_BINS) / 4)
+#define GENERIC_SPEC_SMOOTHING 0.3f
+
+static void gen_spectrum_init(void)
+{
+	if (gen_spectrum_ready)
+		return;
+	gen_fft_in = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * MAX_BINS);
+	gen_fft_out = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * MAX_BINS);
+	memset(gen_fft_in, 0, sizeof(fftw_complex) * MAX_BINS);
+	memset(gen_fft_out, 0, sizeof(fftw_complex) * MAX_BINS);
+	memset(gen_spec_buf, 0, sizeof(gen_spec_buf));
+	// FFTW_ESTIMATE, not the wisdom-measured plan sbitx.c's own FFT uses --
+	// this only needs to be fast to create (built fresh on every daemon
+	// start), not the fastest possible transform; a 2048-point FFT is
+	// cheap enough either way on this hardware
+	gen_fft_plan = fftw_plan_dft_1d(MAX_BINS, gen_fft_in, gen_fft_out, FFTW_FORWARD, FFTW_ESTIMATE);
+	gen_spectrum_ready = 1;
+}
+
+// called once per capture read (n <= MAX_BINS, GENERIC_BUF_FRAMES=960 well
+// under that) -- slides the new real samples into a MAX_BINS-long window,
+// windows+transforms it, and writes the result into spectrum_plot[]
+static void gen_spectrum_update(int32_t *samples, int n)
+{
+	if (n <= 0)
+		return;
+	if (n > MAX_BINS)
+		n = MAX_BINS;
+
+	memmove(gen_spec_buf, gen_spec_buf + n, (MAX_BINS - n) * sizeof(int32_t));
+	memcpy(gen_spec_buf + (MAX_BINS - n), samples, n * sizeof(int32_t));
+
+	// same raw-sample-to-float divisor sbitx.c's own rx_linear() uses
+	// (input_rx[j] / 20000000.0) for its FFT input, kept here for a
+	// consistent dB scale/threshold with the SDR's own display
+	for (int i = 0; i < MAX_BINS; i++) {
+		double v = spectrum_window[i] * (gen_spec_buf[i] / 20000000.0);
+		__real__ gen_fft_in[i] = v;
+		__imag__ gen_fft_in[i] = 0;
+	}
+
+	fftw_execute(gen_fft_plan);
+
+	for (int k = 0; k <= GENERIC_SPEC_HALF_BINS; k++) {
+		float mag = cabs(gen_fft_out[k]);
+		float smoothed = ((1.0f - GENERIC_SPEC_SMOOTHING) * fft_bins[GENERIC_SPEC_CENTER_BIN + k])
+			+ (GENERIC_SPEC_SMOOTHING * mag);
+		fft_bins[GENERIC_SPEC_CENTER_BIN + k] = smoothed;
+		fft_bins[GENERIC_SPEC_CENTER_BIN - k] = smoothed;
+		int y = power2dB(cnrmf(smoothed));
+		spectrum_plot[GENERIC_SPEC_CENTER_BIN + k] = y;
+		spectrum_plot[GENERIC_SPEC_CENTER_BIN - k] = y;
+	}
+}
+
 static snd_pcm_t *open_pcm(const char *device, snd_pcm_stream_t stream, unsigned int rate)
 {
 	snd_pcm_t *handle;
@@ -134,6 +218,7 @@ static void *capture_thread_fn(void *arg)
 			continue;
 		}
 		modem_rx(rx_list->mode, buf, (int)n);
+		gen_spectrum_update(buf, (int)n);
 	}
 
 	snd_pcm_close(pcm);
@@ -251,6 +336,7 @@ static void *playback_thread_fn(void *arg)
 
 void sound_generic_start(void)
 {
+	gen_spectrum_init();
 	running = 1;
 	pthread_create(&capture_thread, NULL, capture_thread_fn, NULL);
 	pthread_create(&playback_thread, NULL, playback_thread_fn, NULL);

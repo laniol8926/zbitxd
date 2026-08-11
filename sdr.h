@@ -99,6 +99,7 @@ for the transmission. The data required is the same!
 
 extern float fft_bins[];
 extern int spectrum_plot[];
+extern float spectrum_window[];
 extern struct filter *ssb;
 
 // generic hamlib-rig backend (bypasses the SDR I/Q chain and si5351/i2c
