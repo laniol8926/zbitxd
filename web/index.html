@@ -2694,7 +2694,16 @@ $("#dial").on("click", function(){ open_panel("keypad_panel"); });
 $(".keypad-btn").on("click", keypad_button_clicked);
 $("#REF").on("change", draw_meters);
 $("#MODE").on("change", mode_changed);
-$("#console-open").on("click", show_console_panel);
+// CMD opens a real Linux terminal (ttyd, running "login" so it
+// authenticates against the Pi's actual system accounts, not a
+// separate credential), per user's ask -- replaces the app's own
+// in-page console/log panel, which show_console_panel() still exists
+// to open but is no longer bound to any button. Navigates the current
+// tab rather than opening a new one -- user won't be operating the
+// radio app while in CMD, so there's no need for both up at once.
+$("#console-open").on("click", function(){
+	window.location.href = "http://" + location.hostname + ":7681/";
+});
 $("#telnet-open").on("click", show_telnet_panel);
 $("#keyboard-open").on("click", show_keyboard);
 $("#MACRO").on("change", logger_get_macro_file);
