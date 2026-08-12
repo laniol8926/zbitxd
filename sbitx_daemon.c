@@ -3042,6 +3042,26 @@ void do_control_action(char *cmd){
 			char model_id[16];
 			snprintf(model_id, sizeof(model_id), "%d", atoi(field_str("RIGMODEL")));
 			rig_generic_connect(model_id, field_str("RIGDEVICE"), field_str("RIGBAUD"));
+
+			// This backend is otherwise push-only for frequency --
+			// nothing here ever reads the rig's actual current state,
+			// so the UI just kept showing its last-persisted FREQ
+			// regardless of reality (confirmed live: app showed
+			// 14.082 right after login while the real radio was
+			// sitting at 14.074, left there from a previous session /
+			// manual retune). Worse than a display glitch: the next
+			// frequency-affecting action would have silently retuned
+			// the rig away from wherever it actually was, to match
+			// that stale value. Adopt the rig's real frequency here
+			// instead -- set_field() re-affirms this exact value back
+			// to the rig via the normal FREQ path, a harmless no-op
+			// since it's already there.
+			long live_freq = rig_generic_get_freq();
+			if (live_freq > 0) {
+				char freq_str[16];
+				snprintf(freq_str, sizeof(freq_str), "%ld", live_freq);
+				set_field("r1:freq", freq_str);
+			}
 		}
 	}
 	// CAPTUREDEV/PLAYBACKDEV previously only updated the persisted

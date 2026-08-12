@@ -136,6 +136,41 @@ static void rig_send_command(const char *cmd)
 		fprintf(stderr, "rig_generic: unexpected reply to '%s': %s", cmd, buf);
 }
 
+// Reads the rig's actual current VFO frequency via CAT ("f") -- a
+// separate function from rig_send_command() since GET-style rigctld
+// commands reply with the value itself, not "RPRT 0" (which
+// rig_send_command() specifically checks for and would misreport as
+// an "unexpected reply" for every successful query). Returns -1 on
+// any failure (not connected, send/recv error, unparseable reply).
+long rig_generic_get_freq(void)
+{
+	char buf[128];
+	int n;
+
+	if (rig_ensure_connected() < 0)
+		return -1;
+
+	n = snprintf(buf, sizeof(buf), "f\n");
+	if (send(rig_sock, buf, n, 0) != n) {
+		rig_drop();
+		return -1;
+	}
+
+	n = recv(rig_sock, buf, sizeof(buf) - 1, 0);
+	if (n <= 0) {
+		rig_drop();
+		return -1;
+	}
+	buf[n] = 0;
+
+	char *end;
+	long freq = strtol(buf, &end, 10);
+	if (end == buf)
+		return -1; // not a number -- e.g. an "RPRT -N" error reply
+
+	return freq;
+}
+
 void rig_generic_set_mode(const char *app_mode)
 {
 	char cmd[64];

@@ -6,6 +6,11 @@
 
 void rig_generic_init(void);
 void rig_generic_set_freq(long freq_hz);
+
+// Reads the rig's actual current VFO frequency via CAT. Returns -1 on
+// failure (not connected, communication error, unparseable reply).
+long rig_generic_get_freq(void);
+
 void rig_generic_set_ptt(int on);
 
 // Sends a CAT mode change for the app's own mode name ("USB", "FT8", or
