@@ -627,10 +627,6 @@ select, select option, input {
 	display: none;
 }
 
-#spectrum canvas {
-	position: absolute;
-}
-		
 /* FT8/ wsjt-x styling */
 
 .sbitx-list-container {

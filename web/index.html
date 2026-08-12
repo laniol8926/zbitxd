@@ -326,9 +326,6 @@
 					<span id="REF_reading"/></span>
 				</div>
 			</div><!-- end of tx_meters -->
-			<div id="spectrum-wrap">
-				<div width="100%"><canvas id="spectrum" width="600" height ="80"></canvas></div>
-			</div><!-- end of spectrum-wrap -->
 			<div width="100%"><canvas id="waterfall" width="600" height="80"></canvas></div>
 		</div>
 <!-- end of panadapter -->
@@ -882,7 +879,6 @@ function resize_ui(){
 	log("resize_ui w = " + b.width() + " h = " + b.height());
 
 	el("waterfall").width = b.width()-sidebar_width;//-sidebar.width;
-	el("spectrum").width = b.width()-sidebar_width;//-sidebar.width;
 	$(".sbitx-panel").width = b.width()-sidebar_width;
 	el("CW_ui").width = b.width()-sidebar_width;//-sidebar.width;
 /*	if(b.height() > 600){
@@ -931,125 +927,6 @@ $('#waterfall').mousedown(function(e) {
 
 // + llh
 var nbins = 0;
-
-function spectrum_update(update){
-	var w = el("spectrum");
-	var ctx = w.getContext("2d");
-	nbins = update.length - 3; //the first three characters are the  status
- 	var scale = w.width/nbins;
-	var height = w.height - 15;
-	ctx.fillStyle = "#000";
-	ctx.fillRect(0,0,w.width, w.height);
-
-	//draw the filter block
-	var low = el("LOW").value;
-	var high = el("HIGH").value;
-	var mode = el("MODE").value;
-	var status = el("STATUS").value;
-	var calculated_span = nbins * 46.875; //this comes from the sampling rate of the sdr
-	var hz_per_pixel = w.width / calculated_span;
-	
-	ctx.fillStyle = "#444";
-	if (mode == 'LSB' || mode == 'CWR'){
-		ctx.fillRect(w.width/2 - (hz_per_pixel * high), 0, 
-			(high-low) * hz_per_pixel, height);
-	}
-	else { 
-		ctx.fillRect(w.width/2 + (hz_per_pixel * low), 0, 
-			(high-low) * hz_per_pixel, height);
-	}
-
-	//draw the grid
-	ctx.beginPath();
-	for (var x = 0; x < 10; x++){
-		ctx.moveTo(w.width*x/10, 0);
-		ctx.lineTo(w.width*x/10, height);
-	}
-	for (var x = 0; x < 8; x++){
-		ctx.moveTo(0, height*x/8);
-		ctx.lineTo(w.width, x* height/8);
-	}
-	ctx.closePath();
-	ctx.strokeStyle = "#333";
-	ctx.stroke();
-
-	//plot the spectrum
-	ctx.beginPath();
-	ctx.moveTo(w.width, height - (update.charCodeAt(0) - 32));
-	//we index the charcodes at an offset of 3 (the first three are status)
-	for (let x = 0; x < nbins; x++)
-		ctx.lineTo((nbins - x - 1) * scale, height - (((update.charCodeAt(x+3) - 32)/100)*height));
-	ctx.strokeStyle = "#ffff00";
-	ctx.stroke();	
-	
-	//write the spectrum edges
-	ctx.fillStyle="cyan";
-	ctx.font = "14px Sans";
-	ctx.fillStyle = "orange";
-
-	//write the status
-	ctx.fillText(status, w.width/2 - ctx.measureText(status).width/2, 14); 
-
-	//show spots!
-	let freq = parseInt(el("FREQ").value)/1000;
-	let spot_count = 0;
-	let spot_report = "";
-	let dups = new Object();
-
-	for (let i = 0; i < spots.length && spot_count < 10; i++){
-		if (Math.abs(spots[i].frequency - freq) < 25){
-			if (dups[spots[i].callsign] == undefined){
-				spot_report = spot_report + " " + spots[i].frequency + "/" + spots[i].callsign + "/" + spots[i].mode;
-				spot_count++;
-				dups[spots[i].callsign] = spots[i].frequency;
-			}
-		}
-	}
-	ctx.font = "12px Sans";
-	ctx.fillStyle = "white";
-	ctx.fillText(spot_report, 0, height+12);
-
-	//now, draw the tx and rx lines
-	var rx_pitch = el("PITCH").value;
-	var tx_pitch = el("TX_PITCH").value;
-
-	ctx.beginPath();
-	ctx.font = "12px Sans";
-	ctx.strokeStyle = "cyan";
-	ctx.fillStyle = "white";
-	if (mode == 'CWR' || mode == 'LSB'){
-		ctx.moveTo(w.width/2 - (rx_pitch * hz_per_pixel), 0);
-		ctx.lineTo(w.width/2 - (rx_pitch * hz_per_pixel), height);
-		ctx.fillText("RX", w.width/2 - (rx_pitch * hz_per_pixel)-10, height+12);
-	}
-	else{
-		ctx.moveTo(w.width/2 + (rx_pitch * hz_per_pixel), 0);
-		ctx.lineTo(w.width/2 + (rx_pitch * hz_per_pixel), height);
-		ctx.fillText("RX", w.width/2 + (rx_pitch * hz_per_pixel)-10, height+12);
-	}
-	ctx.stroke();
-
-
-	//draw the tx line separately only for FTx 
-	if (mode !== "FT8" && mode !== "FT4")
-		return;
-
-	ctx.beginPath();
-	ctx.strokeStyle = "red";
-	ctx.fillStyle = "red";
-
-	if (mode == 'CWR' || mode == 'LSB'){
-		ctx.moveTo(w.width/2 - (tx_pitch * hz_per_pixel), 0);
-		ctx.lineTo(w.width/2 - (tx_pitch * hz_per_pixel), height);
-		ctx.fillText("TX", w.width/2 - (tx_pitch * hz_per_pixel)-10, height+12);
-	}
-	else{
-		ctx.moveTo(w.width/2 + (tx_pitch * hz_per_pixel), 0);
-		ctx.lineTo(w.width/2 + (tx_pitch * hz_per_pixel), height);
-		ctx.fillText("TX", w.width/2 + (tx_pitch * hz_per_pixel)-10, height+12);
-	}
-	ctx.stroke();
-}
 
 function waterfall_update(update){
 	var w = el("waterfall");
@@ -1232,12 +1109,10 @@ function show_keyboard(){
 
 function receiver_panel_open(){
 	log("intializing the receiver panel");
-	//resize the waterfall and the spectrum, both need to be visible when tuning
+	//resize the waterfall, needs to be visible when tuning
 	var waterfall = el("waterfall");
-	var spectrum = el("spectrum");
-//	spectrum.height = 50;
 //	waterfall.height = 50;
-		
+
 }
 
 function filter_set(event){
@@ -2431,21 +2306,17 @@ function show_selected_band_store(args) {
 function mode_set(new_mode){
 
 	var wf = el("waterfall");
-	var sp = el("spectrum");
 	wf.height = 100;
-	sp.height = 100;
 
 	$(".mode-panel").hide();
 	switch(new_mode){
 		case "USB":
 			wf.height=150;
-			sp.height = 100;
 			$("#Voice_ui").show();
 			logger_set_macro("CW1");
 			break;
 		case 'FT4':
 		case 'FT8':
-			sp.height = 50;
 			wf.height=50;
 			FT8_open();
 			$("#FT8_ui").show();
@@ -2504,8 +2375,7 @@ function response_handler(response){
 			switch_to_tx();
 		else if (response.substring(0,2) == "RX" && in_tx == true)
 			switch_to_rx();
-	
-		spectrum_update(response);
+
 		if (in_tx == false)
 			waterfall_update(response);
 		return;
