@@ -1,3 +1,13 @@
+html {
+	/* Pins native form-control popups (datalist suggestion lists, select
+	   dropdowns, scrollbars) to light rendering regardless of the viewing
+	   browser/OS's own dark-mode setting -- without this, the CAPTUREDEV/
+	   PLAYBACKDEV/RIGMODEL/RIGDEVICE datalist popups (not covered by our
+	   own black-background input/select rule below, since that's native
+	   browser chrome) render white or gray depending on the machine. */
+	color-scheme: light;
+}
+
 body {
 	overflow-x: hidden;
 	margin: 0px;
