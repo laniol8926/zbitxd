@@ -630,13 +630,17 @@ select, select option, input {
 /* FT8/ wsjt-x styling */
 
 .sbitx-list-container {
-	display: inline-block;
+	display: inline-flex;
+	flex-direction: column;
 	font-family: courier, monspace-ui, monospace;
 	font-size: 10pt;
 	height: 386px;
 	width: 320px;
-	overflow: auto;
 	border: none;
+}
+
+.sbitx-list-title {
+	flex: none;
 }
 
 /* styling the FT8 list */
@@ -676,9 +680,11 @@ select, select option, input {
 
 .sbitx-list-box .ui-selected {background: grey; color: white;}
 .sbitx-list-box {
-	list-style-type:none; 
-	margin: 0; padding: 0; 
+	list-style-type:none;
+	margin: 0; padding: 0;
 	font-size: 9pt;
+	flex: 1;
+	overflow: auto;
 }
 .sbitx-list-box li{
 	margin: 0; 
@@ -938,8 +944,11 @@ body {
 
 /* specific controls */
 #TEXT {
-	width: 100%;
-	display: inline-block;
+	/* was width:100% -- pushed it onto its own full-width row below the
+	   toolbar instead of sitting inline after SET. FT8 messages are
+	   short (the HTML size="20" attribute is plenty), so let it size
+	   itself like the other toolbar controls instead. */
+	width: 160px;
 }
 
 #CW_INPUT {

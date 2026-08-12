@@ -331,12 +331,12 @@
 <!- wsjtx specific controls -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div id="wsjtx-activity" class="sbitx-list-container" >
-				Band Activity
+				<div class="sbitx-list-title">Band Activity</div>
 				<ol size="10" class="sbitx-list-box">
 				</ol>
 			</div>
 			<div id="wsjtx-rx" class="sbitx-list-container" >
-				RX Frequency
+				<div class="sbitx-list-title">RX Frequency</div>
 				<ol size="10" class="sbitx-list-box">
 				</ol>
 			</div>
@@ -1621,12 +1621,10 @@ function FT8_list_append(list_id, text, style){
 	// text separately for that to read instead.
 	item.dataset.message = deco_strip(text);
 	item.addEventListener("click", FT8_message_chosen);
-	el(list_id).children[0].appendChild(item);
 	// was item.scrollIntoView(...) -- scrolls *every* scrollable
 	// ancestor needed to bring the item into the actual viewport, not
 	// just this list's own internal overflow. #wsjtx-activity/#wsjtx-rx
-	// are already independently scrollable (.sbitx-list-container has
-	// its own fixed height + overflow:auto), but if the list itself
+	// are already independently scrollable, but if the list itself
 	// isn't currently visible in the browser viewport (e.g. the page is
 	// taller than the screen and scrolled elsewhere), scrollIntoView()
 	// scrolls the *whole page* to reveal it -- confirmed live: this
@@ -1636,7 +1634,14 @@ function FT8_list_append(list_id, text, style){
 	// already used elsewhere in this file (e.g. cw_update()'s
 	// rx_window.scrollTop = rx_window.scrollHeight) -- never touches
 	// the page's own scroll position.
-	el(list_id).scrollTop = el(list_id).scrollHeight;
+	//
+	// Scrolling target is the <ol> itself, not the outer container --
+	// the container also holds the "Band Activity"/"RX Frequency" title
+	// above the <ol>, so scrolling the container scrolled the title out
+	// of view along with the list every time a new decode arrived.
+	var ol = el(list_id).querySelector("ol");
+	ol.appendChild(item);
+	ol.scrollTop = ol.scrollHeight;
 }
 
 function FT8_transmit(message){
