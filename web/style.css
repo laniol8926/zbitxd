@@ -441,6 +441,9 @@ select, select option, input {
 	background-color: black;
 	opacity: 1;
 	z-index: 1;
+	width: 600px;
+	max-width: 95vw;
+	max-height: 90vh;
 }
 
 #connect_panel {
@@ -452,7 +455,9 @@ select, select option, input {
 	background-color: black;
 	opacity: 1;
 	z-index: 2;
-	max-width: 600px;
+	width: 600px;
+	max-width: 95vw;
+	max-height: 90vh;
 }
 
 /* #settings_panel/#connect_panel's left:200px assumes the desktop
@@ -465,6 +470,7 @@ select, select option, input {
 	#settings_panel, #connect_panel {
 		left: 5px;
 		right: 5px;
+		width: auto;
 		max-width: none;
 	}
 }
@@ -523,6 +529,16 @@ select, select option, input {
 	   and only get hidden once show_login() runs at the very end of
 	   the page's script, causing a brief flash on every page load */
 	display: none;
+	/* draggable (see panel_drag.js-equivalent code in index.html,
+	   .sbitx-panel-title is the drag handle) + natively resizable --
+	   some panels (settings/connect) can otherwise land off-screen or
+	   too tall for a small/portrait viewport with no way to reach
+	   controls further down; letting the user reposition/resize fixes
+	   that for any screen size without guessing pixel values per device */
+	resize: both;
+	overflow: auto;
+	min-width: 260px;
+	min-height: 150px;
 }
 
 .sbitx-panel-title {
@@ -530,6 +546,9 @@ select, select option, input {
 	display: inline-block;
 	background-color: black;
 	font-size: 14pt;
+	cursor: move;
+	user-select: none;
+	padding: 4px 6px;
 }
 
 .sbitx-btn-back {

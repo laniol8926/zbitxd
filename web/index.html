@@ -1346,6 +1346,115 @@ function close_panel(event){
 	window[panel.id +  "_close"]();
 }
 
+// dragging (via .sbitx-panel-title, see style.css's cursor:move) + native
+// CSS resize (.sbitx-panel's resize:both) -- some panels (settings/connect)
+// can otherwise land off-screen or too tall to reach every control on a
+// small/portrait/unusual screen; letting the user reposition/resize fixes
+// that for any device without guessing pixel values per screen size.
+// Geometry is remembered per panel (localStorage) since settings/connect
+// reopen automatically on every login -- without this the user would have
+// to redo the same drag/resize every single time.
+function panel_geometry_key(panel, prop){
+	return "panel_geom_" + panel.id + "_" + prop;
+}
+
+function restore_panel_geometry(panel){
+	["left", "top", "width", "height"].forEach(function(prop){
+		var v = localStorage.getItem(panel_geometry_key(panel, prop));
+		if (v)
+			panel.style[prop] = v;
+	});
+}
+
+function save_panel_geometry(panel){
+	var r = panel.getBoundingClientRect();
+	if (r.width == 0 && r.height == 0)
+		return; // still display:none -- nothing real to save yet
+	localStorage.setItem(panel_geometry_key(panel, "left"), r.left + "px");
+	localStorage.setItem(panel_geometry_key(panel, "top"), r.top + "px");
+	localStorage.setItem(panel_geometry_key(panel, "width"), r.width + "px");
+	localStorage.setItem(panel_geometry_key(panel, "height"), r.height + "px");
+}
+
+function init_draggable_panels(){
+	document.querySelectorAll(".sbitx-panel").forEach(function(panel){
+		restore_panel_geometry(panel);
+
+		// native resize fires no DOM event on its own -- ResizeObserver
+		// is the standard way to notice it and persist the new size
+		new ResizeObserver(function(){ save_panel_geometry(panel); }).observe(panel);
+
+		var title = panel.querySelector(".sbitx-panel-title");
+		if (!title)
+			return;
+
+		var dragging = false, moved = false;
+		var start_x, start_y, start_left, start_top;
+
+		function drag_start(x, y){
+			var r = panel.getBoundingClientRect();
+			// pin explicit left/top/width in px -- a panel still
+			// positioned via CSS (e.g. the narrow-viewport media
+			// query's right:5px) would otherwise fight a left-only drag
+			panel.style.left = r.left + "px";
+			panel.style.top = r.top + "px";
+			panel.style.right = "auto";
+			panel.style.width = r.width + "px";
+			start_x = x; start_y = y;
+			start_left = r.left; start_top = r.top;
+			dragging = true;
+			moved = false;
+		}
+
+		function drag_move(x, y){
+			if (!dragging)
+				return;
+			var dx = x - start_x, dy = y - start_y;
+			if (Math.abs(dx) > 3 || Math.abs(dy) > 3)
+				moved = true;
+			panel.style.left = (start_left + dx) + "px";
+			panel.style.top = (start_top + dy) + "px";
+		}
+
+		function drag_end(){
+			if (!dragging)
+				return;
+			dragging = false;
+			if (moved)
+				save_panel_geometry(panel);
+		}
+
+		title.addEventListener("mousedown", function(e){
+			drag_start(e.clientX, e.clientY);
+			e.preventDefault();
+		});
+		document.addEventListener("mousemove", function(e){ drag_move(e.clientX, e.clientY); });
+		document.addEventListener("mouseup", drag_end);
+
+		title.addEventListener("touchstart", function(e){
+			var t = e.touches[0];
+			drag_start(t.clientX, t.clientY);
+		}, {passive: true});
+		document.addEventListener("touchmove", function(e){
+			if (!dragging)
+				return;
+			var t = e.touches[0];
+			drag_move(t.clientX, t.clientY);
+		}, {passive: true});
+		document.addEventListener("touchend", drag_end);
+
+		// close_panel() is also bound (bubble phase) to this same title
+		// element's click -- suppress just that one click after an
+		// actual drag, so dragging the panel doesn't also close it
+		title.addEventListener("click", function(e){
+			if (moved){
+				e.stopImmediatePropagation();
+				moved = false;
+			}
+		}, true);
+	});
+}
+
 function sbitx_button_clicked(event){
 	websocket_send(event.currentTarget.id);
 }
@@ -2591,6 +2700,7 @@ function response_handler(response){
 parser = new DOMParser();
 show_login();
 waterfall_init();
+init_draggable_panels();
 setInterval(ui_tick, 50);
 spots = [];
 
