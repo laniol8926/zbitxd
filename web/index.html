@@ -48,8 +48,7 @@
 	<input type="hidden" id="HIGH" value="2200"/>
 	<input type="hidden" id="LOW" value="300"/>
 	<input type="hidden" id="STATUS" value="---" />
-	<input type="hidden" id="REC" value="OFF" /> 
-	<input type="hidden" id="RIT_DELTA" name="RIT_DELTA" value="" /> 
+	<input type="hidden" id="RIT_DELTA" name="RIT_DELTA" value="" />
 	<input type="hidden" id="VFOx" value="A" />
   <div id="sdr_page">
 	<div id="maincontrols">
@@ -157,7 +156,6 @@
 		<button class="sbitxv3-btn" id="esc">ESC</button
 		><button class="sbitxv3-btn macro-btn" id="F1">F1</button>
 		<button class="sbitxv3-btn" id="console-open">CMD</button
-		><button class="sbitxv3-btn" id="recorder-open">REC</button
 		><button class="sbitxv3-btn" id="connect-open">RADIO</button
 		><button class="sbitxv3-btn" id="settings-open">SET</button>
 		<input type="text" class="sbitx-text-input sbitx-text-field"
@@ -319,18 +317,7 @@
 					<meter id="REF_meter" max="1000" min="0" value="0"></meter>
 					<span id="REF_reading"/></span>
 				</div>
-			</div><!-- end of tx_meters --> 
-<!-- recorder panel -->
-	<div id="recorder_panel" class="sbitx-panel mode-panel">
-			<span class="sbitx-panel-title">
-				<button class="sbitx-btn-back" data-for="panel_bar">&#x2716; Close</button>  
-			</span>
-			<div class="menu_item">
-				<button class="logger-button" id="record_start">REC</button>
-				<button class="logger-button" id="record_stop">STOP</button>
-				<span id="record_duration">00:00</span>
-			</div>
-	</div>	
+			</div><!-- end of tx_meters -->
 			<div id="spectrum-wrap">
 				<div width="100%"><canvas id="spectrum" width="600" height ="80"></canvas></div>
 			</div><!-- end of spectrum-wrap -->
@@ -2339,35 +2326,6 @@ function do_web_shutdown(){
 	}
 }
 
-/* recorder panel */
-
-var record_started = -1;
-
-function open_recorder(){
-	open_panel("recorder_panel");
-}
-
-function start_recorder(){
-	websocket_send("REC ON");
-}
-
-function stop_recorder(){
-	websocket_send("REC OFF");
-	el("recorder_panel").style.display = "";
-}
-
-function update_recorder(){
-	if (record_started == -1)
-		el("record_duration").innerHTML = "00:00";
-	else {
-		seconds = Math.round(Date.now()/1000) - record_started;
-		minutes = Math.round(seconds / 60);
-		seconds = Math.round(seconds % 60);
-		el("record_duration").innerHTML = ("0" + minutes).slice(-2) 
-			+ ":" + ("0" + seconds).slice(-2);
-	}
-}
-
 /* switching the ui for different modes */
 
 // response from the sdr 
@@ -2441,10 +2399,6 @@ var ticks = 0;
 function ui_tick(){
 	if (socket == null)
 		return;
-
-	//recorder update if it is running
-	if(record_started != -1)
-		update_recorder();
 
 	if (socket.readyState != 1)
 		return;
@@ -2668,13 +2622,6 @@ function response_handler(response){
 						draw_dial();
 					else if (cmd == "RIGSTATUS" || cmd == "AUDIOSTATUS")
 						e.classList.toggle("connect-status-ok", args == "Connected");
-					if (cmd == "REC"){
-						if (args == "ON")
-							record_started  = Math.round(Date.now()/1000);
-						else
-							record_started = -1; 							
-						update_recorder();
-					}
 				}
 
 			}
@@ -2802,11 +2749,6 @@ $("#audio_connect").on("click", connect_audio);
 $("#rig_model_refresh").on("click", () => websocket_send("riglist"));
 $("#rig_device_refresh").on("click", () => websocket_send("seriallist"));
 $("#audio_device_refresh").on("click", () => websocket_send("audiolist"));
-
-//recorder buttons
-$("#recorder-open").on("click", open_recorder);
-$("#record_start").on("click", start_recorder);
-$("#record_stop").on("click", stop_recorder);
 
 window.onload = ui_init();
 
