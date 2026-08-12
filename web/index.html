@@ -149,6 +149,19 @@
 			</select>
 		</div><button class="sbitxv3-btn" id="web_reboot">Reboot</button
 		><button class="sbitxv3-btn" id="web_shutdown">Shutdown</button>
+		<div class="Sbitxv3-control">
+			<div class="sbitxv3-label">MACRO</div>
+			<select class="sbitxv3-selection sbitx-selection" id="MACRO">
+			</select>
+		</div>
+		<button class="sbitxv3-btn" id="esc">ESC</button
+		><button class="sbitxv3-btn macro-btn" id="F1">F1</button>
+		<button class="sbitxv3-btn" id="console-open">CMD</button
+		><button class="sbitxv3-btn" id="recorder-open">REC</button
+		><button class="sbitxv3-btn" id="connect-open">RADIO</button
+		><button class="sbitxv3-btn" id="settings-open">SET</button>
+		<input type="text" class="sbitx-text-input sbitx-text-field"
+			id="TEXT" placeholder="TEXT" size="20" />
 	</div><!-- end of maincontrols -->
 		<span id="restore-btn" onclick="toggle_fullscreen();"> &#X21F3; </span>
 	<div id="sidebar"> 
@@ -468,20 +481,10 @@
 </div> <!-- end of sdr_page (vs login page, etc)--> 
 	<div id="keybd-container">
 		<div id="more_keys">
-		<div class="Sbitxv3-control">
-			<div class="sbitxv3-label">MACRO</div>
-			<select class="sbitxv3-selection sbitx-selection" id="MACRO">
-			</select>
-		</div>
-		<button class="sbitxv3-btn" id="esc">ESC</button
-		><button class="sbitxv3-btn macro-btn" id="F1">F1</button>
-		<button class="sbitxv3-btn" id="console-open">CMD</button
-		><!--<button class="sbitxv3-btn" id="telnet-open">TEL</button
-		>--><button class="sbitxv3-btn" id="recorder-open">REC</button
-		><button class="sbitxv3-btn" id="connect-open">RADIO</button
-		><button class="sbitxv3-btn" id="settings-open">SET</button>
-		<input type="text" class="sbitx-text-input sbitx-text-field" 
-			id="TEXT" placeholder="TEXT" size="20" />
+		<!-- controls that used to live here (MACRO/ESC/F1/CMD/REC/RADIO/SET/
+		     TEXT) moved up into #maincontrols -- less scrolling to reach
+		     them. #more_keys/#keybd-container left in place (now empty)
+		     since JS still calls .hide()/.show() on them elsewhere. -->
 		</div><!-- end of more_keys -->
 		<!--- removed the keyboard from the html, use the device's own virtual/physical keyboard 
 		<table id="keybd" class="sbitx-keystroke" width="100%">
