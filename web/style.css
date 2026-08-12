@@ -74,6 +74,17 @@ select, select option, input {
 	display: none;
 }
 
+/* Digital-modes-only field station -- receiver audio playback to the
+   browser's speakers is never needed for FT8/FT4/CW decode (that
+   happens server-side straight from the captured samples), and this
+   is unrelated to a rig's own audio interface (e.g. a Digirig on an
+   FT-857D) used for capture/playback -- just hides the button rather
+   than removing the underlying streaming code, in case voice/USB use
+   ever wants it back. */
+#sound_mute {
+	display: none;
+}
+
 #restore-btn {
 	float: right;
 	display: inline-block;
