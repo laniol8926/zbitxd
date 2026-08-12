@@ -172,9 +172,22 @@ void rig_generic_init(void)
 
 // `rigctl --list` output is a fixed-width table, but manufacturer/model
 // names can themselves contain single spaces (e.g. "N2ADR James
-// Ahlstrom", "FT-1000MP MARK-V"), so columns are found by runs of 2+
-// spaces rather than fixed offsets -- more robust against hamlib
-// changing its exact column widths across versions.
+// Ahlstrom", "FT-1000MP MARK-V"). Anchored from the END of the line
+// instead of counting column-separator runs from the front: the
+// trailing Version/Status/Macro fields are always single space-free
+// tokens in hamlib's own output (confirmed across a real, full ~311-rig
+// catalog), so stripping exactly those 3 trailing tokens leaves
+// "Mfg Model" regardless of internal spacing. A front-counted
+// "runs of 2+ spaces = column boundary" approach was tried first and
+// broke on real data: a long Mfg name (e.g. "DTTS Microwave Society")
+// can overflow its allotted column width enough to compress the
+// Mfg/Model gap down to a single space -- indistinguishable from the
+// name's own internal word-spaces -- which shifted the front-counted
+// boundary by one column and swallowed the Version field into the
+// name (confirmed live: "23003 DTTS Microwave Society DttSP IPC
+// 20200319.0" instead of stopping at "...DttSP IPC"). Anchoring from
+// the end sidesteps this entirely since it never depends on any
+// column's padding actually reaching the 2-space threshold.
 void rig_generic_list(char *out, size_t out_size)
 {
 	FILE *pf;
@@ -198,31 +211,48 @@ void rig_generic_list(char *out, size_t out_size)
 			p++;
 		if (*p < '0' || *p > '9')
 			continue; // not a data row
-
 		int id = atoi(p);
+
+		size_t len = strlen(line);
+		while (len > 0 && (line[len-1] == '\n' || line[len-1] == '\r'))
+			line[--len] = 0;
+		char *end = line + len;
+
+		// strip exactly 3 trailing whitespace-separated tokens
+		// (Macro, Status, Version)
+		for (int t = 0; t < 3 && end > p; t++) {
+			while (end > p && *(end-1) == ' ')
+				end--;
+			while (end > p && *(end-1) != ' ')
+				end--;
+		}
+		while (end > p && *(end-1) == ' ')
+			end--; // trailing spaces before the (now excluded) Version token
+
 		while (*p >= '0' && *p <= '9')
 			p++;
 		while (*p == ' ')
-			p++; // skip to Mfg -- don't count this run as a column boundary
+			p++;
+
+		if (p >= end)
+			continue; // malformed row -- fewer than 3 trailing tokens
 
 		char name[128];
-		int ni = 0, boundaries = 0, space_run = 0;
-		for (; *p && *p != '\n'; p++) {
-			if (*p == ' ') {
+		int ni = 0, space_run = 0;
+		for (char *q = p; q < end; q++) {
+			if (*q == ' ') {
 				space_run++;
-				if (space_run == 2)
-					boundaries++;
-				if (boundaries >= 2)
-					break;
 			} else {
-				if (space_run >= 1 && ni > 0)
+				if (space_run >= 1 && ni > 0 && ni < (int)sizeof(name) - 1)
 					name[ni++] = ' ';
 				space_run = 0;
 				if (ni < (int)sizeof(name) - 1)
-					name[ni++] = *p;
+					name[ni++] = *q;
 			}
 		}
 		name[ni] = 0;
+		if (ni == 0)
+			continue;
 
 		char entry[192];
 		int n = snprintf(entry, sizeof(entry), "%d %s\n", id, name);
