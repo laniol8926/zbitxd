@@ -627,6 +627,24 @@ select, select option, input {
 	display: none;
 }
 
+#waterfall_wrap {
+	position: relative;
+}
+
+/* Persistent RX (cyan)/TX (red) tuning-line overlay, redrawn fresh every
+   frame -- separate canvas layered on top of the scrolling waterfall
+   image, rather than tinting individual waterfall pixels (the old
+   approach: the tint only ever applied to the single newest scanline,
+   so it scrolled away and became invisible after one frame). Also
+   the click/touch target for setting TX tone directly on the
+   waterfall (see wf_overlay_click() in the script). */
+#waterfall_overlay {
+	position: absolute;
+	top: 0;
+	left: 0;
+	cursor: crosshair;
+}
+
 /* FT8/ wsjt-x styling */
 
 .sbitx-list-container {

@@ -353,7 +353,10 @@
 					<span id="REF_reading"/></span>
 				</div>
 			</div><!-- end of tx_meters -->
-			<div width="100%"><canvas id="waterfall" width="600" height="80"></canvas></div>
+			<div id="waterfall_wrap" width="100%">
+				<canvas id="waterfall" width="600" height="80"></canvas>
+				<canvas id="waterfall_overlay" width="600" height="80"></canvas>
+			</div>
 		</div>
 <!-- end of panadapter -->
 <!- wsjtx specific controls -->
@@ -888,7 +891,22 @@ function resize_ui(){
 	// picks up a phone orientation flip (fires as a resize event) without
 	// needing the user to switch modes.
 	el("waterfall").height = waterfall_calc_height();
+	sync_wf_overlay_size();
 	height = b.height();
+}
+
+// Keeps #waterfall_overlay's own pixel buffer sized to match #waterfall
+// exactly -- called anywhere the waterfall's own width/height changes
+// (resize_ui(), mode_set()), since a canvas's drawing surface resets
+// to blank whenever its width/height attributes are set, even to the
+// same pixel dimensions it already had.
+function sync_wf_overlay_size(){
+	var wf = el("waterfall");
+	var ov = el("waterfall_overlay");
+	if (!ov) return;
+	ov.width = wf.width;
+	ov.height = wf.height;
+	draw_wf_overlay();
 }
 
 var waterfall_image = null;
@@ -941,33 +959,13 @@ function waterfall_update(update){
 	nbins = update.length - 3;
 	var scale = nbins/w.width;
 
-	//get the tx and rx lines
-	var rx_pitch = el("PITCH").value;
-	var tx_pitch = el("TX_PITCH").value;
 	var mode = el("MODE").value;
-	var calculated_span = nbins * 46.875; //this comes from the sampling rate of the sdr
-	var hz_per_pixel = w.width / calculated_span;
 	var repeat = 3;
 
 	if (mode === "FT8" || mode === "FT4")
 		repeat = 1;
 	else if (mode == 'CW' || mode == 'CWR')
 		repeat = 2;
-	
-
-	var rx_spot = -1;
-	var tx_spot = -1;
-
-	if (mode == 'CWR' || mode == 'LSB')
-		rx_spot = w.width/2 - (rx_pitch * hz_per_pixel);
-	else
-		rx_spot = w.width/2 + (rx_pitch * hz_per_pixel);
-	rx_spot = Math.round(rx_spot);
-
-	if (mode === "FT8" || mode === "FT4"){
-		tx_spot = w.width/2 + (tx_pitch * hz_per_pixel);
-		tx_spot = Math.round(tx_spot);
-	}
 
 	var ctx = w.getContext("2d", {willReadFrequently:true});
 
@@ -1032,24 +1030,90 @@ function waterfall_update(update){
 			g = (100-v) * 12;
 			b = 0;
 		}
-		if (x == tx_spot)
-			img.data[i++] = 255;
-		else 
-			img.data[i++] = r;
-
-		if (x == rx_spot){
-			img.data[i++] = 255; 
-			img.data[i++] = 255; 
-		}
-		else{	
-			img.data[i++] = g;
-			img.data[i++] = b; 
-		}
-		img.data[i++] = 255;	
+		img.data[i++] = r;
+		img.data[i++] = g;
+		img.data[i++] = b;
+		img.data[i++] = 255;
 	}
 
 	for (i = 0; i < repeat; i++)
 		ctx.putImageData(img, 0,i);
+
+	draw_wf_overlay();
+}
+
+// Persistent RX/TX tuning-line overlay -- a separate canvas layered on
+// top of the waterfall (see #waterfall_overlay in style.css), redrawn
+// fresh every call instead of tinting individual waterfall pixels (the
+// old approach only ever tinted the single newest scanline, so the
+// line scrolled away and vanished after one frame). Locked at a fixed
+// 3kHz span (see the SPAN removal/lock -- spectrum_span is always 3000
+// in generic_rig_mode), so the Hz-per-pixel mapping doesn't need to
+// wait for the next spectrum push to be computed correctly.
+function draw_wf_overlay(){
+	var wf = el("waterfall");
+	var ov = el("waterfall_overlay");
+	if (!ov || ov.width == 0 || ov.height == 0)
+		return;
+
+	var mode = el("MODE").value;
+	var hz_per_pixel = ov.width / 3000;
+	var ctx = ov.getContext("2d");
+	ctx.clearRect(0, 0, ov.width, ov.height);
+
+	var rx_pitch = parseFloat(el("PITCH").value);
+	var rx_x;
+	if (mode == 'CWR' || mode == 'LSB')
+		rx_x = ov.width/2 - (rx_pitch * hz_per_pixel);
+	else
+		rx_x = ov.width/2 + (rx_pitch * hz_per_pixel);
+	rx_x = Math.round(rx_x);
+
+	ctx.strokeStyle = "cyan";
+	ctx.fillStyle = "cyan";
+	ctx.font = "10px sans-serif";
+	ctx.beginPath();
+	ctx.moveTo(rx_x + 0.5, 0);
+	ctx.lineTo(rx_x + 0.5, ov.height);
+	ctx.stroke();
+	ctx.fillText("RX", rx_x + 3, 10);
+
+	if (mode === "FT8" || mode === "FT4"){
+		var tx_pitch = parseFloat(el("TX_PITCH").value);
+		var tx_x = Math.round(ov.width/2 + tx_pitch * hz_per_pixel);
+		ctx.strokeStyle = "red";
+		ctx.fillStyle = "red";
+		ctx.beginPath();
+		ctx.moveTo(tx_x + 0.5, 0);
+		ctx.lineTo(tx_x + 0.5, ov.height);
+		ctx.stroke();
+		ctx.fillText("TX", tx_x + 3, 22);
+	}
+}
+
+// Click/tap directly on the waterfall sets your own TX tone (replaces
+// manually typing into the TX TONE box) -- deliberately does NOT touch
+// RX: clicking a decoded station in the activity lists moves RX only
+// (see FT8_message_chosen()), and folding TX into that same gesture
+// would silently retune your transmitter every time you're just
+// evaluating a CQ, not actually replying to it.
+function wf_overlay_click(event){
+	var mode = el("MODE").value;
+	if (mode !== "FT8" && mode !== "FT4")
+		return;
+	var ov = el("waterfall_overlay");
+	var rect = ov.getBoundingClientRect();
+	var clientX = event.touches ? event.touches[0].clientX : event.clientX;
+	var x = clientX - rect.left;
+	var hz_per_pixel = ov.width / 3000;
+	var freq = Math.round((x - ov.width/2) / hz_per_pixel);
+	if (freq < 10) freq = 10;
+	if (freq > 4000) freq = 4000;
+	el("TX_PITCH").value = freq;
+	el("slider_TX_PITCH").value = freq;
+	websocket_send("TX_PITCH " + freq);
+	draw_wf_overlay();
+	event.preventDefault();
 }
 
 /* on screen keyboard panel */
@@ -1769,6 +1833,18 @@ function FT8_message_chosen(event){
 		//event.stopPropagation();
 		return false;
 	} else {
+		// Move the RX line (cyan) to this station's own decoded frequency
+		// -- RX only, deliberately never TX: this fires just from
+		// clicking a decoded line to inspect/reply to it, and silently
+		// retuning the transmitter every time you're evaluating a CQ
+		// (rather than deliberately setting your own tone) would be a
+		// real footgun.
+		var rx_freq_num = parseFloat(rx_frequency);
+		if (!isNaN(rx_freq_num)){
+			el("PITCH").value = rx_freq_num;
+			websocket_send("PITCH " + rx_freq_num);
+			draw_wf_overlay();
+		}
 		websocket_send("FT8_check "+message_text);
 	}
 
@@ -2444,6 +2520,7 @@ function mode_set(new_mode){
 
 	var wf = el("waterfall");
 	wf.height = waterfall_calc_height();
+	sync_wf_overlay_size();
 
 	$(".mode-panel").hide();
 	switch(new_mode){
@@ -2674,6 +2751,8 @@ $(".sbitx-text-field").on("change keydown paste input",sbitx_text_changed);
 $(".linear-slider").on("input", on_linear_moved);
 $(".linear").on("click",  linear_toggle);
 $(".macro-btn").on("click", logger_trigger_macro);
+el("waterfall_overlay").addEventListener("mousedown", wf_overlay_click);
+el("waterfall_overlay").addEventListener("touchstart", wf_overlay_click);
 
 //specific control handler
 $("#sound_mute").on("click", () => { sound_mute = !sound_mute;});
