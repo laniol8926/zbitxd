@@ -1631,6 +1631,25 @@ function FT8_stylize_message_item(item, text, style) {
     item.innerHTML = htmLabel + '<span class="ft8-message">' + htmMessage + '</span>';
 }
 
+// Most recent FT8 decode-period time label (HHMMSS, the first token of
+// every decode line) seen in each list, keyed by list_id -- lets
+// FT8_list_append() tell when a run of decodes has crossed into a new
+// ~15s period and needs a divider, without relying on wall-clock
+// rounding (which drifts against the audio hardware's own sample
+// clock over a long session).
+var FT8_list_last_period = {};
+
+function FT8_period_label(text){
+	var token_list = text.match(/\S+/g);
+	return (token_list && token_list.length > 0) ? token_list[0] : null;
+}
+
+function FT8_format_period_label(label){
+	if (!label || label.length != 6)
+		return label;
+	return label.substring(0,2) + ":" + label.substring(2,4) + ":" + label.substring(4,6) + " UTC";
+}
+
 function FT8_list_append(list_id, text, style){
 
 	var item = document.createElement("li");
@@ -1675,6 +1694,21 @@ function FT8_list_append(list_id, text, style){
 	// "stick to bottom only if already there" pattern.
 	var ol = el(list_id).querySelector("ol");
 	var was_at_bottom = (ol.scrollHeight - ol.scrollTop - ol.clientHeight) < 20;
+
+	// blank/labeled divider between decode periods -- lots of decodes
+	// on a busy band otherwise blend into one dense, undifferentiated
+	// scroll. Skipped on the very first entry (nothing to divide yet).
+	var period = FT8_period_label(text);
+	if (period && FT8_list_last_period[list_id] !== undefined
+			&& FT8_list_last_period[list_id] !== period){
+		var divider = document.createElement("li");
+		divider.className = "sbitx-list-divider";
+		divider.textContent = FT8_format_period_label(period);
+		ol.appendChild(divider);
+	}
+	if (period)
+		FT8_list_last_period[list_id] = period;
+
 	ol.appendChild(item);
 	if (was_at_bottom)
 		ol.scrollTop = ol.scrollHeight;
@@ -1748,6 +1782,7 @@ function FT8_lists_clear() {
 	document.querySelector('#wsjtx-activity ol').innerHTML ="";
 	document.querySelector('#wsjtx-cq ol').innerHTML ="";
 	document.querySelector('#wsjtx-rx ol').innerHTML ="";
+	FT8_list_last_period = {};
 }
 
 function FT8_new_message(text, style){
