@@ -813,6 +813,11 @@ body {
 	width: 78px;
 }
 
+/* per user's ask -- match the other toolbar buttons' black background */
+#web_reboot, #web_shutdown, #esc, #tune_toggle, #console-open, #settings-open {
+	background-color: black;
+}
+
 #settings-open {
 	position:relative;
 }
