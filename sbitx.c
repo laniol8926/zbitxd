@@ -1605,6 +1605,17 @@ void sdr_request(char* request, char* response)
 			set_tx_power_levels();
 	} else if (!strcmp(cmd, "tx_power")) {
 		tx_drive = atoi(value);
+		// DRIVE already scales the digital TX audio level fed to the
+		// rig's mic/audio input (sound_generic.c's GENERIC_TX_SCALE_AT_
+		// MAX_DRIVE) -- confirmed working, kept unchanged. This is a
+		// genuinely separate knob on a real rig: RFPOWER controls the
+		// actual RF output level itself, not how "loud" the audio
+		// driving it is. Sent unconditionally (not gated on in_tx, e.g.
+		// how RX RF avoids CAT during TX) since it's just a rig-side
+		// setting, not something that needs to land at a precise
+		// instant -- takes effect on whatever transmission comes next.
+		if (generic_rig_mode)
+			rig_generic_set_level("RFPOWER", tx_drive / 100.0f);
 		if (in_tx)
 			set_tx_power_levels();
 	} else if (!strcmp(cmd, "bridge")) {
