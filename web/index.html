@@ -1697,17 +1697,23 @@ function FT8_list_append(list_id, text, style){
 
 	// blank/labeled divider between decode periods -- lots of decodes
 	// on a busy band otherwise blend into one dense, undifferentiated
-	// scroll. Skipped on the very first entry (nothing to divide yet).
+	// scroll. Skipped on the very first entry (nothing to divide yet),
+	// and skipped entirely for wsjtx-rx -- that panel is the running
+	// thread of the current QSO, not a general decode feed, and
+	// chopping it up with period breaks works against reading it as
+	// one continuous exchange.
 	var period = FT8_period_label(text);
-	if (period && FT8_list_last_period[list_id] !== undefined
-			&& FT8_list_last_period[list_id] !== period){
-		var divider = document.createElement("li");
-		divider.className = "sbitx-list-divider";
-		divider.textContent = FT8_format_period_label(period);
-		ol.appendChild(divider);
+	if (list_id != "wsjtx-rx"){
+		if (period && FT8_list_last_period[list_id] !== undefined
+				&& FT8_list_last_period[list_id] !== period){
+			var divider = document.createElement("li");
+			divider.className = "sbitx-list-divider";
+			divider.textContent = FT8_format_period_label(period);
+			ol.appendChild(divider);
+		}
+		if (period)
+			FT8_list_last_period[list_id] = period;
 	}
-	if (period)
-		FT8_list_last_period[list_id] = period;
 
 	ol.appendChild(item);
 	if (was_at_bottom)
