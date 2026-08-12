@@ -1639,9 +1639,21 @@ function FT8_list_append(list_id, text, style){
 	// the container also holds the "Band Activity"/"RX Frequency" title
 	// above the <ol>, so scrolling the container scrolled the title out
 	// of view along with the list every time a new decode arrived.
+	// Only auto-scroll if the user was already looking at the bottom of
+	// the list. On a busy band, decodes arrive continuously -- forcing
+	// scroll-to-bottom on every single one means a station's row keeps
+	// sliding out from under the cursor while the user is moving toward
+	// it, so a click meant for one CQ caller lands on whichever
+	// different station's row the auto-scroll just put there instead
+	// (a real reported incident: transmitted to the wrong station).
+	// Leaving the scroll position alone once the user has scrolled up
+	// to read/click an older entry matches the standard chat/log-UI
+	// "stick to bottom only if already there" pattern.
 	var ol = el(list_id).querySelector("ol");
+	var was_at_bottom = (ol.scrollHeight - ol.scrollTop - ol.clientHeight) < 20;
 	ol.appendChild(item);
-	ol.scrollTop = ol.scrollHeight;
+	if (was_at_bottom)
+		ol.scrollTop = ol.scrollHeight;
 }
 
 function FT8_transmit(message){
