@@ -880,10 +880,10 @@ function resize_ui(){
 	el("waterfall").width = b.width()-sidebar_width;//-sidebar.width;
 	$(".sbitx-panel").width = b.width()-sidebar_width;
 	el("CW_ui").width = b.width()-sidebar_width;//-sidebar.width;
-/*	if(b.height() > 600){
-		el("waterfall").height = b.height() / 4;
-		el("spectrum").height = b.height() /4;
-	}*/
+	// recalculate on every resize, not just mode changes -- this is what
+	// picks up a phone orientation flip (fires as a resize event) without
+	// needing the user to switch modes.
+	el("waterfall").height = waterfall_calc_height();
 	height = b.height();
 }
 
@@ -2343,34 +2343,38 @@ function show_selected_band_store(args) {
 	el("band_store").innerHTML = " " + store;
 }
 
+// waterfall height as a share of the viewport, not a fixed pixel count --
+// a fixed value can't look right in both phone portrait and landscape at
+// once. Clamped so it never collapses on a short landscape screen or
+// swallows the whole page on a tall one.
+function waterfall_calc_height(){
+	var h = Math.round(window.innerHeight * 0.35);
+	if (h < 150)
+		h = 150;
+	if (h > 400)
+		h = 400;
+	return h;
+}
+
 function mode_set(new_mode){
 
 	var wf = el("waterfall");
-	wf.height = 200;
+	wf.height = waterfall_calc_height();
 
 	$(".mode-panel").hide();
 	switch(new_mode){
 		case "USB":
-			wf.height=300;
 			$("#Voice_ui").show();
 			logger_set_macro("CW1");
 			break;
 		case 'FT4':
 		case 'FT8':
-			// was 50, then 150 -- sized back when the spectrum display
-			// sat above the waterfall and took its own share of
-			// vertical space; now that spectrum's gone (removed per
-			// user's ask), that space should go to the waterfall
-			// instead of just disappearing. Doubled again per a direct
-			// follow-up ask. Matches the other modes' height.
-			wf.height=300;
 			FT8_open();
 			$("#FT8_ui").show();
 			logger_set_macro("FT8");
 			sound_mute = true;
 			break;
 		default:
-			wf.height=300;
 			var panel_name = "#" + new_mode + "_ui";
 			var active_panel = $(panel_name);
 			logger_set_macro("CW1");
