@@ -361,7 +361,7 @@
 				<ol size="10" class="sbitx-list-box">
 				</ol>
 			</div>
-			<div id="gridmap"></div>
+			<!-- <div id="gridmap"></div> -->
 			<div><input type="text" id="CHECK" placeholder="check" size = "92" class="check" /><span id="gridpos"></span></div>
 			<div id="FT8_controls">
 				<div class="sbitxv3-control">
@@ -534,12 +534,14 @@
 		</table>
 		-->
 	</div> <!-- end of on screen keyboard -->
+	<!--
 	<div class="menu-item">
-		<a href="https://www.hamqsl.com/solar.html" 
+		<a href="https://www.hamqsl.com/solar.html"
 			title="Click to add Solar-Terrestrial Data to your website!">
 			<img src="https://www.hamqsl.com/solarbc.php">
 		</a>
 	</div>
+	-->
 <!- tx panel -->
 </body>
 
@@ -556,9 +558,11 @@ var logbook_bottom_row_id = -1;
 var logbook_top_row_id= 0;
 var sound_mute = false;
 
-/* oz7bx gridmap */
-
-GRIDMAP.init(document.getElementById("gridmap"), 700, 360);
+/* oz7bx gridmap -- container div commented out above; GRIDMAP.init()
+   would throw on a null container (its own code assumes one exists),
+   which would abort this whole top-level <script> block since this
+   isn't inside a function/try-catch -- must stay commented out too */
+// GRIDMAP.init(document.getElementById("gridmap"), 700, 360);
 
 /* a few helper functions */
 function el(element_id){
