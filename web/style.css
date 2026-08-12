@@ -967,15 +967,6 @@ body {
 	width: 20px;
 }
 
-#console {
-	display: none;
-	position: absolute;
-	background-color: white;
-	padding: 2px;
-	width: 200px;
-	color: black;
-}
-
 /* style the  keyboard */
 
 #keybd {

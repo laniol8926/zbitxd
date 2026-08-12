@@ -313,7 +313,6 @@
 <!--   panadapter, xxxx_open functions will resize this as needed -->
 <!-- pan adapter and waterfall -->
 		<div id="pan_adapter">
-			<div id="console">Hello</div>
 			<div id="tx_meters">
 				<div class="menu-item">
 					<span class="slider-label">Watts</span>
@@ -2289,10 +2288,17 @@ function update_data(text){
 		var data = xml.getElementsByTagName("LOG");
 		for (var i = 0; i < data.length; i++) {
 			let s = data[i].innerHTML;
-			write_console(s);
+			// was write_console(s) -- a "Logged: ..." toast (#console,
+			// position:absolute with no explicit top/left, so it rendered
+			// right where it sits in the HTML: directly above the
+			// waterfall) that fired every time a QSO auto-logged.
+			// Confirmed live as the recurring "text panel/box above the
+			// waterfall" the user kept seeing -- not a caching issue.
+			// Auto-logging itself is unaffected, this only removed the
+			// popup notification.
 			// Extract qso grid from message e.g.
 			// "Logged: F4VTG -05-JO65 -14-JN12\n;"
-			if (s.startsWith("Logged:")) { // String ends width \n 
+			if (s.startsWith("Logged:")) { // String ends width \n
 				s = s.substring(s.length-5,s.length-1);
 				GRIDMAP.gridIdJustLogged(s);
 			}
@@ -2340,30 +2346,31 @@ function show_selected_band_store(args) {
 function mode_set(new_mode){
 
 	var wf = el("waterfall");
-	wf.height = 100;
+	wf.height = 200;
 
 	$(".mode-panel").hide();
 	switch(new_mode){
 		case "USB":
-			wf.height=150;
+			wf.height=300;
 			$("#Voice_ui").show();
 			logger_set_macro("CW1");
 			break;
 		case 'FT4':
 		case 'FT8':
-			// was 50 -- sized back when the spectrum display sat above
-			// the waterfall and took its own share of vertical space;
-			// now that spectrum's gone (removed per user's ask), that
-			// space should go to the waterfall instead of just
-			// disappearing. Matches the other modes' height.
-			wf.height=150;
+			// was 50, then 150 -- sized back when the spectrum display
+			// sat above the waterfall and took its own share of
+			// vertical space; now that spectrum's gone (removed per
+			// user's ask), that space should go to the waterfall
+			// instead of just disappearing. Doubled again per a direct
+			// follow-up ask. Matches the other modes' height.
+			wf.height=300;
 			FT8_open();
 			$("#FT8_ui").show();
 			logger_set_macro("FT8");
 			sound_mute = true;
 			break;
 		default:
-			wf.height=150;
+			wf.height=300;
 			var panel_name = "#" + new_mode + "_ui";
 			var active_panel = $(panel_name);
 			logger_set_macro("CW1");
@@ -2764,11 +2771,5 @@ function on_click(event){
 		collection[i].style.display = "";
 }
 
-function write_console(str){
-	var con = $("#console");
-	con[0].innerHTML = str;
-	con.fadeIn(0);
-	con.fadeOut(6000);
-}
 </script>
 </html>
