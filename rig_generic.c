@@ -481,6 +481,13 @@ void rig_generic_connect(const char *model, const char *device, const char *baud
 	}
 	argv[i++] = "-t";
 	argv[i++] = port_str;
+	// Terminator for the "w"/send_cmd raw-passthrough mechanism (see
+	// rig_generic_set_rf_gain()) -- the QMX's own CAT manual states its
+	// commands "never contain a carriage return or linefeed character.
+	// They are always terminated by a semicolon", matching the classic
+	// Kenwood-style ASCII CAT convention this radio's TS-480 emulation
+	// follows. Harmless for rigs that don't use raw passthrough.
+	argv[i++] = "--send-cmd-term=;";
 	argv[i] = NULL;
 
 	rigctld_pid = fork();
@@ -534,6 +541,35 @@ void rig_generic_set_level(const char *level_name, float value)
 {
 	char cmd[64];
 	snprintf(cmd, sizeof(cmd), "L %s %.3f", level_name, value);
+	rig_send_command(cmd);
+}
+
+// Sets RX RF gain via the rig's own native CAT command, bypassing
+// hamlib's set_level abstraction entirely -- confirmed via a real
+// `rigctl --dump-caps` that neither the QMX (model 2057) nor the RS-978
+// (model 1045, mcHF/UHSDR) expose ANY settable hamlib level at all
+// ("Can set Level: N" for both), so the old rig_generic_set_level("RF",
+// ...) call was a guaranteed no-op on both rigs this backend has
+// actually been tested against.
+//
+// QMX-only for now: its CAT manual documents a native "RGnn;" command
+// (gain in dB, e.g. RG63; = 63dB) as part of its TS-480-style command
+// set -- rig_generic_connect() sets rigctld's send-cmd-term to ';' to
+// match. gain_db is passed straight through with no rescaling; the
+// UI's existing 0-100 range already sits comfortably inside this
+// radio's real gain range (factory per-band defaults are 54-74dB).
+// The RS-978's FT-817 emulation has no equivalent CAT command at all
+// (confirmed against both hamlib's own FT-817 backend, which has zero
+// settable levels either, and UHSDR's own CAT documentation) -- silent
+// no-op there rather than sending a command it can't understand.
+void rig_generic_set_rf_gain(int gain_db)
+{
+	char cmd[32];
+
+	if (rig_generic_model_id != 2057)
+		return;
+
+	snprintf(cmd, sizeof(cmd), "w RG%d", gain_db);
 	rig_send_command(cmd);
 }
 

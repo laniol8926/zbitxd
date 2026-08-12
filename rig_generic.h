@@ -18,6 +18,12 @@ void rig_generic_set_ptt(int on);
 // -- callers scale their own UI range down before calling this.
 void rig_generic_set_level(const char *level_name, float value);
 
+// Sets RX RF gain via the rig's own native CAT command (QMX only for
+// now -- see rig_generic.c for why hamlib's set_level("RF", ...)
+// doesn't work at all for either currently-used rig). gain_db is
+// passed straight through, no rescaling. No-op on other rigs.
+void rig_generic_set_rf_gain(int gain_db);
+
 // Sends a CAT mode change for the app's own mode name ("USB", "FT8", or
 // "FT4" -- see sbitx.c's sdr_request() "r1:mode" case, the only caller).
 // Not a single fixed string: which rigctld mode string actually means

@@ -1631,16 +1631,21 @@ void sdr_request(char* request, char* response)
 	} else if (!strcmp(cmd, "r1:gain")) {
 		rx_gain = atoi(value);
 		if (generic_rig_mode) {
-			// on real hardware this is RX RF gain (rigctl "L RF"), not
-			// the zBitx SDR's IF/ALSA-capture gain below -- there's no
-			// separate hardware IF stage to adjust on a rig that does
-			// its own downconversion. Skipping in_tx here deliberately
-			// (unlike the zBitx branch): RF gain only ever affects RX,
-			// and holding off a CAT round-trip during an active
-			// transmission avoids adding serial-port contention right
-			// when FT8's slot timing is precise.
+			// on real hardware this is RX RF gain, not the zBitx SDR's
+			// IF/ALSA-capture gain below -- there's no separate hardware
+			// IF stage to adjust on a rig that does its own
+			// downconversion. Was rig_generic_set_level("RF", ...)
+			// (hamlib's set_level abstraction), but rigctl --dump-caps
+			// confirmed neither the QMX nor the RS-978 expose ANY
+			// settable hamlib level at all, so that was a guaranteed
+			// no-op -- replaced with the QMX's own native "RG" CAT
+			// command (see rig_generic_set_rf_gain()). Skipping in_tx
+			// here deliberately (unlike the zBitx branch): RF gain only
+			// ever affects RX, and holding off a CAT round-trip during
+			// an active transmission avoids adding serial-port
+			// contention right when FT8's slot timing is precise.
 			if (!in_tx)
-				rig_generic_set_level("RF", rx_gain / 100.0f);
+				rig_generic_set_rf_gain(rx_gain);
 		} else if (!in_tx)
 			sound_mixer(audio_card, "Capture", rx_gain);
 	} else if (!strcmp(cmd, "r1:volume")) {
