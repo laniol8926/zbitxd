@@ -1041,3 +1041,72 @@ body {
 	visibility: visible;
 }
 
+/* click-to-enter-frequency keypad, ported from the reference sBitx v5
+   implementation -- .sbitx-panel already provides background/
+   display:none/resize/etc, but not position (each panel sets its own,
+   same as #settings_panel/#connect_panel), so a centered floating
+   dialog position is set here specifically. */
+#keypad_panel {
+	position: fixed;
+	top: 50%;
+	left: 50%;
+	transform: translate(-50%, -50%);
+	z-index: 1000;
+}
+
+#keypad_input {
+	margin: 8px;
+}
+
+#freq_input {
+	width: 100%;
+	box-sizing: border-box;
+	font-size: 16px;
+	text-align: right;
+}
+
+#keypad_buttons {
+	display: grid;
+	grid-template-columns: repeat(3, 1fr);
+	gap: 4px;
+	margin: 8px;
+}
+
+.keypad-btn {
+	background-color: #444;
+	color: #fff;
+	border: 1px solid #555;
+	padding: 10px;
+	font-size: 16px;
+	cursor: pointer;
+	text-align: center;
+}
+
+.keypad-btn:hover {
+	background-color: #555;
+}
+
+#keypad_enter {
+	background-color: #1a75ff;
+}
+
+#keypad_enter:hover {
+	background-color: #0d47a1;
+}
+
+#keypad_clear {
+	background-color: #ff4444;
+}
+
+#keypad_clear:hover {
+	background-color: #cc0000;
+}
+
+#keypad_delete {
+	background-color: #ffaa00;
+}
+
+#keypad_delete:hover {
+	background-color: #cc8800;
+}
+

@@ -33,8 +33,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>sBitx</title>
     <script src="jquery.min.js"></script>
-    <script src="jquery.knob.js"></script>
-    <script src="pcm-player.js"></script> 
+    <script src="pcm-player.js"></script>
 	<script src="proj4.js"></script>
     <script src="gridmap.js"></script>
 	<link rel="stylesheet" href="style.css">
@@ -52,7 +51,6 @@
 	<input type="hidden" id="VFOx" value="A" />
   <div id="sdr_page">
 	<div id="maincontrols">
-		<button class="sbitxv3-btn" id="knob_on" type="button">Knob</button>
 		<button class="sbitxv3-btn" id="sound_mute" type="button">Sound</button>
 		<button class="sbitxv3-btn" id="tune_toggle"
 			title="Keys the transmitter with a steady tone -- click again to stop">Tune</button>
@@ -162,15 +160,15 @@
 			id="TEXT" placeholder="TEXT" size="20" />
 	</div><!-- end of maincontrols -->
 		<span id="restore-btn" onclick="toggle_fullscreen();"> &#X21F3; </span>
-	<div id="sidebar"> 
-		<div class="menu-item" id="tuning_knob">
-			<input id="big_tuning_knob"
-				class="knob" data-width="190" 
-				data-height="190" data-displayInput=false 
-				data-cursor=true data-fgColor="#222222" data-thickness=.3 
-				data-step=1 data-max=360 value="0">
-		</div>
-		</div> <!-- end of sidebar -->	
+	<div id="sidebar">
+		<!-- on-screen tuning knob removed (user's ask) -- replaced by
+		     click-to-enter-frequency on #current_freq. Left this wrapper
+		     div in place, now empty: resize_ui() ($("#sidebar").width()/
+		     .style.display) and ui_init()'s $("#sidebar").hide() still
+		     reference it by id. Already always display:none by default
+		     (see the CSS comment) and never re-shown now that nothing
+		     calls toggle_dial() anymore. -->
+		</div> <!-- end of sidebar -->
 		<div id="main">
 <!-- settings panel -->
 	<div id="settings_panel" class="sbitx-panel">
@@ -260,6 +258,31 @@
 			<input id="AUDIOSTATUS" class="connect-status" type="text" readonly tabindex="-1" />
 		</div>
 	</div><!-- end of connect_panel -->
+
+	<div id="keypad_panel" class="sbitx-panel">
+		<span class="sbitx-panel-title">
+			<button class="sbitx-btn-back" data-for="panel_bar">&#x2716; Close</button>
+		</span>
+		<div id="keypad_input">
+			<input type="text" id="freq_input" class="sbitx-text-input" placeholder="Enter frequency (kHz)" readonly>
+		</div>
+		<div id="keypad_buttons">
+			<button class="keypad-btn">1</button>
+			<button class="keypad-btn">2</button>
+			<button class="keypad-btn">3</button>
+			<button class="keypad-btn">4</button>
+			<button class="keypad-btn">5</button>
+			<button class="keypad-btn">6</button>
+			<button class="keypad-btn">7</button>
+			<button class="keypad-btn">8</button>
+			<button class="keypad-btn">9</button>
+			<button class="keypad-btn">0</button>
+			<button class="keypad-btn">.</button>
+			<button class="keypad-btn" id="keypad_clear">Clear</button>
+			<button class="keypad-btn" id="keypad_delete">Del</button>
+			<button class="keypad-btn" id="keypad_enter">Enter</button>
+		</div>
+	</div><!-- end of keypad_panel -->
 
   		<div id="login_panel">
 				<div class="help_text">
@@ -787,9 +810,6 @@ function draw_dial(){
 	like RIT, SPLIT, etc.
 */
 
-let tuning_position_last = 0;
-var knob_resolution = 6;
-
 function getStepSize() {
 	var step_text = el("STEP").value;
 	var step_size = 1000;
@@ -804,60 +824,6 @@ function getStepSize() {
 	return step_size;
 }
 
-function tuning_knob_handler(position_now){
-	//avoid small movements
-	if (Math.abs(position_now - tuning_position_last) < knob_resolution)
-		return;
-
-	//calculate the relative movement of the dial knob
-	var delta = 0;
-	//we reduce the granulity of the step 
-	if (position_now < 90 && tuning_position_last > 270)
-		delta = position_now + 360.0 - tuning_position_last;
-	else if (position_now > 270 && tuning_position_last < 90)
-		delta =  tuning_position_last + 360 - position_now;
-	else
-		delta = position_now - tuning_position_last;
-
-	tuning_position_last = position_now;
-	
-	//reduce the precision of delta
-	delta = Math.round(delta / knob_resolution);
-	//tuning up or down by the step value		
-    var step_size = getStepSize();
-
-	f = el('FREQ');
-	var freq = parseInt(f.value);
-	freq = Math.round(freq/step_size) * step_size;
-	if (delta > 0)
-		delta = step_size;
-	else
-		delta = -step_size;
-	f.value = freq + delta;
-	update_freq(f.value);	
-}
-
-//initialization code
-
-//link the knob to the jquery code
-$(function($) {
-	$(".knob").knob({
-  	change : function (value) {
-		tuning_knob_handler(value);
-	},
-	release : function (value) {
-		tuning_knob_handler(value); // +llh
-  	//console.log(this.$.attr('value'));
-    //console.log("release : " + value);
- 	},
-	cancel : function () {
-		//console.log("cancel : ", this);
-	},
-  draw : function () {
-  }
-  });
-});
-
 function change_freq(event) {
 	event.preventDefault();
 	let f = el('FREQ');
@@ -869,7 +835,56 @@ function change_freq(event) {
 	else
 		freq -= step_size;
 	f.value = freq;
-	update_freq(f.value);	
+	update_freq(f.value);
+}
+
+// click-to-enter-frequency (replaces the on-screen tuning knob, per
+// user's ask) -- ported from the reference sBitx v5 implementation
+// (~/Downloads/sbitx/web/index.html) rather than improvised from
+// scratch, adapted to this project's existing panel conventions
+// (.sbitx-panel/open_panel(), and the generic .sbitx-panel-title
+// click-to-close handler already wired for every other panel).
+function keypad_panel_open(){
+	el("freq_input").value = "";
+	el("freq_input").focus();
+}
+
+function keypad_button_clicked(event){
+	var btn = event.currentTarget;
+	var input = el("freq_input");
+	var current_value = input.value;
+
+	if (btn.id === "keypad_clear"){
+		input.value = "";
+	} else if (btn.id === "keypad_delete"){
+		input.value = current_value.slice(0, -1);
+	} else if (btn.id === "keypad_enter"){
+		submit_frequency();
+	} else {
+		var new_char = btn.innerHTML;
+		if (new_char === "." && current_value.includes("."))
+			return; // only one decimal point
+		input.value = current_value + new_char;
+	}
+}
+
+// input is kHz (matching normal ham usage, e.g. "7040" or "14074.5"),
+// converted to Hz here before sending
+function submit_frequency(){
+	var input = el("freq_input").value;
+	if (input.endsWith("."))
+		input = input.slice(0, -1);
+	if (!/^\d+(\.\d{0,3})?$/.test(input)){
+		alert("Please enter a valid frequency in kHz (e.g., 7040 or 14074.5)");
+		return;
+	}
+	var freq_hz = Math.round(parseFloat(input) * 1000);
+	if (freq_hz < 1000000 || freq_hz > 30000000){
+		alert("Frequency entered is out of range and should be in kHz.");
+		return;
+	}
+	update_freq(freq_hz.toString());
+	$("#keypad_panel").hide();
 }
 
 /* waterfall and spectrum */
@@ -2673,9 +2688,10 @@ $(".linear").on("click",  linear_toggle);
 $(".macro-btn").on("click", logger_trigger_macro);
 
 //specific control handler
-$("#knob_on").on("click", toggle_dial);
 $("#sound_mute").on("click", () => { sound_mute = !sound_mute;});
 el("dial").addEventListener("wheel", change_freq, { passive: false });
+$("#dial").on("click", function(){ open_panel("keypad_panel"); });
+$(".keypad-btn").on("click", keypad_button_clicked);
 $("#REF").on("change", draw_meters);
 $("#MODE").on("change", mode_changed);
 $("#console-open").on("click", show_console_panel);
@@ -2844,20 +2860,6 @@ function on_click(event){
 	var collection = document.getElementsByClassName("linear-dropdown");
 	for (var i = 0; i < collection.length; i++)
 		collection[i].style.display = "";
-}
-
-function toggle_dial(event){
-	var dial = el("sidebar");
-	var main = el("main");
-	if (dial.style.display == "block"){
-		main.style.marginLeft = 0;
-		dial.style.display = "none";	
-	}
-	else {
-		main.style.marginLeft = 200;
-		dial.style.display = "block";	
-	}
-	resize_ui();	
 }
 
 function write_console(str){
