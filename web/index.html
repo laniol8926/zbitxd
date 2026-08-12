@@ -2337,7 +2337,12 @@ function mode_set(new_mode){
 			break;
 		case 'FT4':
 		case 'FT8':
-			wf.height=50;
+			// was 50 -- sized back when the spectrum display sat above
+			// the waterfall and took its own share of vertical space;
+			// now that spectrum's gone (removed per user's ask), that
+			// space should go to the waterfall instead of just
+			// disappearing. Matches the other modes' height.
+			wf.height=150;
 			FT8_open();
 			$("#FT8_ui").show();
 			logger_set_macro("FT8");
