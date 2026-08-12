@@ -456,7 +456,22 @@ void modem_poll(int mode, int ticks)
 	switch (mode) {
 	case MODE_FT4:
 	case MODE_FT8:
-		if (ticks % 50 == 0)
+		// Tune (generic-rig backend) manages its own tx_on()/tx_off()
+		// directly from the TUNE button, not through ft8_poll()'s
+		// TX-scheduling watchdog below -- but the MODE *field*'s text
+		// value is deliberately left unchanged while Tune is active
+		// (see the commented-out field_set("MODE", "TUNE") in
+		// sbitx_daemon.c's "TUNE ON" handler, "this is not correct,
+		// but ..."), so this switch still dispatches on the stale
+		// FT8/FT4 mode and would otherwise still reach ft8_poll()
+		// during Tune. There, tx_is_on is 1 but ft8_tx_nsamples is
+		// stuck at 0 (Tune bypasses the FT8 encode pipeline entirely,
+		// generating its own steady tone directly in sound_generic.c
+		// instead), which ft8_poll() reads as "nothing left to send"
+		// and immediately calls tx_off() -- confirmed live: Tune
+		// keyed the radio for under a second before reverting to
+		// receive, every time.
+		if (ticks % 50 == 0 && tx_list->mode != MODE_TUNE)
 			ft8_poll(tx_is_on);
 		break;
 	case MODE_CW:
