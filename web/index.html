@@ -92,7 +92,35 @@
       	<input type="range" class="linear-slider"
         	id="slider_IF" max="100" min="0" step="1" value="13" />
 			</div>
-    </div>
+    </div><div class="sbitxv3-control">
+			<div class="sbitxv3-label">AUTO</div>
+			<select class="sbitxv3-selection sbitx-selection" id="FT8_AUTO">
+				<option value="ON">ON</option>
+				<option value="OFF">OFF</option>
+				<option value="CQ_ALT">CQ_ALT</option>
+				<option value="xOTA">xOTA</option>
+			</select>
+		</div><div class="sbitxv3-control">
+			<div class="sbitxv3-label">TX1ST</div>
+			<select class="sbitxv3-selection sbitx-selection" id="FT8_TX1ST">
+				<option value="ON">ON</option>
+				<option value="OFF">OFF</option>
+			</select>
+		</div><div class="linear" id="linear_TX_PITCH">
+    		<div class="linear-label">TX TONE</div>
+    			<input type="number" id="TX_PITCH" min="10" max="4000" class="linear-value" />
+     		<div class="linear-dropdown">
+      			<input type="range" class="linear-slider"
+        			id="slider_TX_PITCH" max="4000" min="10" step="10" value="1900" />
+				</div>
+			</div><div class="linear" id="linear_FT8_REPEAT">
+    			<div class="linear-label">REPEAT</div>
+    			<input type="number" id="FT8_REPEAT" min="1" max="10" class="linear-value" />
+     		<div class="linear-dropdown">
+      		<input type="range" class="linear-slider"
+        		id="slider_FT8_REPEAT" max="10" min="1" step="1" value="3" />
+			</div>
+		</div>
 	<br/>
 		<div class="linear" id="linear_DRIVE">
     	<div class="linear-label">TX PWR</div>
@@ -347,35 +375,6 @@
 			</div>
 			<!-- <div id="gridmap"></div> -->
 			<div id="FT8_controls">
-				<div class="sbitxv3-control">
-					<div class="sbitxv3-label">AUTO</div>
-					<select class="sbitxv3-selection sbitx-selection" id="FT8_AUTO">
-						<option value="ON">ON</option>
-						<option value="OFF">OFF</option>
-						<option value="CQ_ALT">CQ_ALT</option>
-						<option value="xOTA">xOTA</option>
-					</select>
-				</div>
-				<div class="sbitxv3-control">
-					<div class="sbitxv3-label">TX1ST</div>
-					<select class="sbitxv3-selection sbitx-selection" id="FT8_TX1ST">
-						<option value="ON">ON</option>
-						<option value="OFF">OFF</option>
-					</select>
-				</div><div class="linear" id="linear_TX_PITCH">
-    		<div class="linear-label">TX TONE</div>
-    			<input type="number" id="TX_PITCH" min="10" max="4000" class="linear-value" />
-     		<div class="linear-dropdown">
-      			<input type="range" class="linear-slider"
-        			id="slider_TX_PITCH" max="4000" min="10" step="10" value="1900" />
-					</div>
-				</div><div class="linear" id="linear_FT8_REPEAT">
-    			<div class="linear-label">REPEAT</div>
-    			<input type="number" id="FT8_REPEAT" min="1" max="10" class="linear-value" />
-     		<div class="linear-dropdown">
-      		<input type="range" class="linear-slider"
-        		id="slider_FT8_REPEAT" max="10" min="1" step="1" value="3" />
-				</div>
 			</div>
 			<!-- end of FT8_controls -->
 		</div>
