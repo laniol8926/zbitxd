@@ -1451,6 +1451,14 @@ void setup(char* audio_output_device)
 		// parsed after this.
 		set_field("#capture_device", generic_capture_device);
 		set_field("#playback_device", generic_playback_device);
+		// SPAN control removed from the web UI (locked at 3kHz, see the
+		// matching "SPAN " lock in do_control_action()) -- set the real
+		// starting value directly too, since spectrum_span's own
+		// compiled-in default (48000) would otherwise be whatever a
+		// stale persisted SPAN selection last left it at until the next
+		// SPAN request (which may never come now that there's no
+		// dropdown to send one).
+		spectrum_span = 3000;
 		sound_generic_start();
 	} else {
 		// detect the version of sbitx if not read from hw_settings

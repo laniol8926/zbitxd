@@ -3166,7 +3166,16 @@ void do_control_action(char *cmd){
 	else if (!strcmp(request, "STEP 10H"))
 		tuning_step = 10;
 
-	//spectrum bandwidth
+	//spectrum bandwidth -- generic-rig backend locked at 3kHz (user's
+	//reasoning: no radio's own audio passband for FT4/FT8 exceeds that
+	//anyway, and it's controlled by the radio itself, not this app).
+	//Intercepts ANY "SPAN ..." request while in generic_rig_mode --
+	//including a stale persisted value from before this was locked, or
+	//any future one -- before it can reach the specific-value cases
+	//below, so it can never drift away from 3000. Those cases stay
+	//fully intact/reachable for the zBitx-hardware path.
+	else if (!strncmp(request, "SPAN ", 5) && generic_rig_mode)
+		spectrum_span = 3000;
 	else if (!strcmp(request, "SPAN 2.5K"))
 		spectrum_span = 2500;
 	else if (!strcmp(request, "SPAN 6K"))

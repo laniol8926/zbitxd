@@ -110,6 +110,7 @@ extern char generic_rigctld_host[64];
 extern int generic_rigctld_port;
 extern char generic_capture_device[64];
 extern char generic_playback_device[64];
+extern int spectrum_span;
 
 //vfo definitions
 
