@@ -117,7 +117,7 @@ void sound_generic_set_rx_gain(float gain)
 // unrelated legacy buffers/FFTW_MEASURE plans for no benefit. Only the
 // INPUT analysis needs to get bigger; the OUTPUT still only ever needs to
 // hold as many bins as the locked 3kHz span actually displays (see
-// GENERIC_SPEC_HALF_BINS below), which comfortably fits within the
+// GENERIC_SPEC_N_BINS below), which comfortably fits within the
 // existing, unchanged output array size.
 //
 // 96000/16384 = 5.859375 Hz/bin (~8.5 bins per 50Hz signal -- plenty of
@@ -131,18 +131,43 @@ static int32_t gen_spec_buf[GENERIC_SPEC_FFT_SIZE];
 static float gen_spec_window[GENERIC_SPEC_FFT_SIZE];
 static int gen_spectrum_ready = 0;
 
-// How far from center to compute/write into the OUTPUT arrays
-// (fft_bins[]/spectrum_plot[], still sized MAX_BINS=2048, unchanged) --
-// tightened to just what the locked 3kHz span actually needs at the new
-// resolution (1500 Hz half-span / 5.859375 Hz-per-bin = 256 exactly),
-// instead of the old formula's MAX_BINS/4-derived headroom, which was
-// already computing/smoothing ~16x more bins than the ~32 ever actually
-// read by web_get_spectrum(). Assumes spectrum_span stays locked at
+// This backend only ever handles USB-based digital modes (FT8/FT4) on a
+// rig that's already demodulated the RF down to plain baseband audio
+// before it ever reaches here. USB only contains audio content for RF
+// *above* the dial frequency (0-3000Hz audio = dial to dial+3000Hz RF)
+// -- there is no real "negative audio frequency" signal to show, so the
+// dial frequency belongs at the LEFT edge of the display, not centered
+// with content mirrored on both sides.
+//
+// The previous centered/mirrored layout (write the same magnitude to
+// both CENTER_BIN+k and CENTER_BIN-k) was inherited from the original
+// zBitx SDR hardware's own spectrum convention without being reconsidered
+// for whether it's still correct here -- that hardware's own comment
+// ("the center frequency is at the center of the LOWER SIDEBAND") makes
+// sense for its own single-conversion IF/I-Q scheme, which genuinely
+// carries information on both sides of a reference point. A generic
+// rig's plain mono, already-USB-demodulated audio doesn't have that;
+// mirroring it doesn't recover any real second sideband, it just
+// duplicates the one real (0-3000Hz) passband onto both halves of the
+// display, which is a real FFT's own true (but not meaningful here)
+// conjugate symmetry, not additional information. Caught live by direct
+// user correction: "14.074 is not the center frequency... we're in USB
+// mode it is the left edge of the waterfall."
+//
+// GENERIC_SPEC_N_BINS is the full 0-3000Hz span at this resolution
+// (3000 Hz / 5.859375 Hz-per-bin = 512 exactly) written sequentially
+// starting at GENERIC_SPEC_START_BIN, in increasing-frequency order --
+// no mirroring, no center point. Assumes spectrum_span stays locked at
 // 3000 (see the SPAN removal/lock elsewhere in this project) -- if that
 // lock is ever removed, this needs to become a runtime calculation
 // against the real spectrum_span instead of a compile-time constant.
-#define GENERIC_SPEC_HALF_BINS 256
-#define GENERIC_SPEC_CENTER_BIN ((3 * MAX_BINS) / 4)
+// GENERIC_SPEC_START_BIN keeps the same offset the old centered layout
+// used (bin 1536 of the MAX_BINS=2048 output arrays) purely because it's
+// already a known-safe, already-verified-in-bounds choice -- 1536 to
+// 1536+512-1=2047 fits the array exactly, with zero remaining meaning
+// behind "1536" itself now that there's no more center concept.
+#define GENERIC_SPEC_N_BINS 512
+#define GENERIC_SPEC_START_BIN ((3 * MAX_BINS) / 4)
 #define GENERIC_SPEC_SMOOTHING 0.3f
 
 static void gen_spectrum_init(void)
@@ -189,15 +214,17 @@ static void gen_spectrum_update(int32_t *samples, int n)
 
 	fftw_execute(gen_fft_plan);
 
-	for (int k = 0; k <= GENERIC_SPEC_HALF_BINS; k++) {
+	// k=0 (0Hz/dial frequency) writes to GENERIC_SPEC_START_BIN; k
+	// increasing writes to increasing audio frequency/increasing bin
+	// index -- no mirroring, matches the left-edge-anchored layout
+	// documented above.
+	for (int k = 0; k < GENERIC_SPEC_N_BINS; k++) {
 		float mag = cabs(gen_fft_out[k]);
-		float smoothed = ((1.0f - GENERIC_SPEC_SMOOTHING) * fft_bins[GENERIC_SPEC_CENTER_BIN + k])
+		float smoothed = ((1.0f - GENERIC_SPEC_SMOOTHING) * fft_bins[GENERIC_SPEC_START_BIN + k])
 			+ (GENERIC_SPEC_SMOOTHING * mag);
-		fft_bins[GENERIC_SPEC_CENTER_BIN + k] = smoothed;
-		fft_bins[GENERIC_SPEC_CENTER_BIN - k] = smoothed;
+		fft_bins[GENERIC_SPEC_START_BIN + k] = smoothed;
 		int y = power2dB(cnrmf(smoothed));
-		spectrum_plot[GENERIC_SPEC_CENTER_BIN + k] = y;
-		spectrum_plot[GENERIC_SPEC_CENTER_BIN - k] = y;
+		spectrum_plot[GENERIC_SPEC_START_BIN + k] = y;
 	}
 }
 

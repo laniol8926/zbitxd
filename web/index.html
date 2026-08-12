@@ -980,14 +980,23 @@ function waterfall_update(update){
 	for (var x = 0; x < w.width; x++){
 		// interpolate between the two bins bracketing this pixel's
 		// fractional bin position, rather than sampling only the
-		// nearest one -- with a locked 3kHz span (~64 real bins) spread
-		// across a much wider canvas (hundreds of pixels), nearest-
-		// neighbor sampling left long runs of pixels repeating the same
-		// bin's color verbatim, a visibly blocky/low-resolution
-		// waterfall (confirmed live -- this was noticeably worse-
-		// looking than the spectrum trace next to it, which got smooth
-		// interpolation for free from canvas's native line drawing).
-		var bin_f = (w.width - x) * scale;
+		// nearest one -- with a locked 3kHz span spread across a much
+		// wider canvas (hundreds of pixels), nearest-neighbor sampling
+		// left long runs of pixels repeating the same bin's color
+		// verbatim, a visibly blocky/low-resolution waterfall (confirmed
+		// live -- this was noticeably worse-looking than the spectrum
+		// trace next to it, which got smooth interpolation for free
+		// from canvas's native line drawing).
+		//
+		// bin 0 (0Hz/dial frequency) maps to x=0 (left edge), increasing
+		// bin index maps to increasing x -- matches the server's
+		// left-edge-anchored layout (see GENERIC_SPEC_START_BIN's
+		// comment in sound_generic.c): USB only contains audio content
+		// above the dial frequency, so the dial belongs at the left
+		// edge, not the center. Was "(w.width - x) * scale" (reversed),
+		// caught by direct correction: "14.074 is not the center
+		// frequency... it is the left edge of the waterfall."
+		var bin_f = x * scale;
 		var bin0 = Math.floor(bin_f);
 		var bin1 = bin0 + 1;
 		var frac = bin_f - bin0;
@@ -1061,12 +1070,18 @@ function draw_wf_overlay(){
 	var ctx = ov.getContext("2d");
 	ctx.clearRect(0, 0, ov.width, ov.height);
 
+	// USB-only digital-mode backend: dial frequency is the LEFT edge of
+	// the display (0Hz pitch -> x=0), not centered -- matches the
+	// server's own left-edge-anchored spectrum layout (see
+	// GENERIC_SPEC_START_BIN's comment in sound_generic.c). CWR/LSB kept
+	// on the old centered formula for now -- that correction was
+	// specifically about USB/FT8/FT4, not those modes.
 	var rx_pitch = parseFloat(el("PITCH").value);
 	var rx_x;
 	if (mode == 'CWR' || mode == 'LSB')
 		rx_x = ov.width/2 - (rx_pitch * hz_per_pixel);
 	else
-		rx_x = ov.width/2 + (rx_pitch * hz_per_pixel);
+		rx_x = rx_pitch * hz_per_pixel;
 	rx_x = Math.round(rx_x);
 
 	ctx.strokeStyle = "cyan";
@@ -1080,7 +1095,7 @@ function draw_wf_overlay(){
 
 	if (mode === "FT8" || mode === "FT4"){
 		var tx_pitch = parseFloat(el("TX_PITCH").value);
-		var tx_x = Math.round(ov.width/2 + tx_pitch * hz_per_pixel);
+		var tx_x = Math.round(tx_pitch * hz_per_pixel);
 		ctx.strokeStyle = "red";
 		ctx.fillStyle = "red";
 		ctx.beginPath();
@@ -1123,7 +1138,9 @@ function wf_overlay_click(event){
 	var clientX = event.touches ? event.touches[0].clientX : event.clientX;
 	var x = clientX - rect.left;
 	var hz_per_pixel = ov.width / 3000;
-	var freq = Math.round((x - ov.width/2) / hz_per_pixel);
+	// Left-edge-anchored: x=0 is 0Hz/dial frequency, matching where the
+	// line is actually drawn (see draw_wf_overlay()).
+	var freq = Math.round(x / hz_per_pixel);
 	if (freq < 10) freq = 10;
 	if (freq > 4000) freq = 4000;
 	el("TX_PITCH").value = freq;

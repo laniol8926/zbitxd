@@ -2295,9 +2295,13 @@ void web_get_spectrum(char *buff){
   // (GENERIC_SPEC_FFT_SIZE=16384 at 96ksps = 5.859375 Hz/bin, ~8.5
   // bins per a real ~50Hz-wide FT8 signal instead of ~1).
   int n_bins = (int)((1.0 * spectrum_span) / 5.859375);
-  //the center frequency is at the center of the lower sideband,
-  //i.e, three-fourth way up the bins.
-  int starting_bin = (3 *MAX_BINS)/4 - n_bins/2;
+  // USB-only digital-mode backend: dial frequency is the LEFT edge of
+  // the display, not the center -- see GENERIC_SPEC_START_BIN's comment
+  // in sound_generic.c for why (that's also where these bins actually
+  // get written). No more "center of the lower sideband" -- that was the
+  // original zBitx SDR hardware's own convention, not applicable to this
+  // backend's plain, already-USB-demodulated mono audio.
+  int starting_bin = (3 * MAX_BINS) / 4;
   int ending_bin = starting_bin + n_bins;
 
   int j = 3;
