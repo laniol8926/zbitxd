@@ -1101,6 +1101,23 @@ function wf_overlay_click(event){
 	var mode = el("MODE").value;
 	if (mode !== "FT8" && mode !== "FT4")
 		return;
+
+	// Shift+click: manually snap RX back to TX, regardless of where on
+	// the waterfall you click -- the automatic reset only fires once a
+	// QSO actually gets logged (see enter_qso() server-side), so RX
+	// stays "stuck" on a station indefinitely if a QSO is abandoned or
+	// never completes, and the RX Frequency panel quietly turns into a
+	// second Band Activity panel for that one leftover frequency. This
+	// is the manual escape hatch for that.
+	if (event.shiftKey){
+		var tx_pitch = el("TX_PITCH").value;
+		el("PITCH").value = tx_pitch;
+		websocket_send("PITCH " + tx_pitch);
+		draw_wf_overlay();
+		event.preventDefault();
+		return;
+	}
+
 	var ov = el("waterfall_overlay");
 	var rect = ov.getBoundingClientRect();
 	var clientX = event.touches ? event.touches[0].clientX : event.clientX;
