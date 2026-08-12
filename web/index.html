@@ -2727,7 +2727,20 @@ spots = [];
 window.addEventListener("resize", resize_ui);
 window.addEventListener("click", on_click);
 $(".sbitx-btn").on("click", sbitx_button_clicked);
-$(".sbitxv3-btn").on("click", sbitx_button_clicked);
+// #web_reboot/#web_shutdown are excluded here -- they have their own
+// confirm()-gated handlers below (do_web_reboot/do_web_shutdown), but
+// still carry the sbitxv3-btn class for styling. Left bound to this
+// generic handler too, a click fired BOTH: this one (sbitx_button_clicked
+// just sends the bare id, e.g. "web_reboot") AND the confirm()-gated one
+// -- and the bare id alone is enough to trigger the real action
+// server-side (cmd_exec()'s generic fallback uppercases it, matches it
+// case-insensitively against the WEB_REBOOT/WEB_SHUTDOWN field labels,
+// and set_field() on a FIELD_BUTTON fires immediately regardless of
+// value). Confirmed live: the actual reboot/shutdown was firing the
+// instant the button was clicked, before the confirm() dialog was even
+// answered -- the dialog was real, just irrelevant, since the other
+// handler had already done the deed.
+$(".sbitxv3-btn").not("#web_reboot, #web_shutdown").on("click", sbitx_button_clicked);
 //$(".sbitxv3-control").on("click", sbitxv3_control_clicked);
 $(".sbitx-selection").on("change", sbitx_selection_changed);
 $(".sbitx-slider").on("input", sbitx_slider_changed);
