@@ -250,14 +250,23 @@ static void rigctld_stop(void)
 // /dev/serial/by-id/* gives stable, device-identity-based names (survive
 // reboots/replugging in a different order); /dev/ttyACM0-style names are
 // assigned by enumeration order and can point at a different physical
-// device from one boot to the next. Lists by-id entries if any exist,
-// otherwise falls back to raw /dev/ttyACM*/ttyUSB* so there's still
-// something to pick from.
+// device from one boot to the next. Lists by-id entries (preferred),
+// plus any /dev/ttyACM*/ttyUSB* not already represented by one -- not an
+// either/or fallback (a device that never gets a by-id entry, e.g. some
+// generic/no-serial-number USB-serial chips, would otherwise be
+// completely invisible here the moment ANY other attached device does
+// get one, since the old code treated "by-id has ANY entries" as "by-id
+// covers everything").
 void rig_generic_list_serial_devices(char *out, size_t out_size)
 {
 	DIR *d;
 	struct dirent *e;
 	size_t used = 0;
+	// basenames (e.g. "ttyACM0") already represented by a by-id symlink,
+	// resolved via readlink() -- checked against the raw /dev scan below
+	// so it can skip them instead of assuming by-id is all-or-nothing
+	char covered[16][64];
+	int n_covered = 0;
 
 	out[0] = 0;
 
@@ -268,21 +277,44 @@ void rig_generic_list_serial_devices(char *out, size_t out_size)
 				continue;
 			char entry[320];
 			int n = snprintf(entry, sizeof(entry), "/dev/serial/by-id/%s\n", e->d_name);
-			if (n <= 0 || used + (size_t)n >= out_size)
-				continue;
-			memcpy(out + used, entry, (size_t)n);
-			used += (size_t)n;
+			if (n > 0 && used + (size_t)n < out_size) {
+				memcpy(out + used, entry, (size_t)n);
+				used += (size_t)n;
+			}
+
+			if (n_covered < 16) {
+				char link_path[320], resolved[64];
+				snprintf(link_path, sizeof(link_path), "/dev/serial/by-id/%s", e->d_name);
+				ssize_t rl = readlink(link_path, resolved, sizeof(resolved) - 1);
+				if (rl > 0) {
+					resolved[rl] = 0;
+					// symlink target is normally relative (e.g.
+					// "../../ttyACM0") -- basename it so it compares
+					// directly against the bare names found below
+					char *base = strrchr(resolved, '/');
+					base = base ? base + 1 : resolved;
+					snprintf(covered[n_covered++], sizeof(covered[0]), "%s", base);
+				}
+			}
 		}
 		closedir(d);
 	}
 
-	if (used == 0) {
-		d = opendir("/dev");
-		if (!d)
-			return;
+	d = opendir("/dev");
+	if (d) {
 		while ((e = readdir(d))) {
 			if (strncmp(e->d_name, "ttyACM", 6) && strncmp(e->d_name, "ttyUSB", 6))
 				continue;
+
+			int already_listed = 0;
+			for (int i = 0; i < n_covered; i++)
+				if (!strcmp(covered[i], e->d_name)) {
+					already_listed = 1;
+					break;
+				}
+			if (already_listed)
+				continue;
+
 			char entry[280];
 			int n = snprintf(entry, sizeof(entry), "/dev/%s\n", e->d_name);
 			if (n <= 0 || used + (size_t)n >= out_size)
