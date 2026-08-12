@@ -1330,6 +1330,19 @@ void ft8_call(int sel_time) {
 	on fields containing information that we already have).
 	The remaining legitimate usecase is only when the user types the message in the "TEXT" field.
 */
+
+// Pushes the RX audio-pitch field so the web UI's waterfall overlay
+// moves its RX (cyan) line to match -- the client does this itself
+// when the user clicks a decoded line directly (see FT8_message_
+// chosen() in index.html), but there's no click at all when the
+// auto-responder answers a call to us on its own, so that path needs
+// the server to push it instead.
+static void ft8_set_rx_pitch_field(int pitch){
+	char pitch_str[8];
+	snprintf(pitch_str, sizeof(pitch_str), "%d", pitch);
+	field_set("PITCH", pitch_str);
+}
+
 void ft8_process(char *message, ftx_operation operation){
 	char buff[100], reply_message[100], *p;
 	int auto_respond = 0;
@@ -1356,12 +1369,19 @@ void ft8_process(char *message, ftx_operation operation){
 
 	//we can start call in reply to a cq, cq dx or anyone else ending the call
 	if (operation == FTX_START_QSO){
+		ft8_set_rx_pitch_field(rx_pitch);
 		ft8_on_start_qso(message);
 		return;
 	}
 
 	// see if you are on auto responder, the logger is empty and we are the called party
 	if (auto_respond && !strlen(call) && !strcmp(m1, mycall)){
+		// Someone answered our own CQ -- move the RX line (client's
+		// waterfall overlay) to their frequency automatically, same as
+		// clicking their decode line would, since no click ever happens
+		// on this path (the auto-responder detected and is replying to
+		// them without any user interaction at all).
+		ft8_set_rx_pitch_field(rx_pitch);
 		ft8_on_start_qso(message);
 		return;
 	}

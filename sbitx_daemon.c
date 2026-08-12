@@ -1256,6 +1256,13 @@ void enter_qso(){
 	switch (mode_id(field_str("MODE"))) {
 	case MODE_FT4:
 	case MODE_FT8:
+		// A completed QSO leaves RX parked on whoever we were just
+		// working -- snap it back to our own TX frequency so the RX
+		// Frequency panel goes back to showing traffic near where
+		// we're actually calling, instead of continuing to collect
+		// unrelated decodes that just happen to share the old
+		// audio pitch of the station we already finished with.
+		field_set("PITCH", field_str("TX_PITCH"));
 		break;
 	default:
 		call_wipe();
