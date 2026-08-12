@@ -68,6 +68,20 @@ static volatile int running = 0;
 static volatile int capture_open = 0;
 static volatile int playback_open = 0;
 
+// See sound_generic.h -- software RX gain, since most rigs on this
+// backend have no CAT-controllable gain at all. A plain float write/read
+// from a single capture thread and the main thread's field-change
+// handler is safe without a lock here (same reasoning as rx_list->mode
+// itself, read every capture loop iteration with no synchronization
+// elsewhere in this file); a torn read at worst applies briefly-stale
+// gain, never garbage.
+static volatile float generic_rx_gain = 1.0f;
+
+void sound_generic_set_rx_gain(float gain)
+{
+	generic_rx_gain = gain;
+}
+
 // Waterfall/spectrum for the generic-rig backend. The SDR's own spectrum
 // pipeline (sbitx.c's rx_linear()/sound_process()) does FFT-based SSB
 // extraction from a real IF-sampled ADC signal, with bin indexing
@@ -247,6 +261,17 @@ static void *capture_thread_fn(void *arg)
 					break;
 				}
 				continue;
+			}
+			if (generic_rx_gain != 1.0f) {
+				float gain = generic_rx_gain;
+				for (int i = 0; i < (int)n; i++) {
+					float scaled = buf[i] * gain;
+					if (scaled > (float)INT32_MAX)
+						scaled = (float)INT32_MAX;
+					else if (scaled < (float)INT32_MIN)
+						scaled = (float)INT32_MIN;
+					buf[i] = (int32_t)scaled;
+				}
 			}
 			modem_rx(rx_list->mode, buf, (int)n);
 			gen_spectrum_update(buf, (int)n);

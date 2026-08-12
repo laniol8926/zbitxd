@@ -1644,6 +1644,19 @@ void sdr_request(char* request, char* response)
 			// ever affects RX, and holding off a CAT round-trip during
 			// an active transmission avoids adding serial-port
 			// contention right when FT8's slot timing is precise.
+			//
+			// Also drives a software gain stage on the captured audio
+			// (sound_generic.c) unconditionally, not just for the QMX --
+			// most rigs on this backend (confirmed for the RS-978/mcHF
+			// by reading UHSDR's actual firmware source) have no CAT
+			// path to gain at all, so software gain on the captured
+			// samples is the only thing that actually does anything for
+			// them. This mirrors what WSJT-X itself does: its own "Rx"
+			// slider is a software gain on the audio it captures, not a
+			// CAT command to the radio. Sent regardless of in_tx since,
+			// unlike the CAT round-trip above, it's just a local
+			// variable write with no serial-port contention to avoid.
+			sound_generic_set_rx_gain(rx_gain / 100.0f);
 			if (!in_tx)
 				rig_generic_set_rf_gain(rx_gain);
 		} else if (!in_tx)

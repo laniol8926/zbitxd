@@ -22,3 +22,15 @@ void sound_generic_restart(void);
 // user to guess whether they need to click Connect.
 int sound_generic_capture_connected(void);
 int sound_generic_playback_connected(void);
+
+// Software RX gain stage, applied to captured samples before they reach
+// modem_rx()/the waterfall -- most rigs on this backend have no CAT path
+// to a hardware RF/AF gain at all (confirmed for the RS-978/mcHF by
+// reading UHSDR's actual firmware source: its FT-817 CAT emulation has
+// no gain opcode and no EEPROM-mapped gain parameter, so gain there is
+// physical-knob-only). This mirrors what WSJT-X itself actually does in
+// this situation -- its own "Rx" slider is a software gain on the
+// captured audio, not a CAT command to the radio. gain is a plain
+// multiplier (1.0 = unchanged, 0.0 = muted); callers scale their own
+// UI range down before calling this.
+void sound_generic_set_rx_gain(float gain);
