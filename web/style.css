@@ -447,7 +447,7 @@ select, select option, input {
 	padding-bottom: 10px;
 	position: fixed;
 	left: 200px;
-	top: 0px;
+	top: 30px;
 	border: solid 1px white;
 	background-color: black;
 	opacity: 1;
@@ -469,6 +469,7 @@ select, select option, input {
 	display: inline-block;
 	width: 150px;
 	text-align: right;
+	white-space: nowrap;
 }
 
 .settings_input {
