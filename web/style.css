@@ -455,6 +455,20 @@ select, select option, input {
 	max-width: 600px;
 }
 
+/* #settings_panel/#connect_panel's left:200px assumes the desktop
+   #sidebar's width -- but show_main() hides #sidebar unconditionally
+   now (both branches), so that space is never actually reserved. On a
+   narrow phone-portrait viewport this pushes the panel's right edge
+   well past the visible screen, overlapping #restore-btn (fixed
+   top:0/right:0) instead of sitting inside the window. */
+@media (max-width: 480px) {
+	#settings_panel, #connect_panel {
+		left: 5px;
+		right: 5px;
+		max-width: none;
+	}
+}
+
 .connect-panel-intro {
 	margin: 8px;
 	color: white;
