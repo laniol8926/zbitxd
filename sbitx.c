@@ -1611,7 +1611,18 @@ void sdr_request(char* request, char* response)
 		bridge_compensation = atoi(value);
 	} else if (!strcmp(cmd, "r1:gain")) {
 		rx_gain = atoi(value);
-		if (!in_tx)
+		if (generic_rig_mode) {
+			// on real hardware this is RX RF gain (rigctl "L RF"), not
+			// the zBitx SDR's IF/ALSA-capture gain below -- there's no
+			// separate hardware IF stage to adjust on a rig that does
+			// its own downconversion. Skipping in_tx here deliberately
+			// (unlike the zBitx branch): RF gain only ever affects RX,
+			// and holding off a CAT round-trip during an active
+			// transmission avoids adding serial-port contention right
+			// when FT8's slot timing is precise.
+			if (!in_tx)
+				rig_generic_set_level("RF", rx_gain / 100.0f);
+		} else if (!in_tx)
 			sound_mixer(audio_card, "Capture", rx_gain);
 	} else if (!strcmp(cmd, "r1:volume")) {
 		rx_vol = atoi(value);

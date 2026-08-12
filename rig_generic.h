@@ -13,6 +13,11 @@ long rig_generic_get_freq(void);
 
 void rig_generic_set_ptt(int on);
 
+// hamlib rigctl "L" (set_level). value is normalized 0.0-1.0 per
+// hamlib's convention for float-typed levels like "RF"/"AF"/"RFPOWER"
+// -- callers scale their own UI range down before calling this.
+void rig_generic_set_level(const char *level_name, float value);
+
 // Sends a CAT mode change for the app's own mode name ("USB", "FT8", or
 // "FT4" -- see sbitx.c's sdr_request() "r1:mode" case, the only caller).
 // Not a single fixed string: which rigctld mode string actually means

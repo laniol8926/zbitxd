@@ -523,6 +523,20 @@ void rig_generic_set_ptt(int on)
 	rig_send_command(on ? "T 1" : "T 0");
 }
 
+// hamlib's rigctl "L" (set_level) command. level_name is a hamlib level
+// token (e.g. "RF", "AF", "RFPOWER"); value is normalized 0.0-1.0 per
+// hamlib's own convention for these float-typed levels (a fraction of
+// the rig's full range), not a raw dB or 0-100 value -- callers scale
+// their own 0-100 UI range down before calling this. Reuses
+// rig_send_command() since, like the other SET-style commands here,
+// rigctld replies "RPRT 0" on success.
+void rig_generic_set_level(const char *level_name, float value)
+{
+	char cmd[64];
+	snprintf(cmd, sizeof(cmd), "L %s %.3f", level_name, value);
+	rig_send_command(cmd);
+}
+
 int rig_generic_is_connected(void)
 {
 	return rig_sock >= 0;
