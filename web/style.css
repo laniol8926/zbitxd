@@ -118,6 +118,23 @@ select, select option, input {
 	display: none;
 }
 
+/* RIT/SPLIT hidden, not removed -- user's actual workflow achieves the
+   same "transmit here, listen there" effect natively within FT8
+   (holding TX frequency/pitch fixed while clicking a station sets RX),
+   so these traditional VFO-based rig controls are genuinely unused.
+   Kept in the DOM rather than deleted: draw_dial() (the main frequency
+   display, called on every FREQ update) reads el("SPLIT").value/
+   el("RIT").value directly with no null-check, and
+   set_operating_freq() (sbitx_daemon.c) branches on both server-side
+   too -- both already default to OFF and, with no UI to ever toggle
+   them ON, simply stay OFF permanently, which is functionally
+   identical to the feature not existing without touching either of
+   those. :has() scopes this to just these two controls' own
+   label+dropdown pairs, not every .sbitxv3-control on the page. */
+.sbitxv3-control:has(#SPLIT), .sbitxv3-control:has(#RIT) {
+	display: none;
+}
+
 #restore-btn {
 	float: right;
 	display: inline-block;
