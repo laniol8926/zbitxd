@@ -85,6 +85,28 @@ select, select option, input {
 	display: none;
 }
 
+/* Only F1 (CQ) is kept -- calling CQ is the one thing that has no
+   automatic alternative (QSO continuation/replies are already fully
+   automatic via ft8_process()/ft8_poll(), independent of the macro
+   system). F2-F12/Edit/Spot/Kbd were removed outright since their
+   own update code (logger_bind_key()) already null-checks its
+   target element. The MACRO file picker itself is hidden rather than
+   removed -- logger_set_macro()/logger_list_macros()/
+   logger_macro_changed_from_sdr() all reference el("MACRO") without a
+   null check, so removing the element would throw on every mode
+   switch (FT8/CW1 macro file auto-load) instead of just being
+   invisible. With only F1 in use, switching macro *files* from the
+   UI isn't needed anyway -- the persisted #current_macro (already
+   "FT8") keeps loading correctly regardless of this dropdown's
+   visibility. Hides the whole label+dropdown container (its own
+   unique, only-used-once class -- a pre-existing typo of
+   sbitxv3-control, harmless to key off of here) rather than just the
+   <select>, so the "MACRO" text label doesn't dangle on its own with
+   nothing next to it. */
+.Sbitxv3-control {
+	display: none;
+}
+
 #restore-btn {
 	float: right;
 	display: inline-block;
