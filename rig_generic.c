@@ -336,8 +336,21 @@ void rig_generic_list_audio_devices(char *out, size_t out_size)
 		memcpy(card, name_start, len);
 		card[len] = 0;
 
+		// a single physical card can expose more than one PCM device
+		// (e.g. a multi-input/output USB interface) -- aplay -l repeats
+		// the "card N: id [...]" header once per device, with the real
+		// index after ", device ". Previously hardcoded to ",0"
+		// regardless, which duplicated the first device's entry and
+		// made any device beyond 0 on such a card unreachable here --
+		// not yet seen on real hardware (every rig tested so far
+		// exposes exactly one device), but a real latent bug.
+		int device_index = 0;
+		char *dev_marker = strstr(colon, ", device ");
+		if (dev_marker)
+			device_index = atoi(dev_marker + 9);
+
 		char entry[192];
-		int n = snprintf(entry, sizeof(entry), "plughw:%s,0\n", card);
+		int n = snprintf(entry, sizeof(entry), "plughw:%s,%d\n", card, device_index);
 		if (n <= 0 || used + (size_t)n >= out_size)
 			continue;
 		memcpy(out + used, entry, (size_t)n);
