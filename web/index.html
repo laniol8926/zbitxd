@@ -335,6 +335,11 @@
 				<ol size="10" class="sbitx-list-box">
 				</ol>
 			</div>
+			<div id="wsjtx-cq" class="sbitx-list-container" >
+				<div class="sbitx-list-title">CQ Panel</div>
+				<ol size="10" class="sbitx-list-box">
+				</ol>
+			</div>
 			<div id="wsjtx-rx" class="sbitx-list-container" >
 				<div class="sbitx-list-title">RX Frequency</div>
 				<ol size="10" class="sbitx-list-box">
@@ -1539,6 +1544,25 @@ function deco_to_span(text) {
     }
     return "<span class='" + jclass + "'>" + deco_strip(text) + "</span>";
 }
+
+// Same tilde/token parsing FT8_stylize_message_item() uses to decide
+// the 'wsjtx-cq-in-message' style, factored out so the CQ Panel filter
+// can't drift from what actually gets styled as a CQ call.
+function FT8_message_is_cq(text){
+    var token_list = text.match(/\S+/g);
+    if (!token_list || token_list.length < 6 || token_list.length > 9)
+	return false;
+    var tilde_pos = -1;
+    for (var i = 3; i < token_list.length; ++i)
+	if (token_list[i] == '~') {
+	    tilde_pos = i;
+	    break;
+	}
+    if (tilde_pos < 0)
+	return false;
+    return deco_strip(token_list[tilde_pos + 1]) == "CQ";
+}
+
 function FT8_stylize_message_item(item, text, style) {
     //tokenize the message
     var token_list = text.match(/\S+/g);
@@ -1722,6 +1746,7 @@ function FT8_message_chosen(event){
 
 function FT8_lists_clear() {
 	document.querySelector('#wsjtx-activity ol').innerHTML ="";
+	document.querySelector('#wsjtx-cq ol').innerHTML ="";
 	document.querySelector('#wsjtx-rx ol').innerHTML ="";
 }
 
@@ -1729,6 +1754,8 @@ function FT8_new_message(text, style){
 	//log("ft8:" + text + ":" + style);
 	var words = text.split(' ');
 	FT8_list_append("wsjtx-activity", text, style) ;
+	if (FT8_message_is_cq(text))
+		FT8_list_append("wsjtx-cq", text, style);
 	var mycallsign = $("#MYCALLSIGN").val().toUpperCase();
 	if (words[4] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0)
 		FT8_list_append("wsjtx-rx", text, style);
