@@ -107,6 +107,17 @@ select, select option, input {
 	display: none;
 }
 
+/* RADIO (opens connect_panel) hidden per user request -- kept, not
+   removed, since connect_panel is the only way to fix a renumbered
+   serial port or changed audio device. Safe to hide since
+   open_connect() already fires automatically right after every
+   login (see the 'login' case in response_handler()) -- the only
+   thing lost is a manual way back into it later in the same session
+   without logging out/in again. */
+#connect-open {
+	display: none;
+}
+
 #restore-btn {
 	float: right;
 	display: inline-block;
