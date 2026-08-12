@@ -101,15 +101,47 @@ void sound_generic_set_rx_gain(float gain)
 // written with the same value; this only looks "mirrored" compared to the
 // SDR's own asymmetric panorama because that's genuinely all the
 // information a mono audio stream carries.
+// A real FT8/FT4 signal is only ~50Hz wide. The original MAX_BINS(2048)-
+// point FFT at 96ksps gives 46.875 Hz/bin -- barely one bin per signal even
+// before considering that the underlying analysis WINDOW is only
+// 2048/96000 = ~21ms long, which is fundamentally too short to resolve
+// anything anywhere near 50Hz-narrow in the first place (frequency
+// resolution is bounded by window length, not just bin count/spacing).
+// Confirmed live: user reported "lucky to see 3 or 4" distinct signal
+// traces where ~50-60 should fit across the 3kHz passband.
+//
+// Deliberately a SEPARATE FFT size from MAX_BINS (2048, still used by
+// sbitx.c's now-mostly-vestigial old-SDR FFT machinery, and by the
+// fft_bins[]/spectrum_plot[] OUTPUT arrays this writes into) rather than
+// just bumping MAX_BINS itself -- that would also 8x every one of those
+// unrelated legacy buffers/FFTW_MEASURE plans for no benefit. Only the
+// INPUT analysis needs to get bigger; the OUTPUT still only ever needs to
+// hold as many bins as the locked 3kHz span actually displays (see
+// GENERIC_SPEC_HALF_BINS below), which comfortably fits within the
+// existing, unchanged output array size.
+//
+// 96000/16384 = 5.859375 Hz/bin (~8.5 bins per 50Hz signal -- plenty of
+// separation), and a ~170ms analysis window, a natural fit given FT8's
+// own ~160ms symbol length.
+#define GENERIC_SPEC_FFT_SIZE 16384
+
 static fftw_complex *gen_fft_in = NULL, *gen_fft_out = NULL;
 static fftw_plan gen_fft_plan;
-static int32_t gen_spec_buf[MAX_BINS];
+static int32_t gen_spec_buf[GENERIC_SPEC_FFT_SIZE];
+static float gen_spec_window[GENERIC_SPEC_FFT_SIZE];
 static int gen_spectrum_ready = 0;
 
-// how far from center (bin 1536) to compute/write -- capped by having only
-// MAX_BINS/4 (512) bins of headroom above 1536 before running off the end
-// of spectrum_plot[]/fft_bins[] (both sized MAX_BINS=2048)
-#define GENERIC_SPEC_HALF_BINS (MAX_BINS / 4 - 1)
+// How far from center to compute/write into the OUTPUT arrays
+// (fft_bins[]/spectrum_plot[], still sized MAX_BINS=2048, unchanged) --
+// tightened to just what the locked 3kHz span actually needs at the new
+// resolution (1500 Hz half-span / 5.859375 Hz-per-bin = 256 exactly),
+// instead of the old formula's MAX_BINS/4-derived headroom, which was
+// already computing/smoothing ~16x more bins than the ~32 ever actually
+// read by web_get_spectrum(). Assumes spectrum_span stays locked at
+// 3000 (see the SPAN removal/lock elsewhere in this project) -- if that
+// lock is ever removed, this needs to become a runtime calculation
+// against the real spectrum_span instead of a compile-time constant.
+#define GENERIC_SPEC_HALF_BINS 256
 #define GENERIC_SPEC_CENTER_BIN ((3 * MAX_BINS) / 4)
 #define GENERIC_SPEC_SMOOTHING 0.3f
 
@@ -117,37 +149,40 @@ static void gen_spectrum_init(void)
 {
 	if (gen_spectrum_ready)
 		return;
-	gen_fft_in = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * MAX_BINS);
-	gen_fft_out = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * MAX_BINS);
-	memset(gen_fft_in, 0, sizeof(fftw_complex) * MAX_BINS);
-	memset(gen_fft_out, 0, sizeof(fftw_complex) * MAX_BINS);
+	gen_fft_in = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * GENERIC_SPEC_FFT_SIZE);
+	gen_fft_out = (fftw_complex *)fftw_malloc(sizeof(fftw_complex) * GENERIC_SPEC_FFT_SIZE);
+	memset(gen_fft_in, 0, sizeof(fftw_complex) * GENERIC_SPEC_FFT_SIZE);
+	memset(gen_fft_out, 0, sizeof(fftw_complex) * GENERIC_SPEC_FFT_SIZE);
 	memset(gen_spec_buf, 0, sizeof(gen_spec_buf));
+	make_hann_window(gen_spec_window, GENERIC_SPEC_FFT_SIZE);
 	// FFTW_ESTIMATE, not the wisdom-measured plan sbitx.c's own FFT uses --
 	// this only needs to be fast to create (built fresh on every daemon
-	// start), not the fastest possible transform; a 2048-point FFT is
-	// cheap enough either way on this hardware
-	gen_fft_plan = fftw_plan_dft_1d(MAX_BINS, gen_fft_in, gen_fft_out, FFTW_FORWARD, FFTW_ESTIMATE);
+	// start), not the fastest possible transform.
+	gen_fft_plan = fftw_plan_dft_1d(GENERIC_SPEC_FFT_SIZE, gen_fft_in, gen_fft_out, FFTW_FORWARD, FFTW_ESTIMATE);
 	gen_spectrum_ready = 1;
 }
 
-// called once per capture read (n <= MAX_BINS, GENERIC_BUF_FRAMES=960 well
-// under that) -- slides the new real samples into a MAX_BINS-long window,
-// windows+transforms it, and writes the result into spectrum_plot[]
+// called once per capture read (n <= GENERIC_SPEC_FFT_SIZE,
+// GENERIC_BUF_FRAMES=1024 well under that) -- slides the new real samples
+// into a GENERIC_SPEC_FFT_SIZE-long window (takes 16 calls, ~170ms, to
+// fully cycle -- a deliberately long analysis window, see
+// GENERIC_SPEC_FFT_SIZE's comment), windows+transforms it, and writes the
+// result into spectrum_plot[]
 static void gen_spectrum_update(int32_t *samples, int n)
 {
 	if (n <= 0)
 		return;
-	if (n > MAX_BINS)
-		n = MAX_BINS;
+	if (n > GENERIC_SPEC_FFT_SIZE)
+		n = GENERIC_SPEC_FFT_SIZE;
 
-	memmove(gen_spec_buf, gen_spec_buf + n, (MAX_BINS - n) * sizeof(int32_t));
-	memcpy(gen_spec_buf + (MAX_BINS - n), samples, n * sizeof(int32_t));
+	memmove(gen_spec_buf, gen_spec_buf + n, (GENERIC_SPEC_FFT_SIZE - n) * sizeof(int32_t));
+	memcpy(gen_spec_buf + (GENERIC_SPEC_FFT_SIZE - n), samples, n * sizeof(int32_t));
 
 	// same raw-sample-to-float divisor sbitx.c's own rx_linear() uses
 	// (input_rx[j] / 20000000.0) for its FFT input, kept here for a
 	// consistent dB scale/threshold with the SDR's own display
-	for (int i = 0; i < MAX_BINS; i++) {
-		double v = spectrum_window[i] * (gen_spec_buf[i] / 20000000.0);
+	for (int i = 0; i < GENERIC_SPEC_FFT_SIZE; i++) {
+		double v = gen_spec_window[i] * (gen_spec_buf[i] / 20000000.0);
 		__real__ gen_fft_in[i] = v;
 		__imag__ gen_fft_in[i] = 0;
 	}

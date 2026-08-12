@@ -2286,7 +2286,15 @@ int  web_get_console(char *buff, int max){
 
 void web_get_spectrum(char *buff){
 
-  int n_bins = (int)((1.0 * spectrum_span) / 46.875);
+  // 46.875 Hz/bin was the old MAX_BINS(2048)-at-96ksps SDR spectrum
+  // resolution. That path (rx_linear(), the only thing that ever wrote
+  // spectrum_plot[] for zBitx hardware) was removed entirely this
+  // session -- see the "removed all zBitx-hardware GPIO/I2C code"
+  // history -- so this function's only real remaining source now is
+  // sound_generic.c's own, deliberately much finer-resolution FFT
+  // (GENERIC_SPEC_FFT_SIZE=16384 at 96ksps = 5.859375 Hz/bin, ~8.5
+  // bins per a real ~50Hz-wide FT8 signal instead of ~1).
+  int n_bins = (int)((1.0 * spectrum_span) / 5.859375);
   //the center frequency is at the center of the lower sideband,
   //i.e, three-fourth way up the bins.
   int starting_bin = (3 *MAX_BINS)/4 - n_bins/2;
