@@ -513,6 +513,14 @@ struct field main_controls[] = {
 		"", 1,40,1,0},
 	{"#rig_connect", NULL, 1000, -1000, 400, 149, "RIGCONNECT", 40, "", FIELD_BUTTON,
 		"", 0,0,0,0},
+	// live connection status, computed fresh on every send (see
+	// remote_update_field()'s RIGSTATUS/AUDIOSTATUS special cases) --
+	// lets the connect_panel show "already connected" instead of
+	// leaving the user to guess whether they need to click Connect
+	{"#rig_status", NULL, 1000, -1000, 400, 149, "RIGSTATUS", 70, "", FIELD_TEXT,
+		"", 0,20,1,0},
+	{"#audio_status", NULL, 1000, -1000, 400, 149, "AUDIOSTATUS", 70, "", FIELD_TEXT,
+		"", 0,20,1,0},
 	// forces an immediate settings save (see save_user_settings()'s 30s
 	// throttle) -- sent by the settings panel's "Update" button so an
 	// explicit save doesn't silently get lost on a quick page reload
@@ -851,8 +859,31 @@ int remote_update_field(int i, char *text){
 		//send time
 		time_t now = time(NULL);
 		struct tm *tmp = gmtime(&now);
-		sprintf(text, "STATUS %04d/%02d/%02d %02d:%02d:%02dZ",  
-			tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour, tmp->tm_min, tmp->tm_sec); 
+		sprintf(text, "STATUS %04d/%02d/%02d %02d:%02d:%02dZ",
+			tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
+		return 1;
+	}
+
+	// generic-rig-only: computed live rather than tracked via set_field()
+	// so the connect_panel's status text is never stale by even one poll
+	// cycle, and so this never runs do_control_action() (meant for actual
+	// user-editable fields) on every single client poll
+	if (!strcmp(f->label, "RIGSTATUS")){
+		sprintf(text, "RIGSTATUS %s", (generic_rig_mode && rig_generic_is_connected())
+			? "Connected" : "Not connected");
+		return 1;
+	}
+	if (!strcmp(f->label, "AUDIOSTATUS")){
+		int cap = generic_rig_mode && sound_generic_capture_connected();
+		int play = generic_rig_mode && sound_generic_playback_connected();
+		const char *s;
+		if (cap && play)
+			s = "Connected";
+		else if (!cap && !play)
+			s = "Not connected";
+		else
+			s = cap ? "Capture only" : "Playback only";
+		sprintf(text, "AUDIOSTATUS %s", s);
 		return 1;
 	}
 

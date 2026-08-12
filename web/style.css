@@ -475,6 +475,22 @@ select, select option, input {
 	text-transform:uppercase;
 }
 
+/* RIGSTATUS/AUDIOSTATUS in connect_panel -- readonly, so styled as plain
+   status text next to the Connect button rather than an editable box */
+.connect-status {
+	border: none;
+	background: transparent;
+	color: #ff9900;
+	font-weight: bold;
+	margin-left: 8px;
+	width: 110px;
+	pointer-events: none;
+}
+
+.connect-status-ok {
+	color: #33cc33;
+}
+
 /* coloring for the values */
 .greyed {
 	color: #888;

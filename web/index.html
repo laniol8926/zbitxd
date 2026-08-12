@@ -253,6 +253,7 @@
 		<div class="settings-element">
 			<span class="settings-label"></span>
 			<button id="rig_connect" class="logger-button">Connect to Rig</button>
+			<input id="RIGSTATUS" class="connect-status" type="text" readonly tabindex="-1" />
 		</div>
 
 		<div class="settings-element">
@@ -270,6 +271,7 @@
 		<div class="settings-element">
 			<span class="settings-label"></span>
 			<button id="audio_connect" class="logger-button">Connect Audio</button>
+			<input id="AUDIOSTATUS" class="connect-status" type="text" readonly tabindex="-1" />
 		</div>
 	</div><!-- end of connect_panel -->
 
@@ -2563,6 +2565,8 @@ function response_handler(response){
 						open_settings("settings_panel");
 					else if (cmd == 'SPLIT')
 						draw_dial();
+					else if (cmd == "RIGSTATUS" || cmd == "AUDIOSTATUS")
+						e.classList.toggle("connect-status-ok", args == "Connected");
 					if (cmd == "REC"){
 						if (args == "ON")
 							record_started  = Math.round(Date.now()/1000);

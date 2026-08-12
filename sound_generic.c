@@ -65,6 +65,8 @@
 
 static pthread_t capture_thread, playback_thread;
 static volatile int running = 0;
+static volatile int capture_open = 0;
+static volatile int playback_open = 0;
 
 // Waterfall/spectrum for the generic-rig backend. The SDR's own spectrum
 // pipeline (sbitx.c's rx_linear()/sound_process()) does FFT-based SSB
@@ -224,9 +226,11 @@ static void *capture_thread_fn(void *arg)
 	while (running) {
 		snd_pcm_t *pcm = open_pcm(generic_capture_device, SND_PCM_STREAM_CAPTURE, GENERIC_SAMPLE_RATE);
 		if (!pcm) {
+			capture_open = 0;
 			sleep(2);
 			continue;
 		}
+		capture_open = 1;
 
 		while (running) {
 			snd_pcm_sframes_t n = snd_pcm_readi(pcm, buf, GENERIC_BUF_FRAMES);
@@ -248,9 +252,11 @@ static void *capture_thread_fn(void *arg)
 			gen_spectrum_update(buf, (int)n);
 		}
 
+		capture_open = 0;
 		snd_pcm_close(pcm);
 	}
 
+	capture_open = 0;
 	return NULL;
 }
 
@@ -269,9 +275,11 @@ static void *playback_thread_fn(void *arg)
 	while (running) {
 		snd_pcm_t *pcm = open_pcm(generic_playback_device, SND_PCM_STREAM_PLAYBACK, GENERIC_PLAYBACK_RATE);
 		if (!pcm) {
+			playback_open = 0;
 			sleep(2);
 			continue;
 		}
+		playback_open = 1;
 
 		int fatal = 0;
 		while (running && !fatal) {
@@ -325,9 +333,11 @@ static void *playback_thread_fn(void *arg)
 			}
 		}
 
+		playback_open = 0;
 		snd_pcm_close(pcm);
 	}
 
+	playback_open = 0;
 	return NULL;
 }
 
@@ -344,6 +354,16 @@ void sound_generic_stop(void)
 	running = 0;
 	pthread_join(capture_thread, NULL);
 	pthread_join(playback_thread, NULL);
+}
+
+int sound_generic_capture_connected(void)
+{
+	return capture_open;
+}
+
+int sound_generic_playback_connected(void)
+{
+	return playback_open;
 }
 
 void sound_generic_restart(void)

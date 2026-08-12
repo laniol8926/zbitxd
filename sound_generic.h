@@ -14,3 +14,11 @@ void sound_generic_stop(void);
 // USB sound card vs. its own CAT adapter, so this is deliberately not
 // tied to rig_generic_connect()).
 void sound_generic_restart(void);
+
+// True once the respective ALSA device has been opened successfully and
+// hasn't since hit an unrecoverable error (see capture_thread_fn()/
+// playback_thread_fn()'s retry loop in sound_generic.c) -- used by the web
+// UI's connect_panel to show "already connected" instead of leaving the
+// user to guess whether they need to click Connect.
+int sound_generic_capture_connected(void);
+int sound_generic_playback_connected(void);

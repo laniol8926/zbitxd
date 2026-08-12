@@ -39,3 +39,8 @@ void rig_generic_list_serial_devices(char *out, size_t out_size);
 // Lists currently-present ALSA cards, formatted as ready-to-use
 // "plughw:<card>,0" strings, for the Capture/Playback Device pickers.
 void rig_generic_list_audio_devices(char *out, size_t out_size);
+
+// True once rigctld has accepted a connection and no send/recv has failed
+// since -- used by the web UI's connect_panel to show "already connected"
+// instead of leaving the user to guess whether they need to click Connect.
+int rig_generic_is_connected(void);

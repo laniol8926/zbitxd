@@ -412,3 +412,8 @@ void rig_generic_set_ptt(int on)
 {
 	rig_send_command(on ? "T 1" : "T 0");
 }
+
+int rig_generic_is_connected(void)
+{
+	return rig_sock >= 0;
+}
