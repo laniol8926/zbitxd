@@ -254,8 +254,19 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
       // Serve REST response
       mg_http_reply(c, 200, "", "{\"result\": %d}\n", 123);
     } else {
-      // Serve static files
-      struct mg_http_serve_opts opts = {.root_dir = s_web_root};
+      // Serve static files. No-cache headers: without these, browsers
+      // (mobile ones especially) can hang onto an old index.html/
+      // style.css across page reloads with no obvious way for the user
+      // to tell they're not looking at what's actually deployed -- this
+      // caused real, repeated confusion this session (fixes that were
+      // genuinely live on the server looked like they weren't there).
+      // A single-page field-radio-control app has no benefit from
+      // browser caching that outweighs always serving what's actually
+      // installed.
+      struct mg_http_serve_opts opts = {
+          .root_dir = s_web_root,
+          .extra_headers = "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+      };
       mg_http_serve_dir(c, ev_data, &opts);
     }
   } else if (ev == MG_EV_WS_MSG) {
