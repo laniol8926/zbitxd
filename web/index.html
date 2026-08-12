@@ -2252,6 +2252,25 @@ function populate_datalist(list_id, text){
 
 function populate_rig_list(text){
 	populate_datalist("rig_model_options", text);
+
+	// a bare model number (e.g. saved before this picker existed, or
+	// set directly over the websocket protocol) displays confusingly
+	// next to the picker's own full "id Mfg Model" entries -- fill in
+	// the friendly name once the real list arrives. Cosmetic only:
+	// connect_rig() reads whatever's in the field at Connect-click
+	// time, and the server already extracts just the leading digits
+	// either way, so this can't change what actually gets connected to.
+	var field = el("RIGMODEL");
+	var current = field.value;
+	if (current && !/\s/.test(current)){
+		var lines = text.split("\n");
+		for (var i = 0; i < lines.length; i++){
+			if (lines[i].split(" ")[0] == current){
+				field.value = lines[i];
+				break;
+			}
+		}
+	}
 }
 
 function open_settings(){
