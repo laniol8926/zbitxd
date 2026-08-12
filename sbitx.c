@@ -6,8 +6,6 @@
 #include <complex.h>
 #include <fftw3.h>
 #include <unistd.h>
-#include <wiringPi.h>
-#include <wiringSerial.h>
 #include <linux/types.h>
 #include <linux/limits.h>
 #include <stdint.h>
@@ -15,17 +13,40 @@
 #include <signal.h>
 #include <pthread.h>
 #include <errno.h>
+#include <alsa/asoundlib.h>
 #include "sdr.h"
 #include "sdr_ui.h"
 #include "sound.h"
-#include "i2cbb.h"
-#include "si5351.h"
 #include "ini.h"
 #include "configure.h"
 #include "rig_generic.h"
 #include "sound_generic.h"
 
 #define DEBUG 0
+
+// Standalone replacements for wiringPi's millis()/delay() -- see sdr.h
+// for why these are still needed despite removing wiringPi itself.
+// millis() matches wiringPi's own semantics: milliseconds since the
+// first call (not since epoch), wrapping per unsigned int overflow.
+unsigned int millis(void)
+{
+	static struct timespec start;
+	static int have_start = 0;
+	struct timespec now;
+
+	if (!have_start) {
+		clock_gettime(CLOCK_MONOTONIC, &start);
+		have_start = 1;
+	}
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	return (unsigned int)((now.tv_sec - start.tv_sec) * 1000
+		+ (now.tv_nsec - start.tv_nsec) / 1000000);
+}
+
+void delay(unsigned int ms)
+{
+	usleep(ms * 1000);
+}
 
 char audio_card[32];
 static int tx_shift = 512;
@@ -98,6 +119,101 @@ static int sidetone = 100;
 struct vfo tone_a, tone_b, am_carrier; // these are audio tone generators
 static int tx_use_line = 0;
 struct rx* rx_list = NULL;
+
+// Relocated from sbitx_sound.c (now removed along with the rest of the
+// zBitx SDR's own ALSA I/Q capture/playback thread -- sound_generic.c
+// is the real audio path for this backend). Only these four still had
+// live callers outside that dead thread.
+
+void sound_mixer(char* card_name, char* element, int make_on)
+{
+	long min, max;
+	snd_mixer_t* handle;
+	snd_mixer_selem_id_t* sid;
+	char* card = card_name;
+
+	// the zBitx's own mixer control names ("Input Mux", "Mic Boost", etc.)
+	// and card index don't exist on a generic rig's plain USB audio
+	// device -- ALSA aborts the whole process on a null element rather
+	// than failing gracefully, so skip this entirely in generic mode
+	if (generic_rig_mode)
+		return;
+
+	snd_mixer_open(&handle, 0);
+	snd_mixer_attach(handle, card);
+	snd_mixer_selem_register(handle, NULL, NULL);
+	snd_mixer_load(handle);
+
+	snd_mixer_selem_id_alloca(&sid);
+	snd_mixer_selem_id_set_index(sid, 0);
+	snd_mixer_selem_id_set_name(sid, element);
+	snd_mixer_elem_t* elem = snd_mixer_find_selem(handle, sid);
+
+	// find out if the his element is capture side or plaback
+	if (snd_mixer_selem_has_capture_switch(elem)) {
+		snd_mixer_selem_set_capture_switch_all(elem, make_on);
+	} else if (snd_mixer_selem_has_playback_switch(elem)) {
+		snd_mixer_selem_set_playback_switch_all(elem, make_on);
+	} else if (snd_mixer_selem_has_playback_volume(elem)) {
+		long volume = make_on;
+		snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
+		snd_mixer_selem_set_playback_volume_all(elem, volume * max / 100);
+	} else if (snd_mixer_selem_has_capture_volume(elem)) {
+		long volume = make_on;
+		snd_mixer_selem_get_capture_volume_range(elem, &min, &max);
+		snd_mixer_selem_set_capture_volume_all(elem, volume * max / 100);
+	} else if (snd_mixer_selem_is_enumerated(elem)) {
+		snd_mixer_selem_set_enum_item(elem, 0, make_on);
+	}
+	snd_mixer_close(handle);
+}
+
+void sound_volume(char* card_name, char* element, int volume)
+{
+	long min, max;
+	snd_mixer_t* handle;
+	snd_mixer_selem_id_t* sid;
+	char* card;
+
+	card = card_name;
+	snd_mixer_open(&handle, 0);
+	snd_mixer_attach(handle, card);
+	snd_mixer_selem_register(handle, NULL, NULL);
+	snd_mixer_load(handle);
+
+	snd_mixer_selem_id_alloca(&sid);
+	snd_mixer_selem_id_set_index(sid, 0);
+	snd_mixer_selem_id_set_name(sid, element);
+	snd_mixer_elem_t* elem = snd_mixer_find_selem(handle, sid);
+
+	snd_mixer_selem_get_playback_volume_range(elem, &min, &max);
+	snd_mixer_selem_set_playback_volume_all(elem, volume * max / 100);
+
+	snd_mixer_close(handle);
+}
+
+static int use_virtual_cable = 0;
+
+void sound_input(int loop)
+{
+	if (loop)
+		use_virtual_cable = 1;
+	else
+		use_virtual_cable = 0;
+}
+
+// Was updated every capture block by the SDR's own ALSA thread; that
+// thread is gone, so this is now frozen at whatever it last was
+// (0, since it was never running for this backend to begin with).
+// Only remaining caller is modem_cw.c's cw_tx_get_sample() -- pre-existing,
+// harmless here since CW TX was never wired up for the generic-rig
+// backend (RX/decode only, see the original project scope notes).
+static unsigned long sound_millis = 0;
+
+unsigned long sbitx_millis()
+{
+	return sound_millis;
+}
 struct rx* tx_list = NULL;
 struct filter* tx_filter; // convolution filter
 static double tx_amp = 0.0;
@@ -146,19 +262,6 @@ struct power_settings band_power[] = {
 #define MDS_LEVEL (-135)
 
 struct Queue qremote;
-
-void radio_tune_to(u_int32_t f)
-{
-	printf("radio_tune_t %d\n", f);
-	if (rx_list->mode == MODE_CW)
-		si5351bx_setfreq(2, f + bfo_freq - 24000 + TUNING_SHIFT - rx_pitch);
-	else if (rx_list->mode == MODE_CWR)
-		si5351bx_setfreq(2, f + bfo_freq - 24000 + TUNING_SHIFT + rx_pitch);
-	else
-		si5351bx_setfreq(2, f + bfo_freq - 24000 + TUNING_SHIFT);
-
-	//  printf("Setting radio rx_pitch %d\n", rx_pitch);
-}
 
 void fft_init()
 {
@@ -315,47 +418,6 @@ int remote_audio_output(int16_t* samples)
 	return length;
 }
 
-static int prev_lpf = -1;
-void set_lpf_40mhz(int frequency)
-{
-	int lpf = 0;
-
-	if (frequency < 5500000)
-		lpf = LPF_D;
-	else if (frequency < 10500000)
-		lpf = LPF_C;
-	else if (frequency < 21500000 && sbitx_version >= 4)
-		lpf = LPF_B;
-	else if (frequency < 18500000)
-		lpf = LPF_B;
-	else if (frequency < 30000000)
-		lpf = LPF_A;
-
-	if (lpf == prev_lpf) {
-#if DEBUG > 0
-		puts("LPF not changed");
-#endif
-		return;
-	}
-
-#if DEBUG > 0
-	printf("##################Setting LPF to %d\n", lpf);
-#endif
-
-	digitalWrite(LPF_A, LOW);
-	digitalWrite(LPF_B, LOW);
-	digitalWrite(LPF_C, LOW);
-	digitalWrite(LPF_D, LOW);
-	digitalWrite(LPF_E, LOW);
-
-	printf("lpf for %d chosen %d\n", frequency, lpf);
-#if DEBUG > 0
-	printf("################ setting %d high\n", lpf);
-#endif
-	digitalWrite(lpf, HIGH);
-	prev_lpf = lpf;
-}
-
 void set_rx1(int frequency)
 {
 	static int last_frequency; // Holds the last frequency set - used by the Auto IF Gain algorithm
@@ -364,18 +426,8 @@ void set_rx1(int frequency)
 	if (frequency == freq_hdr)
 		return;
 
-	if (generic_rig_mode) {
-		// the rig does its own filtering/tuning -- no LPF relays or
-		// si5351 to drive, just tell it the frequency over CAT
-		rig_generic_set_freq(frequency);
-		freq_hdr = frequency;
-		return;
-	}
-
-	radio_tune_to(frequency);
+	rig_generic_set_freq(frequency);
 	freq_hdr = frequency;
-	if (sbitx_version < 4)
-		set_lpf_40mhz(frequency);
 }
 
 void set_volume(double v)
@@ -562,411 +614,6 @@ struct rx* add_rx(int frequency, short mode, int bpf_low, int bpf_high)
 
 int count = 0;
 
-double agc2(struct rx* r)
-{
-	int i;
-	double signal_strength, agc_gain_should_be;
-
-	// do nothing if agc is off
-	if (r->agc_speed == -1) {
-		for (i = 0; i < MAX_BINS / 2; i++)
-			__imag__(r->fft_time[i + (MAX_BINS / 2)]) *= 10000000;
-		return 10000000;
-	}
-
-	// find the peak signal amplitude
-	signal_strength = 0.0;
-	for (i = 0; i < MAX_BINS / 2; i++) {
-		double s = cimag(r->fft_time[i + (MAX_BINS / 2)]) * 1000;
-		if (signal_strength < s)
-			signal_strength = s;
-	}
-	// also calculate the moving average of the signal strength
-	r->signal_avg = (r->signal_avg * 0.93) + (signal_strength * 0.07);
-	if (signal_strength == 0)
-		agc_gain_should_be = 10000000;
-	else
-		agc_gain_should_be = 100000000000 / signal_strength;
-	r->signal_strength = signal_strength;
-	//	printf("Agc temp, g:%g, s:%g, f:%g ", r->agc_gain, signal_strength, agc_gain_should_be);
-
-	double agc_ramp = 0.0;
-
-	// climb up the agc quickly if the signal is louder than before
-	if (agc_gain_should_be < r->agc_gain) {
-		r->agc_gain = agc_gain_should_be;
-		// reset the agc to hang count down
-		r->agc_loop = r->agc_speed;
-	} else if (r->agc_loop <= 0) {
-		agc_ramp = (agc_gain_should_be - r->agc_gain) / (MAX_BINS / 2);
-	}
-
-	if (agc_ramp != 0) {
-		for (i = 0; i < MAX_BINS / 2; i++) {
-			__imag__(r->fft_time[i + (MAX_BINS / 2)]) *= r->agc_gain;
-		}
-		r->agc_gain += agc_ramp;
-	} else
-		for (i = 0; i < MAX_BINS / 2; i++)
-			__imag__(r->fft_time[i + (MAX_BINS / 2)]) *= r->agc_gain;
-
-	r->agc_loop--;
-
-	// printf("%d:s meter: %d %d %d \n", count++, (int)r->agc_gain, (int)r->signal_strength, r->agc_loop);
-	return 100000000000 / r->agc_gain;
-}
-
-void my_fftw_execute(fftw_plan f)
-{
-	fftw_execute(f);
-}
-
-static int rx_tick = 0;
-static char bufDebugTick[200];
-
-// TODO : optimize the memory copy and moves to use the memcpy
-void rx_linear(int32_t* input_rx, int32_t* input_mic,
-    int32_t* output_speaker, int32_t* output_tx, int n_samples)
-{
-	int i, j = 0;
-	double i_sample, q_sample;
-
-	rx_tick++;
-	// STEP 1: first add the previous M samples to
-	for (i = 0; i < MAX_BINS / 2; i++)
-		fft_in[i] = fft_m[i];
-
-	// STEP 2: then add the new set of samples
-	//  m is the index into incoming samples, starting at zero
-	//  i is the index into the time samples, picking from
-	//  the samples added in the previous step
-	int m = 0;
-	// gather the samples into a time domain array
-	for (i = MAX_BINS / 2; i < MAX_BINS; i++) {
-		i_sample = (1.0 * input_rx[j]) / 20000000.0;
-		q_sample = 0;
-
-		j++;
-
-		__real__ fft_m[m] = i_sample;
-		__imag__ fft_m[m] = q_sample;
-
-		__real__ fft_in[i] = i_sample;
-		__imag__ fft_in[i] = q_sample;
-		m++;
-	}
-
-	// STEP 3: convert the time domain samples to  frequency domain
-	my_fftw_execute(plan_fwd);
-
-	// STEP 3B: this is a side line, we use these frequency domain
-	//  values to paint the spectrum in the user interface
-	//  I discovered that the raw time samples give horrible spectrum
-	//  and they need to be multiplied wiht a window function
-	//  they use a separate fft plan
-	//  NOTE: the spectrum update has nothing to do with the actual
-	//  signal processing. If you are not showing the spectrum or the
-	//  waterfall, you can skip these steps
-	for (i = 0; i < MAX_BINS; i++)
-		__real__ fft_in[i] *= spectrum_window[i];
-	my_fftw_execute(plan_spectrum);
-
-	// the spectrum display is updated
-	spectrum_update();
-
-	// ... back to the actual processing, after spectrum update
-
-	// we may add another sub receiver within the pass band later,
-	// hence, the linkced list of receivers here
-	// at present, we handle just the first receiver
-	struct rx* r = rx_list;
-
-	// STEP 4: we rotate the bins around by r-tuned_bin
-	int shift = r->tuned_bin;
-	if (r->mode == MODE_AM)
-		shift = 0;
-	for (i = 0; i < MAX_BINS; i++) {
-		int b = i + shift;
-		if (b >= MAX_BINS)
-			b = b - MAX_BINS;
-		if (b < 0)
-			b = b + MAX_BINS;
-		r->fft_freq[i] = fft_out[b];
-	}
-
-	// STEP 5:zero out the other sideband
-	if (r->mode == MODE_LSB || r->mode == MODE_CWR)
-		for (i = 0; i < MAX_BINS / 2; i++) {
-			__real__ r->fft_freq[i] = 0;
-			__imag__ r->fft_freq[i] = 0;
-		}
-	else if (r->mode != MODE_AM)
-		for (i = MAX_BINS / 2; i < MAX_BINS; i++) {
-			__real__ r->fft_freq[i] = 0;
-			__imag__ r->fft_freq[i] = 0;
-		}
-
-	// STEP 6: apply the filter to the signal,
-	// in frequency domain we just multiply the filter
-	// coefficients with the frequency domain samples
-	for (i = 0; i < MAX_BINS; i++)
-		r->fft_freq[i] *= r->filter->fir_coeff[i];
-
-	// STEP 7: convert back to time domain
-	my_fftw_execute(r->plan_rev);
-
-	// STEP 8 : AGC
-	agc2(r);
-
-	// STEP 9: send the output back to where it needs to go
-	int is_digital = 0;
-
-	if (rx_list->output == 0) {
-		if (r->mode == MODE_AM)
-			for (i = 0; i < MAX_BINS / 2; i++) {
-				int32_t sample;
-				sample = cabs(r->fft_time[i + (MAX_BINS / 2)]);
-				// keep transmit buffer empty
-				output_speaker[i] = sample;
-				output_tx[i] = 0;
-			}
-		else
-			for (i = 0; i < MAX_BINS / 2; i++) {
-				int32_t sample;
-				sample = cimag(r->fft_time[i + (MAX_BINS / 2)]);
-				// keep transmit buffer empty
-				output_speaker[i] = sample;
-				output_tx[i] = 0;
-			}
-
-		// push the samples to the remote audio queue, decimated to 16000 samples/sec
-		for (i = 0; i < MAX_BINS / 2; i += 6)
-			q_write(&qremote, output_speaker[i]);
-	}
-
-	if (mute_count) {
-		memset(output_speaker, 0, MAX_BINS / 2 * sizeof(int32_t));
-		mute_count--;
-	}
-
-	// push the data to any potential modem
-	modem_rx(rx_list->mode, output_speaker, MAX_BINS / 2);
-	// printf("S meter: %d\n", calculate_s_meter(r));
-}
-
-void read_power()
-{
-	uint8_t response[4];
-	int16_t vfwd, vref;
-	char buff[20];
-
-	if (!in_tx)
-		return;
-	if (i2cbb_read_i2c_block_data(0x8, 0, 4, response) == -1)
-		return;
-
-	vfwd = vref = 0;
-
-	memcpy(&vfwd, response, 2);
-	memcpy(&vref, response + 2, 2);
-	if (vref >= vfwd)
-		vswr = 100;
-	else
-		vswr = (10 * (vfwd + vref)) / (vfwd - vref);
-
-	// here '400' is the scaling factor as our ref power output is 40 watts
-	// this calculates the power as 1/10th of a watt, 400 = 40 watts
-	int fwdvoltage = (vfwd * 40) / bridge_compensation;
-	fwdpower = (fwdvoltage * fwdvoltage) / 400;
-
-	int rf_v_p2p = (fwdvoltage * 126) / 400;
-	if (rf_v_p2p > 135 && !in_calibration) {
-		alc_level *= 135.0 / (1.0 * rf_v_p2p);
-		printf("ALC tripped, to %d percent\n", (int)(100 * alc_level));
-	}
-	/*	else if (alc_level < 0.95){
-	        printf("alc releasing to ");
-	        alc_level *= 1.02;
-	    }
-	*/
-	//	printf("alc: %g\n", alc_level);
-}
-
-static int tx_process_restart = 0;
-
-void tx_process(
-    int32_t* input_rx, int32_t* input_mic,
-    int32_t* output_speaker, int32_t* output_tx,
-    int n_samples)
-{
-	int i;
-	double i_sample, q_sample, i_carrier;
-
-	// uncomment this to test a simple audio loop of mic to speaker
-	// memcpy(output_speaker, input_mic, sizeof(int32_t) * n_samples);
-	// return;
-
-	// if (pf_debug)
-	//	fwrite(input_mic, sizeof(int32_t), n_samples, pf_debug);
-
-	struct rx* r = tx_list;
-
-	// fix the burst at the start of transmission
-	if (tx_process_restart) {
-		fft_reset_m_bins();
-		tx_process_restart = 0;
-	}
-
-	if (mute_count && (r->mode == MODE_USB || r->mode == MODE_LSB || r->mode == MODE_AM)) {
-		memset(input_mic, 0, n_samples * sizeof(int32_t));
-		mute_count--;
-	}
-	// first add the previous M samples
-	for (i = 0; i < MAX_BINS / 2; i++)
-		fft_in[i] = fft_m[i];
-
-	int m = 0;
-	int j = 0;
-
-	// double max = -10.0, min = 10.0;
-	// gather the samples into a time domain array
-	for (i = MAX_BINS / 2; i < MAX_BINS; i++) {
-		if (r->mode == MODE_2TONE)
-			i_sample = (1.0 * (vfo_read(&tone_a) + vfo_read(&tone_b))) / 50000000000.0;
-		else if (r->mode == MODE_TUNE)
-			i_sample = (1.0 * vfo_read(&tone_a)) / 50000000000.0;
-		else if (r->mode == MODE_CALIBRATE)
-			i_sample = (1.0 * (vfo_read(&tone_a))) / 30000000000.0;
-		else if (r->mode == MODE_CW || r->mode == MODE_CWR || r->mode == MODE_FT8 || r->mode == MODE_FT4)
-			i_sample = modem_next_sample(r->mode) / 3;
-		else if (r->mode == MODE_AM) {
-			double modulation = (1.0 * input_mic[j]) / 200000000.0;
-			if (modulation < -1.0)
-				modulation = -1.0;
-			i_carrier = (1.0 * vfo_read(&am_carrier)) / 50000000000.0;
-			i_sample = (1.0 + modulation) * i_carrier;
-		} else
-			i_sample = (1.0 * input_mic[j]) / 2000000000.0;
-
-		// don't echo the voice modes
-		switch (r->mode) {
-		case MODE_USB:
-		case MODE_LSB:
-		case MODE_AM:
-		case MODE_NBFM:
-			output_speaker[j] = 0;
-			break;
-		case MODE_CW:
-		case MODE_CWR:
-		case MODE_FT4:
-		case MODE_FT8:
-			output_speaker[j] = (int)(i_sample * 20000000.0) * sidetone;
-			break;
-		case MODE_DIGITAL:
-			output_speaker[j] = input_mic[j] / 1000 * sidetone;
-			break;
-		}
-
-		q_sample = 0;
-
-		j++;
-
-		__real__ fft_m[m] = i_sample;
-		__imag__ fft_m[m] = q_sample;
-
-		__real__ fft_in[i] = i_sample;
-		__imag__ fft_in[i] = q_sample;
-		m++;
-	}
-
-	// if (pf_debug)
-	//	fwrite(output_speaker, sizeof(int32_t), MAX_BINS/2, pf_debug);
-
-	// push the samples to the remote audio queue, decimated to 16000 samples/sec
-	for (i = 0; i < MAX_BINS / 2; i += 6)
-		q_write(&qremote, output_speaker[i]);
-
-	// convert to frequency
-	fftw_execute(plan_fwd);
-
-	// NOTE: fft_out holds the fft output (in freq domain) of the
-	// incoming mic samples
-	// the naming is unfortunate
-
-	// apply the filter
-	for (i = 0; i < MAX_BINS; i++)
-		fft_out[i] *= tx_filter->fir_coeff[i];
-
-	// the usb extends from 0 to MAX_BINS/2 - 1,
-	// the lsb extends from MAX_BINS - 1 to MAX_BINS/2 (reverse direction)
-	// zero out the other sideband
-
-	// TBD: Something strange is going on, this should have been the otherway
-
-	if (r->mode == MODE_LSB || r->mode == MODE_CWR)
-		// zero out the LSB
-		for (i = 0; i < MAX_BINS / 2; i++) {
-			__real__ fft_out[i] = 0;
-			__imag__ fft_out[i] = 0;
-		}
-	else if (r->mode != MODE_AM)
-		// zero out the USB
-		for (i = MAX_BINS / 2; i < MAX_BINS; i++) {
-			__real__ fft_out[i] = 0;
-			__imag__ fft_out[i] = 0;
-		}
-
-	// now rotate to the tx_bin
-	// rememeber the AM is already a carrier modulated at 24 KHz
-	int shift = tx_shift;
-	if (r->mode == MODE_AM)
-		shift = 0;
-	for (i = 0; i < MAX_BINS; i++) {
-		int b = i + shift;
-		if (b >= MAX_BINS)
-			b = b - MAX_BINS;
-		if (b < 0)
-			b = b + MAX_BINS;
-		r->fft_freq[b] = fft_out[i];
-	}
-
-	// convert back to time domain
-	fftw_execute(r->plan_rev);
-	int min = 10000000;
-	int max = -10000000;
-	float scale = volume;
-	for (i = 0; i < MAX_BINS / 2; i++) {
-		double s = creal(r->fft_time[i + (MAX_BINS / 2)]);
-		output_tx[i] = s * scale * tx_amp * alc_level;
-		/*		if (min > output_tx[i])
-		            min = output_tx[i];
-		        if (max < output_tx[i])
-		            max = output_tx[i];	*/
-		// output_tx[i] = 0;
-	}
-
-	if (sbitx_version < 4)
-		read_power();
-	sdr_modulation_update(output_tx, MAX_BINS / 2, tx_amp);
-}
-
-/*
-    This is called each time there is a block of signal samples ready
-    either from the mic or from the rx IF
-*/
-void sound_process(
-    int32_t* input_rx, int32_t* input_mic,
-    int32_t* output_speaker, int32_t* output_tx,
-    int n_samples)
-{
-	if (in_tx)
-		tx_process(input_rx, input_mic, output_speaker, output_tx, n_samples);
-	else
-		rx_linear(input_rx, input_mic, output_speaker, output_tx, n_samples);
-	if (pf_record)
-		wav_record(in_tx == 0 ? output_speaker : input_mic, n_samples);
-}
-
 void set_rx_filter()
 {
 	// on AM filter at the IF level, instead of the baseband
@@ -987,50 +634,6 @@ void set_rx_filter()
 		    5);
 }
 
-/*
-Write code that mus repeatedly so things, it is called during the idle time
-of the event loop
-*/
-void loop()
-{
-	delay(10);
-}
-
-void signal_handler(int signum)
-{
-	digitalWrite(TX_LINE, LOW);
-}
-
-void setup_audio_codec()
-{
-	strcpy(audio_card, "hw:0");
-
-	// configure all the channels of the mixer
-	sound_mixer(audio_card, "Input Mux", 0);
-	sound_mixer(audio_card, "Line", 1);
-	sound_mixer(audio_card, "Mic", 0);
-	sound_mixer(audio_card, "Mic Boost", 0);
-	sound_mixer(audio_card, "Playback Deemphasis", 0);
-
-	sound_mixer(audio_card, "Master", 10);
-	sound_mixer(audio_card, "Output Mixer HiFi", 1);
-	sound_mixer(audio_card, "Output Mixer Mic Sidetone", 0);
-}
-
-void setup_oscillators()
-{
-	// initialize the SI5351
-
-	delay(200);
-	si5351bx_init();
-	delay(200);
-	si5351bx_setfreq(1, bfo_freq);
-
-	delay(200);
-	si5351bx_setfreq(1, bfo_freq);
-
-	si5351_reset();
-}
 
 static int hw_init_index = 0;
 static int hw_settings_handler(void* user, const char* section,
@@ -1098,299 +701,10 @@ void set_tx_power_levels()
 	alc_level = 1.0;
 }
 
-/* calibrate power on all bands */
-
-void calibrate_band_power(struct power_settings* b)
-{
-
-	set_rx1(b->f_start + 35000);
-	printf("*calibrating for %d\n", freq_hdr);
-	tx_list->mode = MODE_CALIBRATE;
-	tx_drive = 100;
-
-	int i, j;
-
-	//	double scale_delta = b->scale / 25;
-	double scaling_factor = 0.0001;
-	b->scale = scaling_factor;
-	set_tx_power_levels();
-	delay(50);
-
-	tr_switch(1);
-	delay(100);
-
-	for (i = 0; i < 200 && b->scale < 0.015; i++) {
-		scaling_factor *= 1.1;
-		b->scale = scaling_factor;
-		set_tx_power_levels();
-		delay(50); // let the new power levels take hold
-
-		int avg = 0;
-		// take many readings to get a peak
-		for (j = 0; j < 10; j++) {
-			delay(20);
-			avg += fwdpower / 10; // fwdpower in 1/10th of a watt
-			//			printf("  avg %d, fwd %d scale %g\n", avg, fwdpower, b->scale);
-		}
-		avg /= 10;
-		printf("*%d, f %d : avg %d, max = %d\n", i, b->f_start, avg, b->max_watts);
-		if (avg >= b->max_watts)
-			break;
-	}
-	tr_switch(0);
-	printf("*tx scale for %d is set to %g\n", b->f_start, b->scale);
-	delay(100);
-}
-
-static void save_hw_settings()
-{
-	static int last_save_at = 0;
-
-	FILE* f = fopen(STATEDIR "/hw_settings.ini", "w");
-	if (!f) {
-		printf("Unable to save " STATEDIR "/hw_settings.ini : %s\n", strerror(errno));
-		return;
-	}
-
-	fprintf(f, "bfo_freq=%d\n\n", bfo_freq);
-	// now save the band stack
-	for (int i = 0; i < sizeof(band_power) / sizeof(struct power_settings); i++) {
-		fprintf(f, "[tx_band]\nf_start=%d\nf_stop=%d\nscale=%g\n\n",
-		    band_power[i].f_start, band_power[i].f_stop, band_power[i].scale);
-	}
-
-	fclose(f);
-}
-
-pthread_t calibration_thread;
-
-void* calibration_thread_function(void* server)
-{
-
-	int old_freq = freq_hdr;
-	int old_mode = tx_list->mode;
-	int old_tx_drive = tx_drive;
-
-	in_calibration = 1;
-	for (int i = 0; i < sizeof(band_power) / sizeof(struct power_settings); i++) {
-		calibrate_band_power(band_power + i);
-	}
-	in_calibration = 0;
-
-	set_rx1(old_freq);
-	tx_list->mode = old_mode;
-	tx_drive = old_tx_drive;
-	save_hw_settings();
-	printf("*Finished band power calibrations\n");
-}
-
-void tx_cal()
-{
-	printf("*Starting tx calibration, with dummy load connected\n");
-	pthread_create(&calibration_thread, NULL, calibration_thread_function,
-	    (void*)NULL);
-}
-
-void tr_switch_de(int tx_on)
-{
-	if (tx_on) {
-		digitalWrite(RX_LINE, LOW);
-		// mute it all and hang on for a millisecond
-		sound_mixer(audio_card, "Master", 0);
-		sound_mixer(audio_card, "Capture", 0);
-		delay(1);
-
-		// now switch of the signal back
-		// now ramp up after 5 msecs
-		delay(2);
-		//			digitalWrite(TX_LINE, HIGH);
-		mute_count = 20;
-		tx_process_restart = 1;
-		// give time for the reed relay to switch
-		delay(2);
-		set_tx_power_levels();
-		in_tx = 1;
-		// finally ramp up the power
-		if (tr_relay) {
-			set_lpf_40mhz(freq_hdr);
-			delay(10); // debounce the lpf relays
-		}
-		digitalWrite(TX_LINE, HIGH);
-
-		spectrum_reset();
-	} else {
-		in_tx = 0;
-		// mute it all and hang on
-		sound_mixer(audio_card, "Master", 0);
-		sound_mixer(audio_card, "Capture", 0);
-		delay(1);
-		fft_reset_m_bins();
-		mute_count = MUTE_MAX;
-
-		// power down the PA chain to null any gain
-		delay(2);
-
-		if (tr_relay) {
-			digitalWrite(LPF_A, LOW);
-			digitalWrite(LPF_B, LOW);
-			digitalWrite(LPF_C, LOW);
-			digitalWrite(LPF_D, LOW);
-		}
-		delay(10);
-
-		// drive the tx line low, switching the signal path
-		digitalWrite(TX_LINE, LOW);
-		delay(5);
-		// audio codec is back on
-		sound_mixer(audio_card, "Master", rx_vol); // Need to change - N3SB
-		sound_mixer(audio_card, "Capture", rx_gain);
-		spectrum_reset();
-		// rx_tx_ramp = 10;
-		delay(5);
-		digitalWrite(RX_LINE, HIGH);
-	}
-}
-
-// v2 t/r switch uses the lpfs to cut the feedback during t/r transitions
-void tr_switch_v2(int tx_on)
-{
-	if (tx_on) {
-
-		// first turn off the LPFs, so PA doesnt connect
-		digitalWrite(LPF_A, LOW);
-		digitalWrite(LPF_B, LOW);
-		digitalWrite(LPF_C, LOW);
-		digitalWrite(LPF_D, LOW);
-
-		// mute it all and hang on for a millisecond
-		sound_mixer(audio_card, "Master", 0);
-		sound_mixer(audio_card, "Capture", 0);
-		delay(1);
-
-		// now switch of the signal back
-		// now ramp up after 5 msecs
-		delay(2);
-		mute_count = 20;
-		tx_process_restart = 1;
-		digitalWrite(TX_LINE, HIGH);
-		delay(20);
-		set_tx_power_levels();
-		in_tx = 1;
-		prev_lpf = -1; // force this
-		set_lpf_40mhz(freq_hdr);
-		delay(10);
-		spectrum_reset();
-	} else {
-		in_tx = 0;
-		// mute it all and hang on
-		sound_mixer(audio_card, "Master", 0);
-		sound_mixer(audio_card, "Capture", 0);
-		delay(1);
-		fft_reset_m_bins();
-		mute_count = MUTE_MAX;
-
-		digitalWrite(LPF_A, LOW);
-		digitalWrite(LPF_B, LOW);
-		digitalWrite(LPF_C, LOW);
-		digitalWrite(LPF_D, LOW);
-		prev_lpf = -1; // force the lpf to be re-energized
-		delay(10);
-		// power down the PA chain to null any gain
-		digitalWrite(TX_LINE, LOW);
-		delay(5);
-		// audio codec is back on
-		//  Set a level for receiver volume - left channel
-		sound_mixer(audio_card, "Master", rx_vol); // Need to change - N3SB
-		sound_mixer(audio_card, "Capture", rx_gain);
-		spectrum_reset();
-		prev_lpf = -1;
-		set_lpf_40mhz(freq_hdr);
-		// rx_tx_ramp = 10;
-	}
-}
-
-// v4 t/r switch uses separate lines for RX and TX powering
-void tr_switch_v4(int tx_on)
-{
-	if (tx_on) {
-
-		digitalWrite(RX_LINE, LOW);
-
-		// first turn off the LPFs, so PA doesnt connect
-		digitalWrite(LPF_A, LOW);
-		digitalWrite(LPF_B, LOW);
-		digitalWrite(LPF_C, LOW);
-		digitalWrite(LPF_D, LOW);
-		digitalWrite(LPF_E, LOW);
-
-		// mute it all and hang on for a millisecond
-		//		sound_mixer(audio_card, "Master", 0);
-		//		sound_mixer(audio_card, "Capture", 0);
-		delay(1);
-
-		// now switch of the signal back
-		// now ramp up after 5 msecs
-		delay(2);
-		mute_count = 20;
-		tx_process_restart = 1;
-		delay(20);
-		in_tx = 1;
-		set_tx_power_levels();
-		prev_lpf = -1; // force this
-		set_lpf_40mhz(freq_hdr);
-		delay(10);
-		spectrum_reset();
-		digitalWrite(TX_LINE, HIGH);
-	} else {
-
-		in_tx = 0;
-		digitalWrite(TX_LINE, LOW);
-
-		// mute it all and hang on
-		sound_mixer(audio_card, "Master", 0);
-		sound_mixer(audio_card, "Capture", 0);
-		delay(1);
-		fft_reset_m_bins();
-		mute_count = MUTE_MAX;
-
-		digitalWrite(LPF_A, LOW);
-		digitalWrite(LPF_B, LOW);
-		digitalWrite(LPF_C, LOW);
-		digitalWrite(LPF_D, LOW);
-		digitalWrite(LPF_E, LOW);
-		prev_lpf = -1; // force the lpf to be re-energized
-		delay(10);
-		// power down the PA chain to null any gain
-		delay(5);
-		// audio codec is back on
-		//  Set a level for receiver volume - left channel
-		sound_mixer(audio_card, "Master", rx_vol); // Need to change - N3SB
-		sound_mixer(audio_card, "Capture", rx_gain);
-		spectrum_reset();
-		prev_lpf = -1;
-		// set_lpf_40mhz(freq_hdr);
-		// rx_tx_ramp = 10;
-		digitalWrite(RX_LINE, HIGH);
-	}
-}
 
 void tr_switch(int tx_on)
 {
-	if (generic_rig_mode) {
-		rig_generic_set_ptt(tx_on);
-		return;
-	}
-
-	switch (sbitx_version) {
-	case SBITX_DE:
-		tr_switch_de(tx_on);
-		break;
-	case SBITX_V4:
-		tr_switch_v4(tx_on);
-		break;
-	default:
-		tr_switch_v2(tx_on);
-	}
+	rig_generic_set_ptt(tx_on);
 }
 
 /*
@@ -1403,27 +717,8 @@ void setup(char* audio_output_device)
 
 	read_hw_ini();
 
-	if (!generic_rig_mode) {
-		// setup the LPF and the gpio pins -- zBitx SDR board only, a
-		// generic rig has its own filtering/relays behind CAT control
-		pinMode(TX_LINE, OUTPUT);
-		pinMode(RX_LINE, OUTPUT);
-		pinMode(LPF_A, OUTPUT);
-		pinMode(LPF_B, OUTPUT);
-		pinMode(LPF_C, OUTPUT);
-		pinMode(LPF_D, OUTPUT);
-		digitalWrite(LPF_A, LOW);
-		digitalWrite(LPF_B, LOW);
-		digitalWrite(LPF_C, LOW);
-		digitalWrite(LPF_D, LOW);
-		digitalWrite(TX_LINE, LOW);
-		digitalWrite(RX_LINE, HIGH);
-	}
-
 	fft_init();
 	vfo_init_phase_table();
-	if (!generic_rig_mode)
-		setup_oscillators();
 	q_init(&qremote, 8000);
 
 	modem_init();
@@ -1434,46 +729,29 @@ void setup(char* audio_output_device)
 	tx_list->tuned_bin = 512;
 	tx_init(7000000, MODE_LSB, -3000, -150);
 
-	if (generic_rig_mode) {
-		// no zBitx board to identify -- CAT/audio both go to the
-		// generic rig backend instead
-		rig_generic_init();
-		// hw_settings.ini's [generic_rig] capture_device/playback_device
-		// (read above by read_hw_ini()) only ever set the C globals --
-		// the #capture_device/#playback_device FIELDs the web UI actually
-		// displays kept their compiled-in "default" placeholder regardless
-		// of what device was really opened. That let AUDIO_CONNECT
-		// silently resubmit the stale "default" text and tear down a
-		// working device -- confirmed live (real device was
-		// "plughw:mchf,0", UI still showed "default", AUDIO_CONNECT killed
-		// both capture and playback with "cannot open default"). A
-		// user_settings.ini entry saved later still wins, since that's
-		// parsed after this.
-		set_field("#capture_device", generic_capture_device);
-		set_field("#playback_device", generic_playback_device);
-		// SPAN control removed from the web UI (locked at 3kHz, see the
-		// matching "SPAN " lock in do_control_action()) -- set the real
-		// starting value directly too, since spectrum_span's own
-		// compiled-in default (48000) would otherwise be whatever a
-		// stale persisted SPAN selection last left it at until the next
-		// SPAN request (which may never come now that there's no
-		// dropdown to send one).
-		spectrum_span = 3000;
-		sound_generic_start();
-	} else {
-		// detect the version of sbitx if not read from hw_settings
-		if (sbitx_version == -1) {
-			uint8_t response[4];
-			if (i2cbb_read_i2c_block_data(0x8, 0, 4, response) == -1)
-				sbitx_version = SBITX_DE;
-			else
-				sbitx_version = SBITX_V2;
-		}
-		printf("hw version: %d\n", sbitx_version);
-
-		setup_audio_codec();
-		sound_thread_start("plughw:0,0");
-	}
+	rig_generic_init();
+	// hw_settings.ini's [generic_rig] capture_device/playback_device
+	// (read above by read_hw_ini()) only ever set the C globals --
+	// the #capture_device/#playback_device FIELDs the web UI actually
+	// displays kept their compiled-in "default" placeholder regardless
+	// of what device was really opened. That let AUDIO_CONNECT
+	// silently resubmit the stale "default" text and tear down a
+	// working device -- confirmed live (real device was
+	// "plughw:mchf,0", UI still showed "default", AUDIO_CONNECT killed
+	// both capture and playback with "cannot open default"). A
+	// user_settings.ini entry saved later still wins, since that's
+	// parsed after this.
+	set_field("#capture_device", generic_capture_device);
+	set_field("#playback_device", generic_playback_device);
+	// SPAN control removed from the web UI (locked at 3kHz, see the
+	// matching "SPAN " lock in do_control_action()) -- set the real
+	// starting value directly too, since spectrum_span's own
+	// compiled-in default (48000) would otherwise be whatever a
+	// stale persisted SPAN selection last left it at until the next
+	// SPAN request (which may never come now that there's no
+	// dropdown to send one).
+	spectrum_span = 3000;
+	sound_generic_start();
 
 	sleep(1); // why? to allow the aloop to initialize?
 
@@ -1481,7 +759,7 @@ void setup(char* audio_output_device)
 	vfo_start(&tone_b, 1900, 0);
 	vfo_start(&am_carrier, 24000, 0);
 
-	delay(2000);
+	sleep(2);
 	// pf_debug = fopen("tx.raw", "w");
 }
 
@@ -1693,9 +971,7 @@ void sdr_request(char* request, char* response)
 			tx_use_line = 0;
 		else if (!strcmp(value, "LINE"))
 			tx_use_line = 1;
-	} else if (!strcmp(cmd, "txcal"))
-		tx_cal();
-	else if (!strcmp(cmd, "tx_compress"))
+	} else if (!strcmp(cmd, "tx_compress"))
 		tx_compress = atoi(value);
 	/* else
 	      printf("*Error request[%s] not accepted\n", request); */

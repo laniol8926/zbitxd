@@ -259,8 +259,16 @@ int	get_wpm();
 void telnet_open(char *server);
 int telnet_write(char *text);
 void telnet_close();
-double agc2(struct rx *r);
 FILE *wav_start_writing(const char* path);
+
+// Standalone replacements for wiringPi's millis()/delay() (now removed
+// along with the rest of the zBitx-hardware-only GPIO/I2C code -- see
+// sbitx.c for the implementation). Still genuinely needed here: live
+// field-update timestamps, the Tune feature's TX timing, CW RX timing,
+// mongoose's own internal timers, and fldigi retry timing all use these
+// for real, non-hardware-specific purposes.
+unsigned int millis(void);
+void delay(unsigned int ms);
 
 #define MULTICAST_ADDR "224.0.0.1"
 #define MULTICAST_PORT 5005

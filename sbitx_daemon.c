@@ -30,8 +30,6 @@ The initial sync between the gui values, the core radio values, settings, et al 
 #include <errno.h>
 #include <sys/file.h>
 #include <errno.h>
-#include <wiringPi.h>
-#include <wiringSerial.h>
 #include <signal.h>
 #include <systemd/sd-daemon.h>
 #include <systemd/sd-journal.h>
@@ -42,7 +40,6 @@ The initial sync between the gui values, the core radio values, settings, et al 
 #include "hamlib.h"
 #include "remote.h"
 #include "modem_ft8.h"
-#include "i2cbb.h"
 #include "webserver.h"
 #include "logbook.h"
 #include "hist_disp.h"
@@ -80,15 +77,6 @@ char pins[15] = {0, 2, 3, 6, 7,
 //time sync, when the NTP time is not synced, this tracks the number of seconds 
 //between the system cloc and the actual time set by \utc command
 
-//encoder state
-struct encoder {
-	int pin_a,  pin_b;
-	int speed;
-	int prev_state;
-	int history;
-};
-void tuning_isr(void);
-
 #define COLOR_SELECTED_TEXT 0
 #define COLOR_TEXT 1
 #define COLOR_TEXT_MUTED 2
@@ -119,11 +107,6 @@ struct font_style {
 	
 };
 
-struct encoder enc_a, enc_b;
-
-//keyer polling variables
-//the PTT and DASH lines are pulled high
-int ptt_state = HIGH, dash_state = HIGH;
 struct field *cw_input = NULL;
 struct field *f_mode = NULL;
 struct field *f_text_in = NULL;
@@ -153,12 +136,12 @@ static struct console_line console_stream[MAX_CONSOLE_LINES];
 int console_current_line = 0;
 struct Queue q_web;
 
+// Always 0 -- zbitx_write() is a no-op without the physical zBitx
+// touchscreen board this fork never targets (see project notes: this
+// backend is for every rig except zBitx/sBitx, whose own users already
+// have the genuine hardware-dependent upstream software).
 static uint8_t zbitx_available = 0;
 int update_logs = 0;
-#define ZBITX_I2C_ADDRESS 0xa
-void zbitx_init();
-void zbitx_poll(int all);
-void zbitx_get_spectrum(char *buff);
 void zbitx_write(int style, char *text);
 
 // event ids, some of them are mapped from gtk itself
@@ -2225,139 +2208,12 @@ void set_ui(int id){
 	current_layout = id;
 }
 
-/* hardware specific routines */
-
-void init_gpio_pins(){
-	for (int i = 0; i < 15; i++){
-		pinMode(pins[i], INPUT);
-		pullUpDnControl(pins[i], PUD_UP);
-	}
-
-	pinMode(PTT, INPUT);
-	pullUpDnControl(PTT, PUD_UP);
-	pinMode(DASH, INPUT);
-	pullUpDnControl(DASH, PUD_UP);
-}
-
+// No physical CW paddle exists on this backend (headless/browser
+// operation, no front-panel GPIO) -- was digitalRead(PTT)/digitalRead(DASH)
+// via key_isr(), now just always reports no key down. Kept (not deleted)
+// since modem_cw.c calls this directly.
 int key_poll(){
-	int key = CW_IDLE;
-	//int input_method = get_cw_input_method();
-	if (cw_input == NULL){
-		printf("cw_input field must point to the CW_INPUT field\n");
-		return 0;
-	}
-
-	//quick look up of one of the three values of keying type
-	//STRAIG[H]T
-	//IAMBIC[\0]
-	//IAMBIC[B]
-
-	int input_method = CW_IAMBIC; 
-	switch(cw_input->value[6]){
-		case 0:
-			input_method = CW_IAMBIC;
-			break;
-		case 'H':
-			input_method = CW_STRAIGHT;
-			break;
-		case 'B':
-			input_method = CW_IAMBICB;
-			break;
-	}
-	
-
-	if (input_method == CW_IAMBIC || input_method == CW_IAMBICB){	
-		if (ptt_state == LOW)
-		//if (digitalRead(PTT) == LOW)
-			key |= CW_DASH;
-		if (dash_state == LOW)
-		//if (digitalRead(DASH) == LOW)
-			key |= CW_DOT;
-	}
-	//straight key
-	else if (ptt_state == LOW || dash_state == LOW)
-			key = CW_DOWN;
-
-	return key;
-}
-
-void enc_init(struct encoder *e, int speed, int pin_a, int pin_b){
-	e->pin_a = pin_a;
-	e->pin_b = pin_b;
-	e->speed = speed;
-	e->history = 5;
-}
-
-int enc_state (struct encoder *e) {
-	return (digitalRead(e->pin_a) ? 1 : 0) + (digitalRead(e->pin_b) ? 2: 0);
-}
-
-int enc_read(struct encoder *e) {
-  int result = 0; 
-  int newState;
-  
-  newState = enc_state(e); // Get current state  
-    
-  if (newState != e->prev_state)
-     delay (1);
-  
-  if (enc_state(e) != newState || newState == e->prev_state)
-    return 0; 
-
-  //these transitions point to the encoder being rotated anti-clockwise
-  if ((e->prev_state == 0 && newState == 2) || 
-    (e->prev_state == 2 && newState == 3) || 
-    (e->prev_state == 3 && newState == 1) || 
-    (e->prev_state == 1 && newState == 0)){
-      e->history--;
-      //result = -1;
-    }
-  //these transitions point to the enccoder being rotated clockwise
-  if ((e->prev_state == 0 && newState == 1) || 
-    (e->prev_state == 1 && newState == 3) || 
-    (e->prev_state == 3 && newState == 2) || 
-    (e->prev_state == 2 && newState == 0)){
-      e->history++;
-    }
-  e->prev_state = newState; // Record state for next pulse interpretation
-  if (e->history > e->speed){
-    result = 1;
-    e->history = 0;
-  }
-  if (e->history < -e->speed){
-    result = -1;
-    e->history = 0;
-  }
-  return result;
-}
-
-static int tuning_ticks = 0;
-void tuning_isr(void){
-	int tuning = enc_read(&enc_b);
-	if (tuning < 0)
-		tuning_ticks++;
-	if (tuning > 0)
-		tuning_ticks--;	
-}
-
-void key_isr(void){
-	dash_state = digitalRead(DASH);
-	ptt_state = digitalRead(PTT);
-}
-
-void hw_init(){
-	wiringPiSetup();
-	init_gpio_pins();
-
-	enc_init(&enc_a, ENC_FAST, ENC1_B, ENC1_A);
-	enc_init(&enc_b, ENC_FAST, ENC2_A, ENC2_B);
-
-//	int e = g_timeout_add(1, ui_tick, NULL);
-
-	wiringPiISR(ENC2_A, INT_EDGE_BOTH, tuning_isr);
-	wiringPiISR(ENC2_B, INT_EDGE_BOTH, tuning_isr);
-	wiringPiISR(PTT, INT_EDGE_BOTH, key_isr);
-	wiringPiISR(DASH, INT_EDGE_BOTH, key_isr);
+	return CW_IDLE;
 }
 
 void hamlib_tx(int tx_input){
@@ -2522,209 +2378,6 @@ void zbitx_write(int style, char *text){
 	q_write(&q_zbitx_console, 0);
 }
 
-//cramp all the spectrum into 250 points
-void zbitx_get_spectrum(char *buff){
-
-  int n_bins = (int)((1.0 * spectrum_span) / 46.875);
-  //the center frequency is at the center of the lower sideband,
-  //i.e, three-fourth way up the bins.
-  int starting_bin = (3 *MAX_BINS)/4 - n_bins/2;
-  int ending_bin = starting_bin + n_bins;
-
-  int j;
-  if (in_tx){
-    strcpy(buff, "WF ");
-		j = strlen(buff);
-		float step = MOD_MAX/250.0;
-		//printf("wf on tx %d / %d", step, MOD_MAX);
-		for (float i = 0; i < MOD_MAX; i+= step){
-      int y = (2 * mod_display[(int)i]) + 32;
-      if (y > 127)
-        buff[j] = 127;
-			else if (y < 32)
-				buff[j] = ' ';
-      else
-        buff[j] = y;
-			j++;
-    }
-  }
-  else{
-    strcpy(buff, "WF ");
-		j = strlen(buff);
-		float step = (1.0  * (ending_bin - starting_bin))/250.0;
-		float i = 1.0 * starting_bin;
-    while(i <= (int) ending_bin){
-      int y = spectrum_plot[(int)i] + waterfall_offset;
-      if (y > 95)
-        buff[j++] = 127;
-      else if(y >= 0 )
-        buff[j++] = y + 32;
-      else
-        buff[j++] = ' ';
-			i += step;
-    }
-  }
-
-  buff[j++] = 0;
-//	if (in_tx)
-//		printf("%s : %d\n", buff, strlen(buff)); 
-  return;
-}
-
-static void zbitx_logs(){
-	char logbook_path[PATH_MAX];
-	char row_response[1000], row[1000];
-	char query[100];
-	char args[100];
-	int	row_id;
-
-	printf("Sending the last 50 log entries to zbitx\n");	
-	query[0] = 0;
-	row_id = -1;
-	logbook_query(NULL, row_id, logbook_path);
-	FILE *pf = fopen(logbook_path, "r");
-	if (!pf)
-		return;
-	while(fgets(row, sizeof(row), pf)){
-		sprintf(row_response, "QSO %s}", row);
-		//printf(row_response);
-		i2cbb_write_i2c_block_data(ZBITX_I2C_ADDRESS, '{', strlen(row_response), row_response);
-	}
-	fclose(pf);
-}
-
-void zbitx_poll(int all){
-	char buff[3000];
-	static unsigned int last_update = 0;
-	static int wf_update = 1;
-
-	int count = 0;
-	int e = 0;
-	int retry;
-	unsigned int this_time = millis();
-
-	for (int i = 0; active_layout[i].cmd[0] > 0; i++){
-		struct field *f = active_layout+i;
-		if (!strcmp(f->label, "WATERFALL") || !strcmp(f->label, "SPECTRUM") || !strcmp(f->label, "CONSOLE"))
-			continue;
-		if (all || f->updated_at >  last_update){
-			sprintf(buff, "%s %s}", f->label, f->value);
-			retry = 3;
-			do {
-				e = i2cbb_write_i2c_block_data(ZBITX_I2C_ADDRESS, '{', strlen(buff), buff);
-				if (!e){
-					if (retry < 3)
-						printf("Sucess on %d\n", retry);
-					break;
-				}
-				delay(3);
-				printf("Retrying I2C %d\n", retry);
-			}while(retry--);
-			f->update_remote = 0;
-			count++;
-			delay(10);
-		}
-	}
-	last_update = this_time;
-	
-	//check if the console q has any new updates
-	while (q_length(&q_zbitx_console) > 0){
-		char remote_cmd[1000];
-		int c, i;
-
-		i = 0;
-		while(i < sizeof(remote_cmd)-3 && (c = q_read(&q_zbitx_console)) >= ' ')
-			remote_cmd[i++] = c;
-		remote_cmd[i++] = '}';
-		remote_cmd[i++] = 0;
- 	
-		e = i2cbb_write_i2c_block_data(ZBITX_I2C_ADDRESS, '{', 
-			strlen(remote_cmd), remote_cmd);
-	}
-
-	if (wf_update){
-		zbitx_get_spectrum(buff);
-		strcat(buff, "}"); //terminate the block
-		//spectrum can be lost mometarily, it is alright	
-		delay(1);
-		i2cbb_write_i2c_block_data(0x0a, '{', strlen(buff), buff);
-	}
-
-	//transmit in_tx
-	sprintf(buff, "IN_TX %d}", in_tx);
-	delay(1);
-	i2cbb_write_i2c_block_data(0x0a, '{', strlen(buff), buff);
-
-
-	if(update_logs){
-		zbitx_logs();
-		update_logs = 0;
-	}
-
-	int  reply_length;
-
-	if ((reply_length = i2cbb_read_rll(0xa, buff)) != -1){
-	//zero terminate the reply
-		buff[reply_length] = 0;
-
-		if(!strncmp(buff, "FT8 ", 4)){
-			char ft8_message[100];
-			hd_strip_decoration(ft8_message, buff);
-			//ft8_process(ft8_message, FTX_START_QSO);
-			printf("FT4/8 from zbitx: %s\n", ft8_message);
-			remote_execute(ft8_message);
-		}
-		else if (!strcmp(buff, "WF ON"))
-			wf_update = 1;
-		else if (!strcmp(buff, "WF OFF"))
-			wf_update = 0;
-		else if (!strncmp(buff, "SHUTDOWN", 8)) {
-			printf("Shutting down system...\n");
-			system("sudo /sbin/shutdown -h now");
-		}
-		else{
-			if (!strncmp(buff, "OPEN", 4)){
-				update_logs = 1;
-				printf("<<<< refresh the log >>>>>\n");
-			}
-			remote_execute(buff);
-		}
-	}
-	last_update = this_time;
-}
-
-void zbitx_init(){
-	char buff[100];
-	sprintf(buff, "9 %s}", VER_STR);
- 	int e = i2cbb_write_i2c_block_data (ZBITX_I2C_ADDRESS, '{', 
-		strlen(buff), buff);
-
-
-	if (!e){
-		printf("zBitx front panel detected\n");
-		zbitx_available = 1;
-
-
- 		e = i2cbb_write_i2c_block_data (ZBITX_I2C_ADDRESS, '{', 
-		strlen(VER_STR), VER_STR);
-
-		FILE *pf = popen("hostname -I", "r");
-		if (pf){
-			char ip_str[100], buff[100];
-			fgets(ip_str, 100, pf);
-			pclose(pf);
-			//terminate the string at the first space
-			char *p = strchr(ip_str, ' ');
-			if (p){
-				*p = 0;
-				sprintf(buff, "9 \nzBitx on http://%s\n}", ip_str);
- 				i2cbb_write_i2c_block_data (ZBITX_I2C_ADDRESS, '{', 
-					strlen(buff), buff);
-			}
-		}
-	}
-}
-
 bool ui_tick(){
 	int static ticks = 0;
 
@@ -2749,24 +2402,7 @@ bool ui_tick(){
 		}
 	}
 
-	// check the tuning knob
 	struct field *f = get_field("r1:freq");
-
-	while (tuning_ticks > 0){
-		edit_field(f, MIN_KEY_DOWN);
-		tuning_ticks--;
-    //sprintf(message, "tune-\r\n");
-    //write_console(STYLE_LOG, message);
-
-	}
-
-	while (tuning_ticks < 0){
-		edit_field(f, MIN_KEY_UP);
-		tuning_ticks++;
-    //sprintf(message, "tune+\r\n");
-    //write_console(STYLE_LOG, message);
-	}
-
 
 	//the modem tick is called on every tick
 	//each modem has to optimize for efficient operation
@@ -2796,9 +2432,6 @@ bool ui_tick(){
 		char response[6], cmd[10];
 		cmd[0] = 1;
 
-		if (zbitx_available)
-			zbitx_poll(0);
-
 		if(in_tx){
 			char buff[10];
 
@@ -2812,15 +2445,6 @@ bool ui_tick(){
 		update_field(f);	//move this each time the spectrum watefall index is moved
 		f = get_field("waterfall");
 		update_field(f);
-
-		if (digitalRead(ENC1_SW) == 0){
-			//flip between mode and volume
-			if (f_focus && !strcmp(f_focus->label, "AUDIO"))
-				focus_field(get_field("r1:mode"));
-			else
-				focus_field(get_field("r1:volume"));
-			printf("Focus is on %s\n", f_focus->label);
-		}
 
 		if (record_start)
 			update_field(get_field("#record"));
@@ -2843,22 +2467,6 @@ bool ui_tick(){
 	save_user_settings(0);
 
  
-	//straight key in CW
-	if (f && (!strcmp(f_mode->value, "2TONE") || !strcmp(f_mode->value, "LSB") 
-	|| !strcmp(f_mode->value, "AM") || !strcmp(f_mode->value, "USB"))){
-		if (ptt_state == LOW && in_tx == 0)
-			tx_on(TX_PTT);
-		else if (ptt_state == HIGH && in_tx  == TX_PTT)
-			tx_off();
-	}
-
-	int scroll = enc_read(&enc_a);
-	if (scroll && f_focus){
-		if (scroll < 0)
-			edit_field(f_focus, MIN_KEY_DOWN);
-		else
-			edit_field(f_focus, MIN_KEY_UP);
-	}	
 	return TRUE;
 }
 
@@ -3659,7 +3267,6 @@ int main( int argc, char* argv[] ) {
 	f_pitch= get_field_by_label("PITCH");
 	f_text_in = get_field_by_label("TEXT");
 	ui_init(argc, argv);
-	hw_init();
 	console_init();
 
 	q_init(&q_remote_commands, 1000); //not too many commands
@@ -3746,11 +3353,6 @@ int main( int argc, char* argv[] ) {
 	settings_updated = 0;
   hamlib_start();
 	remote_start();
-
-	zbitx_init();
-
-	if (zbitx_available)
-		zbitx_poll(1); // send all the field values
 
 //	//switch to maximum priority
 //	struct sched_param sch;
