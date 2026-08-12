@@ -481,13 +481,6 @@ void rig_generic_connect(const char *model, const char *device, const char *baud
 	}
 	argv[i++] = "-t";
 	argv[i++] = port_str;
-	// Terminator for the "w"/send_cmd raw-passthrough mechanism (see
-	// rig_generic_set_rf_gain()) -- the QMX's own CAT manual states its
-	// commands "never contain a carriage return or linefeed character.
-	// They are always terminated by a semicolon", matching the classic
-	// Kenwood-style ASCII CAT convention this radio's TS-480 emulation
-	// follows. Harmless for rigs that don't use raw passthrough.
-	argv[i++] = "--send-cmd-term=;";
 	argv[i] = NULL;
 
 	rigctld_pid = fork();
@@ -554,13 +547,27 @@ void rig_generic_set_level(const char *level_name, float value)
 //
 // QMX-only for now: its CAT manual documents a native "RGnn;" command
 // (gain in dB, e.g. RG63; = 63dB) as part of its TS-480-style command
-// set -- rig_generic_connect() sets rigctld's send-cmd-term to ';' to
-// match. gain_db is passed straight through with no rescaling; the
-// UI's existing 0-100 range already sits comfortably inside this
-// radio's real gain range (factory per-band defaults are 54-74dB).
-// The RS-978's FT-817 emulation has no equivalent CAT command at all
+// set. Sent via rigctld's "w"/send_cmd, WITH the ';' included directly
+// in the command text -- confirmed by reading hamlib 4.7.1's own
+// rigctl_parse.c: for Kenwood/Yaesu-family backends (which the QMX's
+// TS-480 emulation is), it forces send_cmd_term to 0 (append nothing)
+// regardless of any --send-cmd-term flag, so the caller is expected to
+// supply their own terminator in the command string -- which this
+// hamlib build's rigctld doesn't even accept as a startup flag anyway
+// (confirmed live: "unrecognized option", which broke CAT for every
+// rig generic_rig_connect() spawns it for, not just the QMX -- a real
+// regression caught by the user's own RS-978 retest, now removed from
+// the spawn args entirely). Deliberately not using rigctld's
+// "send_raw" command instead: its reply read always blocks waiting
+// for terminator-delimited data, which a true fire-and-forget SET
+// command like this (QMX gives no reply to RG<n>;) would just time
+// out on every single call.
+// gain_db is passed straight through with no rescaling; the UI's
+// existing 0-100 range already sits comfortably inside this radio's
+// real gain range (factory per-band defaults are 54-74dB). The
+// RS-978's FT-817 emulation has no equivalent CAT command at all
 // (confirmed against both hamlib's own FT-817 backend, which has zero
-// settable levels either, and UHSDR's own CAT documentation) -- silent
+// settable levels either, and UHSDR's own firmware source) -- silent
 // no-op there rather than sending a command it can't understand.
 void rig_generic_set_rf_gain(int gain_db)
 {
@@ -569,7 +576,7 @@ void rig_generic_set_rf_gain(int gain_db)
 	if (rig_generic_model_id != 2057)
 		return;
 
-	snprintf(cmd, sizeof(cmd), "w RG%d", gain_db);
+	snprintf(cmd, sizeof(cmd), "w RG%d;", gain_db);
 	rig_send_command(cmd);
 }
 
