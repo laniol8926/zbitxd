@@ -658,18 +658,6 @@ select, select option, input {
 	width: 90px;
 }
 
-.wfgain-toggle-row {
-	padding: 3px 6px;
-	background-color: black;
-}
-
-.wfgain-toggle-row label {
-	color: #3dacbf;
-	font-size: 11px;
-	font-weight: bold;
-	cursor: pointer;
-}
-
 #waterfall_scale {
 	display: block;
 	background-color: black;
