@@ -3339,7 +3339,12 @@ document.addEventListener('keydown', function(e){
 	}
 	else if (e.key == 'Escape'){
 		websocket_send("ESC");
-		e.preventDefault();
+		// deliberately no e.preventDefault() here -- Escape's native
+		// browser behavior (most importantly exiting fullscreen) was
+		// getting suppressed along with it in some browsers, leaving
+		// no way back out of fullscreen via the keyboard (confirmed
+		// live: "to exit full screen hit esc, that does not work").
+		// The app's own ESC action above still fires either way.
 	}
 	else if (e.key == "Enter" && text_focus != null && text_focus.id == "text_in"){
 		websocket_send(text_focus.value);
