@@ -547,6 +547,12 @@ var spec_zero = wf_gain_load("spec_zero", 0);
 var wf_gain = wf_gain_load("wf_gain", 100);
 var wf_zero = wf_gain_load("wf_zero", 0);
 
+// FT8/FT4 waterfall real-time scroll driver -- see waterfall_scroll_tick()
+// and the response_handler() TX/RX branch for why this exists instead of
+// scrolling once per server response.
+var last_wf_row = null;
+var wf_scroll_timer = null;
+
 /* oz7bx gridmap -- container div commented out above; GRIDMAP.init()
    would throw on a null container (its own code assumes one exists),
    which would abort this whole top-level <script> block since this
@@ -914,6 +920,7 @@ function resize_ui(){
 	// picks up a phone orientation flip (fires as a resize event) without
 	// needing the user to switch modes.
 	el("waterfall").height = waterfall_calc_height();
+	waterfall_setup_scroll_rate();
 	sync_wf_overlay_size();
 	height = b.height();
 }
@@ -972,35 +979,18 @@ $('#waterfall').mousedown(function(e) {
 // + llh
 var nbins = 0;
 
-function waterfall_update(update){
-	var w = el("waterfall");
+// Builds one pixel-high row of waterfall color data from a raw "TX "/
+// "RX "-prefixed spectrum string -- factored out of waterfall_update()
+// so the FT8/FT4 sweep display (waterfall_scroll_tick()) can draw a row
+// at an arbitrary y position without going through the continuous-scroll
+// shift logic below, which doesn't apply to a sweep display.
+function waterfall_build_row(update, ctx, width){
+	var n = update.length - 3;
+	var scale = n/width;
+	var img = ctx.createImageData(width, 1);
 	var i = 0;
 
-	if (w.width == 0 || w.height== 0)
-		return;
-
-	nbins = update.length - 3;
-	var scale = nbins/w.width;
-
-	var mode = el("MODE").value;
-	var repeat = 3;
-
-	if (mode === "FT8" || mode === "FT4")
-		repeat = 1;
-	else if (mode == 'CW' || mode == 'CWR')
-		repeat = 2;
-
-	var ctx = w.getContext("2d", {willReadFrequently:true});
-
-	//first move the old image down by 1 pixels (bitblt it down)
-	var img = ctx.getImageData(0,0,w.width, w.height);
-	ctx.putImageData(img, 0, repeat);
-
-	//create a new strip of waterfall width, but 1 pixels high
-	img = ctx.getImageData(0,0,w.width, 1);
-	var i = 0;
-
-	for (var x = 0; x < w.width; x++){
+	for (var x = 0; x < width; x++){
 		// interpolate between the two bins bracketing this pixel's
 		// fractional bin position, rather than sampling only the
 		// nearest one -- with a locked 3kHz span spread across a much
@@ -1024,9 +1014,9 @@ function waterfall_update(update){
 		var bin1 = bin0 + 1;
 		var frac = bin_f - bin0;
 		if (bin0 < 0) bin0 = 0;
-		if (bin0 > nbins - 1) bin0 = nbins - 1;
+		if (bin0 > n - 1) bin0 = n - 1;
 		if (bin1 < 0) bin1 = 0;
-		if (bin1 > nbins - 1) bin1 = nbins - 1;
+		if (bin1 > n - 1) bin1 = n - 1;
 
 		//the first three are status
 		var v0 = (update.charCodeAt(bin0+3) - 32) * 2;
@@ -1069,7 +1059,7 @@ function waterfall_update(update){
 			r = (v-60) * 12;
 			g = 255;
 			b = 0;
-		} 
+		}
 		else {
 			r = 255;
 			g = (100-v) * 12;
@@ -1081,7 +1071,33 @@ function waterfall_update(update){
 		img.data[i++] = 255;
 	}
 
-	for (i = 0; i < repeat; i++)
+	nbins = n;
+	return img;
+}
+
+// Continuous-scroll waterfall -- CW/USB/etc. Not used for FT8/FT4
+// anymore (see waterfall_scroll_tick()), which needs an absolute-
+// position sweep instead of a shift-down-by-N-pixels scroll.
+function waterfall_update(update){
+	var w = el("waterfall");
+
+	if (w.width == 0 || w.height== 0)
+		return;
+
+	var mode = el("MODE").value;
+	var repeat = 3;
+
+	if (mode == 'CW' || mode == 'CWR')
+		repeat = 2;
+
+	var ctx = w.getContext("2d", {willReadFrequently:true});
+
+	//first move the old image down by 1 pixels (bitblt it down)
+	var img = ctx.getImageData(0,0,w.width, w.height);
+	ctx.putImageData(img, 0, repeat);
+
+	img = waterfall_build_row(update, ctx, w.width);
+	for (var i = 0; i < repeat; i++)
 		ctx.putImageData(img, 0,i);
 
 	draw_wf_overlay();
@@ -2576,31 +2592,109 @@ function show_selected_band_store(args) {
 // waterfall height as a share of the viewport, not a fixed pixel count --
 // a fixed value can't look right in both phone portrait and landscape at
 // once. Clamped so it never collapses on a short landscape screen or
-// swallows the whole page on a tall one.
-//
-// FT8/FT4 are a special case: rows advance in lockstep with ui_tick()'s
-// 50ms poll (every poll gets a fresh spectrum frame back regardless of
-// whether "audio" or "spectrum" was requested -- see get_audio()/
-// get_spectrum() in webserver.c, both call web_get_spectrum()), at
-// `repeat` rows per poll (waterfall_update() sets repeat=1 for FT8/FT4).
-// That's a fixed, known rows/second rate (1000/50 * 1 = 20), so the
-// canvas height that makes the *whole visible waterfall* equal exactly
-// one decode period -- never bleeding into the previous cycle, never
-// leaving dead space for a cycle still in progress -- is just
-// period_seconds * 20. FT4's period is half FT8's (7.5s vs 15s), so it
-// needs half the rows for the same one-period result. This overrides
-// the viewport-percentage sizing for these two modes specifically.
-const WF_ROWS_PER_SEC = 1000 / 50;
+// swallows the whole page on a tall one. Applies to every mode,
+// including FT8/FT4 -- an earlier version locked FT8/FT4 to a fixed
+// 300px/150px (period_seconds * a fixed rows/sec) so the canvas height
+// exactly equalled one decode period, but that fixed pixel count could
+// eat close to half the screen on some viewports, crowding out the
+// Band Activity list ("missing decodes... waterfall height takes up
+// almost half of the vertical display" -- a real, reported regression).
+// Rather than pick one of "always exactly one period" or "always fits
+// the viewport", wf_rows_per_sec below makes the *rate* adapt to
+// whatever height this formula returns, so both hold at once: the
+// waterfall still always represents exactly one period top-to-bottom,
+// it just scrolls faster or slower depending on how tall the viewport
+// let it be.
+const WF_SCROLL_INTERVAL_MS = 50;
 const FT8_PERIOD_SEC = 15;
 const FT4_PERIOD_SEC = 7.5;
 
-function waterfall_calc_height(){
-	var mode = el("MODE") ? el("MODE").value : "";
-	if (mode === "FT8")
-		return Math.round(FT8_PERIOD_SEC * WF_ROWS_PER_SEC);
-	if (mode === "FT4")
-		return Math.round(FT4_PERIOD_SEC * WF_ROWS_PER_SEC);
+// FT8/FT4 scroll rate, in rows/second -- recomputed by
+// waterfall_setup_scroll_rate() any time the canvas height changes
+// (mode switch or viewport resize/rotation) so "one period = full
+// height" keeps holding regardless of what height actually is. Also
+// drives waterfall_scroll_tick()'s pacing (see there for why it's
+// elapsed-time-based rather than a fixed 1-row-per-tick counter).
+var wf_rows_per_sec = 20;
+var wf_scroll_start_time = null;
+var wf_rows_emitted = 0;
 
+// mode: pass explicitly from mode_set() (which knows new_mode
+// authoritatively -- see waterfall_calc_height()'s comment on why
+// el("MODE").value can be stale at that exact point) or omit to read
+// the DOM (fine from resize_ui(), which only ever runs well after any
+// mode transition has settled).
+function waterfall_setup_scroll_rate(mode){
+	if (mode === undefined)
+		mode = el("MODE") ? el("MODE").value : "";
+	var height = el("waterfall").height;
+	var period_sec = (mode === "FT4") ? FT4_PERIOD_SEC
+		: (mode === "FT8") ? FT8_PERIOD_SEC : null;
+	if (period_sec == null)
+		return;
+	wf_rows_per_sec = height / period_sec;
+	// height just changed, so any rows already scrolled at the old
+	// rate no longer correspond to a sane position on the new-size
+	// canvas -- start the current period over rather than let the
+	// pacing math produce a jump.
+	last_wf_row = null;
+	wf_scroll_start_time = null;
+	wf_rows_emitted = 0;
+	waterfall_clear();
+}
+
+function waterfall_clear(){
+	var w = el("waterfall");
+	var ctx = w.getContext("2d", {willReadFrequently:true});
+	ctx.fillStyle = "black";
+	ctx.fillRect(0, 0, w.width, w.height);
+}
+
+// FT8/FT4 continuous scroll -- new rows enter at the top and push older
+// rows down, same direction/shape as waterfall_update()'s scroll for
+// other modes, just driven by this dedicated timer instead of one
+// scroll per server response (see response_handler()'s TX/RX branch for
+// why: that broke the moment a station spent part of a period
+// transmitting).
+//
+// Rate is computed from elapsed real time rather than "add 1 row per
+// tick", so it self-corrects for any setInterval jitter/throttling
+// instead of drifting -- an earlier version that just counted ticks
+// measured out at "a time period and a half per scroll" on real
+// hardware. wf_rows_emitted tracks how many rows *should* exist by now
+// given real elapsed time (rows/sec = height/period, exact by
+// construction); the gap between that and rows actually drawn so far is
+// how many to add this tick (normally 1, more if a tick was delayed).
+function waterfall_scroll_tick(){
+	if (last_wf_row == null)
+		return;
+
+	var w = el("waterfall");
+	if (w.height == 0)
+		return;
+
+	if (wf_scroll_start_time == null)
+		wf_scroll_start_time = Date.now();
+
+	var elapsed_sec = (Date.now() - wf_scroll_start_time) / 1000;
+	var target_total = Math.floor(elapsed_sec * wf_rows_per_sec);
+	var rows_needed = target_total - wf_rows_emitted;
+	if (rows_needed <= 0)
+		return;
+
+	var ctx = w.getContext("2d", {willReadFrequently:true});
+	var img = waterfall_build_row(last_wf_row, ctx, w.width);
+
+	var shifted = ctx.getImageData(0, 0, w.width, w.height);
+	ctx.putImageData(shifted, 0, rows_needed);
+	for (var y = 0; y < rows_needed; y++)
+		ctx.putImageData(img, 0, y);
+
+	wf_rows_emitted = target_total;
+	draw_wf_overlay();
+}
+
+function waterfall_calc_height(){
 	var h = Math.round(window.innerHeight * 0.35);
 	if (h < 150)
 		h = 150;
@@ -2612,8 +2706,22 @@ function waterfall_calc_height(){
 function mode_set(new_mode){
 
 	var wf = el("waterfall");
+	// new_mode, not el("MODE").value -- see waterfall_setup_scroll_rate()'s
+	// comment on why the DOM can be stale at this exact point for a
+	// server-pushed mode change.
 	wf.height = waterfall_calc_height();
+	waterfall_setup_scroll_rate(new_mode);
 	sync_wf_overlay_size();
+
+	// Only FT8/FT4 use the real-time scroll timer (see
+	// waterfall_scroll_tick()) -- clear it on every mode change and only
+	// restart it if the new mode still needs it, so it doesn't keep
+	// redrawing a stale frozen row (and burning CPU) once the user
+	// switches to CW/USB/etc.
+	if (wf_scroll_timer != null){
+		clearInterval(wf_scroll_timer);
+		wf_scroll_timer = null;
+	}
 
 	$(".mode-panel").hide();
 	switch(new_mode){
@@ -2627,6 +2735,7 @@ function mode_set(new_mode){
 			$("#FT8_ui").show();
 			logger_set_macro("FT8");
 			sound_mute = true;
+			wf_scroll_timer = setInterval(waterfall_scroll_tick, WF_SCROLL_INTERVAL_MS);
 			break;
 		default:
 			var panel_name = "#" + new_mode + "_ui";
@@ -2680,7 +2789,20 @@ function response_handler(response){
 		else if (response.substring(0,2) == "RX" && in_tx == true)
 			switch_to_rx();
 
-		if (in_tx == false)
+		// FT8/FT4: a dedicated real-time timer (wf_scroll_timer, see
+		// mode_set()/waterfall_scroll_tick()) drives the waterfall
+		// instead of this per-response call, so keep the latest genuine
+		// RX row available for it but don't draw here -- drawing on
+		// every response AND on the timer would double the scroll rate.
+		// Only RX-prefixed rows are kept (never TX-prefixed) so the
+		// display freezes on the last real receiver data during TX,
+		// same as a real radio muting its receiver while transmitting,
+		// rather than drawing whatever a "TX ..." row actually contains.
+		if (response.substring(0,2) == "RX")
+			last_wf_row = response;
+
+		var mode = el("MODE").value;
+		if (mode !== "FT8" && mode !== "FT4" && in_tx == false)
 			waterfall_update(response);
 		return;
 	}
