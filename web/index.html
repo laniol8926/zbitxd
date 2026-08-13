@@ -2675,12 +2675,15 @@ const WF_SCROLL_INTERVAL_MS = 50;
 
 // FT8/FT4 top-to-bottom scroll duration -- deliberately NOT tied to a
 // single decode period anymore (that was 15s/7.5s, one FT8/FT4 cycle
-// exactly). Started at 45s (several periods' worth of history on screen
-// at once rather than each cycle wiping the previous one off the top
-// edge), reduced to 30s after further live testing. Same value for both
-// modes on purpose -- this is about how much history to keep on screen,
-// not about matching a protocol timing.
-const WF_SCROLL_DURATION_SEC = 30;
+// exactly). 45s (several periods' worth of history on screen at once
+// rather than each cycle wiping the previous one off the top edge),
+// briefly reduced to 30s then put back -- turned out the real complaint
+// was the waterfall's physical pixel height (see waterfall_calc_height()),
+// not how much time was shown; this and that are independent knobs (see
+// waterfall_setup_scroll_rate()). Same value for both modes on purpose
+// -- this is about how much history to keep on screen, not about
+// matching a protocol timing.
+const WF_SCROLL_DURATION_SEC = 45;
 
 // FT8/FT4 scroll rate, in rows/second -- recomputed by
 // waterfall_setup_scroll_rate() any time the canvas height changes
@@ -2853,11 +2856,16 @@ function waterfall_scroll_tick(){
 }
 
 function waterfall_calc_height(){
-	var h = Math.round(window.innerHeight * 0.35);
-	if (h < 150)
-		h = 150;
-	if (h > 400)
-		h = 400;
+	// one third less than the original 35%-of-viewport sizing -- user's
+	// direct ask, after confirming the scroll-duration knob (how much
+	// TIME fits top-to-bottom) has zero effect on this, the actual
+	// physical pixel height. Clamp bounds scaled down by the same 2/3
+	// factor so they stay proportional.
+	var h = Math.round(window.innerHeight * 0.35 * (2/3));
+	if (h < 100)
+		h = 100;
+	if (h > 267)
+		h = 267;
 	return h;
 }
 
