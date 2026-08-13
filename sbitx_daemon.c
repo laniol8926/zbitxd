@@ -252,8 +252,13 @@ struct band band_stack[] = {
 		{7000000,7040000,7074000,7150000},{MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 	{"30M", 10100000, 10150000, 0,
 		{10100000, 10100000, 10136000, 10150000}, {MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
-	{"20M", 14000000, 14400000, 0,
-		{14000000, 14400000, 14074000, 14200000}, {MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
+	// stop was 14400000 (14.400) -- the real internationally-harmonized
+	// amateur allocation is 14.000-14.350, same across all 3 ITU
+	// regions (confirmed live: a user test tuning to 14.400 expected a
+	// refusal from the new out-of-band guard below and got none,
+	// because this table said 14.400 was still in-band).
+	{"20M", 14000000, 14350000, 0,
+		{14000000, 14350000, 14074000, 14200000}, {MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 	{"17M", 18068000, 18168000, 0,
 		{18068000, 18100000, 18110000, 18160000}, {MODE_USB, MODE_FT8, MODE_USB, MODE_USB}},
 	{"15M", 21000000, 21500000, 0,
@@ -3198,6 +3203,21 @@ void cmd_exec(char *cmd){
 		}
 		else if (freq < 30000)
 			freq *= 1000;
+
+		// Refuse here, before set_field("r1:freq", ...) below ever
+		// runs -- set_field() unconditionally commits the new value to
+		// the field AND pushes it to the client via update_field(),
+		// regardless of what set_operating_freq() decides deeper in
+		// the call chain (do_control_action() -> set_operating_freq()
+		// has its own freq_in_any_band() guard too, which correctly
+		// kept the real radio from retuning -- but by the time that ran
+		// the field's value, and hence the app's own display, had
+		// already changed). Confirmed live: radio stayed put, display
+		// jumped to the rejected frequency anyway.
+		if (freq > 0 && !freq_in_any_band((int)freq)){
+			write_console(STYLE_LOG, "OUT OF BAND\n");
+			return;
+		}
 
 		struct field *f_rit = get_field_by_label("RIT");
 		if (!strcmp(f_rit->value, "ON")){

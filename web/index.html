@@ -209,12 +209,19 @@
 		<div class="settings-element">
 			<span class="settings-label">ITU Region:</span>
 			<select class="sbitxv3-selection sbitx-selection" id="REGION">
-				<option value="1">1 (Europe/Africa/ME/former USSR)</option>
-				<option value="2" selected>2 (Americas)</option>
-				<option value="3">3 (Asia-Pacific)</option>
-			</select>
-			(affects 80M/40M band edges only -- e.g. 40M is 7.0-7.2 in
-			Regions 1/3, 7.0-7.3 in Region 2)<br/>
+				<option value="1">1</option>
+				<option value="2" selected>2</option>
+				<option value="3">3</option>
+			</select><br/>
+			<!-- .sbitxv3-selection is a fixed 48px wide, meant for short
+			     toolbar labels (ON/OFF/FAST/etc) -- the earlier verbose
+			     in-option text ("1 (Europe/Africa/ME/former USSR)") ran
+			     into the description text next to it instead of wrapping.
+			     Kept the select itself just "1"/"2"/"3", moved all the
+			     description onto its own line below. -->
+			1 = Europe/Africa/Middle East/former USSR, 2 = Americas,
+			3 = Asia-Pacific. Affects 80M/40M band edges only (e.g. 40M
+			is 7.0-7.2 in Regions 1/3, 7.0-7.3 in Region 2).<br/>
 			<span id="region_grid_hint"></span>
 		</div>
 		<div class="settings-element">
@@ -912,6 +919,17 @@ function submit_frequency(){
 	var freq_hz = Math.round(parseFloat(input) * 1000);
 	if (freq_hz < 1000000 || freq_hz > 30000000){
 		alert("Frequency entered is out of range and should be in kHz.");
+		return;
+	}
+	// Same check the server itself now enforces (freq_in_any_band() in
+	// set_operating_freq()/the cmd_exec "freq" handler) -- done here too,
+	// client-side, so the user gets an immediate popup instead of just a
+	// console log line that's easy to miss, and without waiting on a
+	// round trip. Reuses the same region-aware get_band_ranges() the
+	// BAND dropdown sync already uses, so this can't drift out of sync
+	// with what the server actually allows.
+	if (freq_to_band(freq_hz) == null){
+		alert("Invalid Frequency: " + input + " kHz is outside any amateur band");
 		return;
 	}
 	update_freq(freq_hz.toString());
@@ -2762,7 +2780,7 @@ function get_band_ranges(){
 		["60M", 5250000, 5500000],
 		["40M", r40[0], r40[1]],
 		["30M", 10100000, 10150000],
-		["20M", 14000000, 14400000],
+		["20M", 14000000, 14350000],
 		["17M", 18068000, 18168000],
 		["15M", 21000000, 21500000],
 		["12M", 24890000, 24990000],
