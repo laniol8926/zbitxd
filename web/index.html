@@ -2276,6 +2276,7 @@ function logger_wipe(event){
 
 function logger_abort(event){
 	websocket_send("abort=1");
+	clear_cq_highlight();
 }
 
 function show_in_qrz_window(callsign) {
@@ -2319,8 +2320,32 @@ function logger_enter_qso(){
 	setTimeout(logbook_reload, 500);
 }
 
+// F1 is the CQ macro in the default macro set -- calls CQ repeatedly
+// until stopped, same "actively doing something" category as Tune, so
+// it gets the same light-green highlight while active. Scoped
+// specifically to F1 (via event.currentTarget.id, not the same as the
+// event.id used for the actual websocket_send() above -- that's this
+// function's own pre-existing convention, left as-is) rather than
+// every .macro-btn, since only F1/CQ is a toggle-until-stopped action.
+var cq_active = false;
+
 function logger_trigger_macro(event){
 	websocket_send(event.id);
+	if (event.currentTarget && event.currentTarget.id === "F1"){
+		cq_active = !cq_active;
+		el("F1").classList.toggle("toggle-active", cq_active);
+	}
+}
+
+// Escape (the #esc button's logger_abort(), or the Escape key itself --
+// see the keydown handler below) is equivalent to clicking F1 again:
+// either way CQ-calling stops, so the highlight needs to clear on both,
+// not just a second F1 click.
+function clear_cq_highlight(){
+	if (cq_active){
+		cq_active = false;
+		el("F1").classList.remove("toggle-active");
+	}
 }
 
 function logger_bind_key(fn_key, macro_line){
@@ -2647,7 +2672,7 @@ function toggle_tune(){
 	tune_on = !tune_on;
 	websocket_send("TUNE " + (tune_on ? "ON" : "OFF"));
 	el("tune_toggle").innerHTML = tune_on ? "Stop Tune" : "Tune";
-	el("tune_toggle").classList.toggle("tune-active", tune_on);
+	el("tune_toggle").classList.toggle("toggle-active", tune_on);
 }
 
 // shutdown -h/-r now takes several real seconds (stopping services,
@@ -3375,6 +3400,7 @@ document.addEventListener('keydown', function(e){
 		// no way back out of fullscreen via the keyboard (confirmed
 		// live: "to exit full screen hit esc, that does not work").
 		// The app's own ESC action above still fires either way.
+		clear_cq_highlight();
 	}
 	else if (e.key == "Enter" && text_focus != null && text_focus.id == "text_in"){
 		websocket_send(text_focus.value);

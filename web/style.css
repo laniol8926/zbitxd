@@ -853,10 +853,15 @@ body {
 	/*padding: 7 0 7 0;*/
 }
 
-/* Tune actually keys the transmitter with a steady tone -- light green
-   background while active is a clear, ongoing reminder it's on until
-   clicked again, not just the "Stop Tune" label text. */
-#tune_toggle.tune-active {
+/* Shared "this is actively doing something" highlight -- Tune (keys the
+   transmitter with a steady tone) and F1/CQ (calls CQ repeatedly until
+   stopped) both use this, a clear ongoing reminder while active rather
+   than just a label change. Combined-class selectors (not just
+   .toggle-active alone) so this reliably wins regardless of where
+   .macro-btn's own background-color (line ~975, same specificity,
+   comes later in the cascade and silently won otherwise) sits in the
+   file. */
+.toggle-active, .macro-btn.toggle-active, #tune_toggle.toggle-active {
 	background-color: lightgreen;
 	color: black;
 }
