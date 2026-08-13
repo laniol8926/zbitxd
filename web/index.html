@@ -1875,6 +1875,19 @@ function FT8_format_period_label(label){
 
 function FT8_list_append(list_id, text, style){
 
+	// Skip an exact-duplicate of the immediately preceding entry -- the
+	// server can echo the same logical message through more than one
+	// XML tag at once (e.g. WSJTX-RX and WSJTX-Q both carrying your own
+	// queued reply right after clicking a CQ line to start a QSO, see
+	// update_data()'s separate per-tag-type loops), which otherwise
+	// shows up as the identical line appearing twice -- confirmed live
+	// by direct user report: one click doubled the RX Frequency panel
+	// entry, a double-click quadrupled it.
+	var existing_ol = el(list_id).querySelector("ol");
+	var last_item = existing_ol.lastElementChild;
+	if (last_item && last_item.dataset && last_item.dataset.message === deco_strip(text))
+		return;
+
 	var item = document.createElement("li");
 	FT8_stylize_message_item(item, text, style);
 
