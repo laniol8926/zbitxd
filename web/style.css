@@ -1014,6 +1014,21 @@ body {
 	border: solid 1px black;
 }
 
+/* Power (Reboot/Shutdown) -- red background/white text, same "worth
+   flagging as consequential" treatment as TX PWR/#linear_DRIVE above,
+   user's explicit ask given what this control actually does. */
+.power-control {
+	background-color: #bf0f0f;
+	border: solid 1px black;
+}
+.power-control .sbitxv3-label {
+	color: white;
+}
+.power-control .sbitxv3-selection {
+	background-color: #bf0f0f;
+	color: white;
+}
+
 /* TX TONE box hidden, not removed -- user verified the waterfall
    click-to-tune sets TX_PITCH correctly, making the manual entry box
    redundant, but #TX_PITCH/#slider_TX_PITCH are still read directly by

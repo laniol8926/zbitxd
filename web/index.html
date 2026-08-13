@@ -160,13 +160,16 @@
 				<option value="OFF">OFF</option>
 				<option value="ON">ON</option>
 			</select>
-		</div><div class="sbitxv3-control">
-			<div class="sbitxv3-label">PWR</div>
+		</div><div class="sbitxv3-control power-control">
+			<div class="sbitxv3-label">Power</div>
 			<!-- was two separate Reboot/Shutdown buttons -- one-shot
 			     action select instead, space-saving. Not .sbitx-selection
 			     (the generic handler sends a raw, unconfirmed
 			     websocket_send() on every change) -- has its own
-			     confirm()-gated handler, see do_power_action(). -->
+			     confirm()-gated handler, see do_power_action(). Red/
+			     white styling (.power-control) matches this app's
+			     existing convention for a control worth flagging as
+			     consequential (e.g. #linear_DRIVE/TX PWR). -->
 			<select class="sbitxv3-selection" id="power_action">
 				<option value="" selected>--</option>
 				<option value="reboot">Reboot</option>
