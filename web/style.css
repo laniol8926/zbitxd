@@ -1042,6 +1042,16 @@ body {
 	color: white;
 }
 
+/* TX Enabled -- passive status indicator (no user interaction), white
+   label text always, background turns red only while actually
+   transmitting (see switch_to_tx()/switch_to_rx()). */
+.tx-enabled-indicator .sbitxv3-label {
+	color: white;
+}
+.tx-enabled-indicator.tx-active {
+	background-color: red;
+}
+
 /* TX TONE box hidden, not removed -- user verified the waterfall
    click-to-tune sets TX_PITCH correctly, making the manual entry box
    redundant, but #TX_PITCH/#slider_TX_PITCH are still read directly by

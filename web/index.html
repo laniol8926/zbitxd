@@ -123,6 +123,8 @@
 		</div><div class="sbitxv3-control">
 			<div class="sbitxv3-label">GAIN</div>
 			<input type="checkbox" id="wf_gain_controls_toggle" checked />
+		</div><div class="sbitxv3-control tx-enabled-indicator" id="tx_enabled_indicator">
+			<div class="sbitxv3-label">TX Enabled</div>
 		</div>
 	<br/>
 		<div class="linear" id="linear_DRIVE">
@@ -1708,12 +1710,14 @@ function switch_to_tx(){
 	log("setting in_tx true");
 	$("#tx_meters").show();
 	in_tx = true;
+	el("tx_enabled_indicator").classList.add("tx-active");
 }
 
 function switch_to_rx(){
 	$("#tx_meters").hide();
 	log("setting in_tx false");
 	in_tx = false;
+	el("tx_enabled_indicator").classList.remove("tx-active");
 }
 
 /* wsjtx functionality */
