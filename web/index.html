@@ -1207,8 +1207,11 @@ function draw_wf_overlay(){
 		rx_x = rx_pitch * hz_per_pixel;
 	rx_x = Math.round(rx_x);
 
-	ctx.strokeStyle = "cyan";
-	ctx.fillStyle = "cyan";
+	// was "cyan" -- barely visible against the waterfall's own blue/
+	// cyan/green color range (a jet-style palette), which white never
+	// appears in.
+	ctx.strokeStyle = "white";
+	ctx.fillStyle = "white";
 	ctx.font = "10px sans-serif";
 	ctx.beginPath();
 	ctx.moveTo(rx_x + 0.5, 0);
