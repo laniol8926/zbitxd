@@ -1002,6 +1002,16 @@ body {
 	border: solid 1px black;
 }
 
+/* TX TONE box hidden, not removed -- user verified the waterfall
+   click-to-tune sets TX_PITCH correctly, making the manual entry box
+   redundant, but #TX_PITCH/#slider_TX_PITCH are still read directly by
+   draw_wf_overlay()/wf_overlay_click()/FT8_message_chosen() and written
+   by the server's generic field-update fallback, so the elements stay
+   in the DOM -- only their toolbar control is hidden. */
+#linear_TX_PITCH {
+	display: none;
+}
+
 
 /* specific controls */
 #TEXT {
@@ -1111,8 +1121,13 @@ body {
 #keypad_panel {
 	position: fixed;
 	top: 50%;
-	left: 50%;
-	transform: translate(-50%, -50%);
+	/* was left:50% + translateX(-50%) (screen-centered) -- on a small
+	   screen that landed right on top of the frequency display it's
+	   meant to be entering a new value for, since that display sits in
+	   the left/center-left of the top toolbar. Anchored to the right
+	   edge instead so it never overlaps it. */
+	right: 10px;
+	transform: translateY(-50%);
 	z-index: 1000;
 }
 
