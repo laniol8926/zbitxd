@@ -1459,6 +1459,22 @@ function save_panel_geometry(panel){
 
 function init_draggable_panels(){
 	document.querySelectorAll(".sbitx-panel").forEach(function(panel){
+		// #keypad_panel is meant to always appear at its CSS-defined
+		// position (right edge, vertically centered -- see style.css,
+		// fixed there specifically because it was overlapping the
+		// frequency display it edits), not a user-draggable/remembered
+		// one like settings/connect. Skipping it here entirely also
+		// clears out any stale saved position from before that CSS fix
+		// existed, which would otherwise keep silently overriding it
+		// forever (confirmed live: the fix "didn't take" because a
+		// leftover localStorage geometry from an earlier test/drag was
+		// still being restored and taking precedence over the CSS).
+		if (panel.id == "keypad_panel"){
+			["left", "top", "width", "height"].forEach(function(prop){
+				localStorage.removeItem(panel_geometry_key(panel, prop));
+			});
+			return;
+		}
 		restore_panel_geometry(panel);
 
 		// native resize fires no DOM event on its own -- ResizeObserver
