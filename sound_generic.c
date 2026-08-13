@@ -170,6 +170,21 @@ static int gen_spectrum_ready = 0;
 #define GENERIC_SPEC_START_BIN ((3 * MAX_BINS) / 4)
 #define GENERIC_SPEC_SMOOTHING 0.3f
 
+// gen_spectrum_update() is called once per capture read (GENERIC_BUF_FRAMES
+// = 1024 samples, ~10.67ms at 96kHz) to keep the sliding window current,
+// but actually re-running the 16384-point FFT that often is unnecessary
+// and expensive -- found live, not guessed: one capture thread pegged at
+// ~87% CPU sustained (confirmed via `sudo gdb -p <tid> -batch -ex bt`,
+// which landed inside libfftw3), driving the whole Pi's load average
+// over 9 on a quad-core board and causing real, reported waterfall
+// stalls. GENERIC_SPEC_REFRESH_SAMPLES throttles the actual FFT+bin-write
+// work to roughly this many new samples between runs (100ms's worth here)
+// -- comfortably faster than anything the display could show a
+// difference for (even the fastest current waterfall scroll rate adds a
+// new row much slower than that), while cutting FFT calls/sec by roughly
+// the same ~9.4x this window is longer than one capture read.
+#define GENERIC_SPEC_REFRESH_SAMPLES (GENERIC_SAMPLE_RATE / 10)
+
 static void gen_spectrum_init(void)
 {
 	if (gen_spectrum_ready)
@@ -191,10 +206,16 @@ static void gen_spectrum_init(void)
 // GENERIC_BUF_FRAMES=1024 well under that) -- slides the new real samples
 // into a GENERIC_SPEC_FFT_SIZE-long window (takes 16 calls, ~170ms, to
 // fully cycle -- a deliberately long analysis window, see
-// GENERIC_SPEC_FFT_SIZE's comment), windows+transforms it, and writes the
-// result into spectrum_plot[]
+// GENERIC_SPEC_FFT_SIZE's comment) on every call, but only actually
+// re-runs the FFT/writes spectrum_plot[] once GENERIC_SPEC_REFRESH_SAMPLES
+// new samples have accumulated (see its own comment for why) -- the
+// window itself still slides on every call so the next refresh always
+// analyzes the most current audio, only the expensive transform is
+// throttled.
 static void gen_spectrum_update(int32_t *samples, int n)
 {
+	static int samples_since_refresh = 0;
+
 	if (n <= 0)
 		return;
 	if (n > GENERIC_SPEC_FFT_SIZE)
@@ -202,6 +223,11 @@ static void gen_spectrum_update(int32_t *samples, int n)
 
 	memmove(gen_spec_buf, gen_spec_buf + n, (GENERIC_SPEC_FFT_SIZE - n) * sizeof(int32_t));
 	memcpy(gen_spec_buf + (GENERIC_SPEC_FFT_SIZE - n), samples, n * sizeof(int32_t));
+
+	samples_since_refresh += n;
+	if (samples_since_refresh < GENERIC_SPEC_REFRESH_SAMPLES)
+		return;
+	samples_since_refresh = 0;
 
 	// same raw-sample-to-float divisor sbitx.c's own rx_linear() uses
 	// (input_rx[j] / 20000000.0) for its FFT input, kept here for a
