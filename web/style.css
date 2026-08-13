@@ -1120,14 +1120,16 @@ body {
    dialog position is set here specifically. */
 #keypad_panel {
 	position: fixed;
-	top: 50%;
-	/* was left:50% + translateX(-50%) (screen-centered) -- on a small
-	   screen that landed right on top of the frequency display it's
-	   meant to be entering a new value for, since that display sits in
-	   the left/center-left of the top toolbar. Anchored to the right
-	   edge instead so it never overlaps it. */
-	right: 10px;
-	transform: translateY(-50%);
+	/* was left:50%/top:50% + translate(-50%,-50%) (screen-centered),
+	   which landed on top of the frequency display it edits on a small
+	   screen. A right-edge-pinned attempt after that ("far right") also
+	   wasn't wanted -- user's ask was for it to land somewhere inside
+	   the window instead of pinned to the physical edge. Positioned the
+	   same way #connect_panel/#settings_panel already are (fixed
+	   left/top below the toolbar) instead, offset from the left edge
+	   far enough to clear the frequency display specifically. */
+	left: 260px;
+	top: 60px;
 	z-index: 1000;
 }
 

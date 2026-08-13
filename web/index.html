@@ -2677,13 +2677,6 @@ function ui_tick(){
 		logbook_request(-logbook_top_row_id);
 }
 
-// must match band_stack[]'s order in sbitx_daemon.c exactly -- SELBAND
-// encodes (band index * 10 + stack slot) using that array's real
-// indices. 60M has no #BAND option (matches the old button layout,
-// which never had one either) so it's only here to keep the indices
-// aligned with the server's.
-const BAND_STACK_ORDER = ["80M","60M","40M","30M","20M","17M","15M","12M","10M"];
-
 // Exact start/stop Hz ranges from sbitx_daemon.c's own band_stack[] --
 // kept in sync manually since the client has no way to fetch them at
 // runtime. Used to keep the BAND dropdown honest against the real
@@ -2713,10 +2706,15 @@ function freq_to_band(freq_hz){
 }
 
 function show_selected_band_store(args) {
-	const band_name = BAND_STACK_ORDER[Math.floor(args/10)];
+	// no longer sets el("BAND").value here -- SELBAND is a separately-
+	// persisted "last band button explicitly clicked" value (see
+	// freq_to_band()'s comment) that can arrive *after* a 'FREQ' update
+	// during the initial login replay, silently clobbering the correct,
+	// frequency-derived BAND value with a stale one right after it was
+	// fixed (confirmed live: BAND still showed 40M on a 20M radio even
+	// with that fix in place). BAND is purely frequency-derived now;
+	// this function only still updates the band-memory-slot indicator.
 	const store = args%10+1;
-	if (el("BAND").querySelector('option[value="' + band_name + '"]'))
-		el("BAND").value = band_name;
 	el("band_store").innerHTML = " " + store;
 }
 
