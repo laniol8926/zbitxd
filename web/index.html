@@ -2577,7 +2577,30 @@ function show_selected_band_store(args) {
 // a fixed value can't look right in both phone portrait and landscape at
 // once. Clamped so it never collapses on a short landscape screen or
 // swallows the whole page on a tall one.
+//
+// FT8/FT4 are a special case: rows advance in lockstep with ui_tick()'s
+// 50ms poll (every poll gets a fresh spectrum frame back regardless of
+// whether "audio" or "spectrum" was requested -- see get_audio()/
+// get_spectrum() in webserver.c, both call web_get_spectrum()), at
+// `repeat` rows per poll (waterfall_update() sets repeat=1 for FT8/FT4).
+// That's a fixed, known rows/second rate (1000/50 * 1 = 20), so the
+// canvas height that makes the *whole visible waterfall* equal exactly
+// one decode period -- never bleeding into the previous cycle, never
+// leaving dead space for a cycle still in progress -- is just
+// period_seconds * 20. FT4's period is half FT8's (7.5s vs 15s), so it
+// needs half the rows for the same one-period result. This overrides
+// the viewport-percentage sizing for these two modes specifically.
+const WF_ROWS_PER_SEC = 1000 / 50;
+const FT8_PERIOD_SEC = 15;
+const FT4_PERIOD_SEC = 7.5;
+
 function waterfall_calc_height(){
+	var mode = el("MODE") ? el("MODE").value : "";
+	if (mode === "FT8")
+		return Math.round(FT8_PERIOD_SEC * WF_ROWS_PER_SEC);
+	if (mode === "FT4")
+		return Math.round(FT4_PERIOD_SEC * WF_ROWS_PER_SEC);
+
 	var h = Math.round(window.innerHeight * 0.35);
 	if (h < 150)
 		h = 150;
