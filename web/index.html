@@ -2601,23 +2601,30 @@ function show_selected_band_store(args) {
 // almost half of the vertical display" -- a real, reported regression).
 // Rather than pick one of "always exactly one period" or "always fits
 // the viewport", wf_rows_per_sec below makes the *rate* adapt to
-// whatever height this formula returns, so both hold at once: the
-// waterfall still always represents exactly one period top-to-bottom,
-// it just scrolls faster or slower depending on how tall the viewport
-// let it be.
+// whatever height this formula returns, so the scroll duration stays
+// exact regardless of what height actually is.
 const WF_SCROLL_INTERVAL_MS = 50;
-const FT8_PERIOD_SEC = 15;
-const FT4_PERIOD_SEC = 7.5;
+
+// FT8/FT4 top-to-bottom scroll duration -- deliberately NOT tied to a
+// single decode period anymore (that was 15s/7.5s, one FT8/FT4 cycle
+// exactly). User's own follow-up request after using the one-period
+// version live: slow it down so several periods' worth of history stay
+// visible on screen at once (3 FT8 periods, 6 FT4 periods, at 45s),
+// rather than each cycle wiping the previous one off the top edge.
+// Same value for both modes on purpose -- this is about how much
+// history to keep on screen, not about matching a protocol timing.
+const WF_SCROLL_DURATION_SEC = 45;
 
 // FT8/FT4 scroll rate, in rows/second -- recomputed by
 // waterfall_setup_scroll_rate() any time the canvas height changes
-// (mode switch or viewport resize/rotation) so "one period = full
-// height" keeps holding regardless of what height actually is. Also
-// drives waterfall_scroll_tick()'s pacing (see there for why it's
-// elapsed-time-based rather than a fixed 1-row-per-tick counter).
+// (mode switch or viewport resize/rotation) so the scroll duration
+// keeps holding regardless of what height actually is. Also drives
+// waterfall_scroll_tick()'s pacing (see there for why it's elapsed-
+// time-based rather than a fixed 1-row-per-tick counter).
 var wf_rows_per_sec = 20;
 var wf_scroll_start_time = null;
 var wf_rows_emitted = 0;
+var wf_last_period_index = null;
 
 // mode: pass explicitly from mode_set() (which knows new_mode
 // authoritatively -- see waterfall_calc_height()'s comment on why
@@ -2627,12 +2634,10 @@ var wf_rows_emitted = 0;
 function waterfall_setup_scroll_rate(mode){
 	if (mode === undefined)
 		mode = el("MODE") ? el("MODE").value : "";
-	var height = el("waterfall").height;
-	var period_sec = (mode === "FT4") ? FT4_PERIOD_SEC
-		: (mode === "FT8") ? FT8_PERIOD_SEC : null;
-	if (period_sec == null)
+	if (mode !== "FT8" && mode !== "FT4")
 		return;
-	wf_rows_per_sec = height / period_sec;
+	var height = el("waterfall").height;
+	wf_rows_per_sec = height / WF_SCROLL_DURATION_SEC;
 	// height just changed, so any rows already scrolled at the old
 	// rate no longer correspond to a sane position on the new-size
 	// canvas -- start the current period over rather than let the
@@ -2640,6 +2645,7 @@ function waterfall_setup_scroll_rate(mode){
 	last_wf_row = null;
 	wf_scroll_start_time = null;
 	wf_rows_emitted = 0;
+	wf_last_period_index = null;
 	waterfall_clear();
 }
 
@@ -2665,6 +2671,44 @@ function waterfall_clear(){
 // given real elapsed time (rows/sec = height/period, exact by
 // construction); the gap between that and rows actually drawn so far is
 // how many to add this tick (normally 1, more if a tick was delayed).
+// FT8/FT4 decode periods are UTC-aligned (:00/:15/:30/:45 for FT8, half
+// that for FT4) -- same boundaries FT8_period_label()'s divider rows in
+// Band Activity/CQ Panel are keyed off of, just computed from the clock
+// directly here instead of parsed out of decode text.
+function waterfall_period_ms(mode){
+	return (mode === "FT4") ? 7500 : 15000;
+}
+
+function waterfall_utc_label(ms){
+	var d = new Date(ms);
+	var hh = String(d.getUTCHours()).padStart(2, "0");
+	var mm = String(d.getUTCMinutes()).padStart(2, "0");
+	var ss = String(d.getUTCSeconds()).padStart(2, "0");
+	return FT8_format_period_label(hh + mm + ss);
+}
+
+const WF_MARKER_HEIGHT = 14;
+
+// Solid red line + UTC label, inserted at the top of the canvas exactly
+// like a scroll row so it becomes part of the same shifting bitmap and
+// tracks down with everything else for free -- no separate overlay/
+// position-tracking needed. User's ask, verbatim reasoning: at the
+// old one-period-per-screen rate the ~2.36s decode/dead-time gap after
+// each ~12.64s transmission was obvious as a visual artifact; explicit
+// period-start markers (matching the same UTC boundaries/format as the
+// Band Activity and CQ Panel divider rows) make that gap self-
+// explanatory instead of looking like a glitch.
+function waterfall_draw_period_marker(ctx, width, period_start_ms){
+	ctx.fillStyle = "red";
+	ctx.fillRect(0, 0, width, 2);
+	ctx.fillStyle = "black";
+	ctx.fillRect(0, 2, width, WF_MARKER_HEIGHT - 2);
+	ctx.fillStyle = "red";
+	ctx.font = "10px monospace";
+	ctx.textBaseline = "top";
+	ctx.fillText(waterfall_utc_label(period_start_ms), 2, 3);
+}
+
 function waterfall_scroll_tick(){
 	if (last_wf_row == null)
 		return;
@@ -2682,7 +2726,32 @@ function waterfall_scroll_tick(){
 	if (rows_needed <= 0)
 		return;
 
+	var mode = el("MODE").value;
+	var period_ms = waterfall_period_ms(mode);
+	var now = Date.now();
+	var period_index = Math.floor(now / period_ms);
 	var ctx = w.getContext("2d", {willReadFrequently:true});
+
+	// wf_last_period_index starting null means we don't know when the
+	// *current* (possibly already-in-progress) period began, so the
+	// first tick after a mode switch/resize never draws a marker for
+	// it -- only for periods that genuinely start while already
+	// watching.
+	if (wf_last_period_index !== null && period_index !== wf_last_period_index){
+		var shifted = ctx.getImageData(0, 0, w.width, w.height);
+		ctx.putImageData(shifted, 0, WF_MARKER_HEIGHT);
+		waterfall_draw_period_marker(ctx, w.width, period_index * period_ms);
+		// count the marker itself as consumed schedule budget, or the
+		// elapsed-time catch-up math would keep trying to make up the
+		// "missing" rows_needed rows on top of it, permanently drifting
+		// the scroll rate faster than intended.
+		wf_rows_emitted += WF_MARKER_HEIGHT;
+		wf_last_period_index = period_index;
+		draw_wf_overlay();
+		return;
+	}
+	wf_last_period_index = period_index;
+
 	var img = waterfall_build_row(last_wf_row, ctx, w.width);
 
 	var shifted = ctx.getImageData(0, 0, w.width, w.height);
