@@ -658,6 +658,11 @@ select, select option, input {
 	width: 90px;
 }
 
+#waterfall_scale {
+	display: block;
+	background-color: black;
+}
+
 #waterfall_wrap {
 	position: relative;
 }

@@ -363,6 +363,7 @@
 				<div class="wfgain-item"><span class="wfgain-label">WF ZERO</span
 					><input type="range" class="wfgain-slider" id="wf_zero_slider" min="-50" max="50" step="1" value="0" /></div>
 			</div><!-- end of wf_gain_controls -->
+			<canvas id="waterfall_scale" width="600" height="16"></canvas>
 			<div id="waterfall_wrap" width="100%">
 				<canvas id="waterfall" width="600" height="80"></canvas>
 				<canvas id="waterfall_overlay" width="600" height="80"></canvas>
@@ -922,7 +923,54 @@ function resize_ui(){
 	el("waterfall").height = waterfall_calc_height();
 	waterfall_setup_scroll_rate();
 	sync_wf_overlay_size();
+	el("waterfall_scale").width = b.width()-sidebar_width;
+	draw_wf_scale();
 	height = b.height();
+}
+
+// Static 0-3000Hz frequency scale, drawn once and only redrawn on
+// resize -- a fixed reference to visually validate the RX/TX overlay
+// lines (draw_wf_overlay()) and the waterfall's own color-trace
+// positions actually line up with the frequency they claim to (the
+// waterfall is locked to a 3kHz span -- see the SPAN removal/lock
+// elsewhere in this project -- 0Hz/dial frequency at the left edge,
+// 3000Hz at the right, same convention draw_wf_overlay() already uses
+// for hz_per_pixel). User's own ask, verbatim: tick marks every 500Hz,
+// labelled 0/500/.../3000, small but readable font.
+function draw_wf_scale(){
+	var sc = el("waterfall_scale");
+	if (!sc || sc.width == 0 || sc.height == 0)
+		return;
+	var ctx = sc.getContext("2d");
+	ctx.fillStyle = "black";
+	ctx.fillRect(0, 0, sc.width, sc.height);
+	ctx.fillStyle = "#3dacbf";
+	ctx.textBaseline = "top";
+
+	var hz_per_pixel = sc.width / 3000;
+
+	// unlabelled minor ticks every 100Hz, smaller than the labelled
+	// 500Hz major ticks below -- drawn first so they never sit on top
+	// of a major tick/label.
+	ctx.font = "6px monospace";
+	ctx.textAlign = "center";
+	for (var freq = 0; freq <= 3000; freq += 100){
+		if (freq % 500 == 0)
+			continue;
+		ctx.fillText("|", Math.round(freq * hz_per_pixel), 0);
+	}
+
+	ctx.font = "9px monospace";
+	for (var freq = 0; freq <= 3000; freq += 500){
+		var x = Math.round(freq * hz_per_pixel);
+		ctx.textAlign = "center";
+		ctx.fillText("|", x, 0);
+		// keep the 0Hz/3000Hz labels from running off the canvas edge --
+		// the tick itself stays centered on the exact frequency, only the
+		// label text shifts to stay fully on-screen.
+		ctx.textAlign = (freq == 0) ? "left" : (freq == 3000) ? "right" : "center";
+		ctx.fillText(String(freq), x, 7);
+	}
 }
 
 // Keeps #waterfall_overlay's own pixel buffer sized to match #waterfall
