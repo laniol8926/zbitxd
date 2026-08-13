@@ -1598,7 +1598,16 @@ function init_draggable_panels(){
 }
 
 function sbitx_button_clicked(event){
-	websocket_send(event.currentTarget.id);
+	var id = event.currentTarget.id;
+	if (id === "F1" && cq_active){
+		// second F1 click while CQ is already calling: do_macro() has
+		// no stop logic of its own, it would just re-queue another
+		// FT8_REPEAT round -- only abort_tx()/modem_abort() actually
+		// zeroes ft8_repeat server-side, same as ESC
+		websocket_send("abort=1");
+		return;
+	}
+	websocket_send(id);
 }
 
 
@@ -2327,18 +2336,20 @@ function logger_enter_qso(){
 // F1 is the CQ macro in the default macro set -- calls CQ repeatedly
 // until stopped, same "actively doing something" category as Tune, so
 // it gets the same light-green highlight while active. Scoped
-// specifically to F1 (via event.currentTarget.id, not the same as the
-// event.id used for the actual websocket_send() above -- that's this
-// function's own pre-existing convention, left as-is) rather than
-// every .macro-btn, since only F1/CQ is a toggle-until-stopped action.
+// specifically to F1 (via event.currentTarget.id) rather than every
+// .macro-btn, since only F1/CQ is a toggle-until-stopped action. The
+// actual websocket_send() for F1 happens in sbitx_button_clicked()
+// (also bound to this button, and checks cq_active itself to decide
+// between "F1" and "abort=1") -- this handler only owns the highlight.
 var cq_active = false;
 
 function logger_trigger_macro(event){
-	websocket_send(event.id);
 	if (event.currentTarget && event.currentTarget.id === "F1"){
 		cq_active = !cq_active;
 		el("F1").classList.toggle("toggle-active", cq_active);
+		return;
 	}
+	websocket_send(event.id);
 }
 
 // Escape (the #esc button's logger_abort(), or the Escape key itself --
