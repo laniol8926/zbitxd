@@ -203,11 +203,22 @@
 		</div>
 
 		<div class="settings-element">
-			<span class="settings-label">My Grid:</span><input id="MYGRID" 
+			<span class="settings-label">My Grid:</span><input id="MYGRID"
 					class="settings_input sbitx-text-input" type="text" size="6" />
 		</div>
 		<div class="settings-element">
-			<span class="settings-label">Telnet Server:</span> 
+			<span class="settings-label">ITU Region:</span>
+			<select class="sbitxv3-selection sbitx-selection" id="REGION">
+				<option value="1">1 (Europe/Africa/ME/former USSR)</option>
+				<option value="2" selected>2 (Americas)</option>
+				<option value="3">3 (Asia-Pacific)</option>
+			</select>
+			(affects 80M/40M band edges only -- e.g. 40M is 7.0-7.2 in
+			Regions 1/3, 7.0-7.3 in Region 2)<br/>
+			<span id="region_grid_hint"></span>
+		</div>
+		<div class="settings-element">
+			<span class="settings-label">Telnet Server:</span>
 			<input type="text" class="settings_input sbitx-text-input" size="17"
 				id="TELNETURL" />
 			(Like : dxc.nc7j.com:7373)
@@ -2493,10 +2504,49 @@ function populate_rig_list(text){
 	}
 }
 
+// Rough longitude-band approximation of ITU region from a Maidenhead
+// grid square's first letter (the longitude field, 20 deg per letter,
+// 'A' = -180) -- advisory only, shown as a hint next to the real
+// REGION setting, never used to silently set it. Real ITU region
+// boundaries follow political borders, not meridians -- the known
+// failure case is Russia, which spans nearly all longitudes but is
+// entirely Region 1, so this heuristic would misguess it as Region 3
+// for its eastern portion. That's exactly why REGION is an explicit,
+// user-confirmed setting rather than a fully automatic one.
+function grid_to_region_guess(grid){
+	if (!grid || grid.length < 1)
+		return null;
+	var field_letter = grid.toUpperCase().charCodeAt(0) - 65; // 'A'=0
+	if (field_letter < 0 || field_letter > 17)
+		return null;
+	var lon = -180 + field_letter * 20; // west edge of this grid field
+	if (lon >= -170 && lon < -20)
+		return 2;
+	if (lon >= -20 && lon < 40)
+		return 1;
+	return 3;
+}
+
+function update_region_grid_hint(){
+	var grid = el("MYGRID") ? el("MYGRID").value : "";
+	var guess = grid_to_region_guess(grid);
+	var hint = el("region_grid_hint");
+	if (!hint)
+		return;
+	if (guess == null){
+		hint.innerHTML = "";
+		return;
+	}
+	hint.innerHTML = "Based on grid " + grid.toUpperCase()
+		+ ", this looks like Region " + guess
+		+ " -- doesn't account for national exceptions (e.g. Russia), confirm before relying on it.";
+}
+
 function open_settings(){
 	open_panel("settings_panel");
 	//set the focs to the pin
 	el("PASSKEY").focus();
+	update_region_grid_hint();
 }
 
 // dedicated post-login "connect to radio / connect audio" panel -- separate
@@ -2693,22 +2743,38 @@ function ui_tick(){
 // (SELBAND) it showed before, which could silently drift out of sync
 // with reality -- confirmed live: dropdown showed 40M on startup while
 // the radio was actually on 20M.
-const BAND_RANGES = [
-	["80M", 3500000, 4000000],
-	["60M", 5250000, 5500000],
-	["40M", 7000000, 7300000],
-	["30M", 10100000, 10150000],
-	["20M", 14000000, 14400000],
-	["17M", 18068000, 18168000],
-	["15M", 21000000, 21500000],
-	["12M", 24890000, 24990000],
-	["10M", 28000000, 29700000],
-];
+//
+// 80M/40M are region-dependent (see apply_region_band_limits() in
+// sbitx_daemon.c for the authoritative version and why only these two
+// bands need it) -- computed fresh each call from the current REGION
+// field rather than a fixed table, so this stays in sync with whatever
+// the server is actually enforcing. Every other band here is WARC-
+// harmonized or otherwise identical across all three regions.
+function get_band_ranges(){
+	var region = el("REGION") ? el("REGION").value : "2";
+	var r80 = [3500000, 4000000], r40 = [7000000, 7300000]; // region 2 / default
+	if (region == "1" || region == "3"){
+		r40 = [7000000, 7200000];
+		r80 = (region == "1") ? [3500000, 3800000] : [3500000, 3900000];
+	}
+	return [
+		["80M", r80[0], r80[1]],
+		["60M", 5250000, 5500000],
+		["40M", r40[0], r40[1]],
+		["30M", 10100000, 10150000],
+		["20M", 14000000, 14400000],
+		["17M", 18068000, 18168000],
+		["15M", 21000000, 21500000],
+		["12M", 24890000, 24990000],
+		["10M", 28000000, 29700000],
+	];
+}
 
 function freq_to_band(freq_hz){
-	for (var i = 0; i < BAND_RANGES.length; i++){
-		if (freq_hz >= BAND_RANGES[i][1] && freq_hz <= BAND_RANGES[i][2])
-			return BAND_RANGES[i][0];
+	var ranges = get_band_ranges();
+	for (var i = 0; i < ranges.length; i++){
+		if (freq_hz >= ranges[i][1] && freq_hz <= ranges[i][2])
+			return ranges[i][0];
 	}
 	return null;
 }
@@ -3237,6 +3303,7 @@ $("#dial").on("click", function(){ open_panel("keypad_panel"); });
 $(".keypad-btn").on("click", keypad_button_clicked);
 $("#REF").on("change", draw_meters);
 $("#MODE").on("change", mode_changed);
+$("#MYGRID").on("input", update_region_grid_hint);
 // CMD opens a real Linux terminal (ttyd, running "login" so it
 // authenticates against the Pi's actual system accounts, not a
 // separate credential), per user's ask -- replaces the app's own

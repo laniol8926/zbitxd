@@ -264,8 +264,55 @@ struct band band_stack[] = {
 		{28000000, 28000000, 28074000, 28250000}, {MODE_USB, MODE_USB, MODE_FT8, MODE_USB}},
 };
 
+// Adjusts band_stack[]'s 80M/40M start/stop for the given ITU region
+// (1/2/3) -- see #region's own field-table comment. These are the only
+// two bands here with a real, well-documented 3-way regional split;
+// every other band in band_stack[] is either WARC-harmonized (30M/17M/
+// 12M) or otherwise identical for amateur use across all three regions.
+// 60M is deliberately NOT touched -- it's allocated per-*country*, not
+// per-region, in most of the world (and not every rig even supports
+// it), so a simple region table would misrepresent it regardless of
+// which numbers were picked.
+//
+// Looks bands up by name rather than the BAND80M/BAND40M/etc index
+// constants above -- found while writing this that BAND40M (1) and
+// BAND60M (2) are swapped relative to band_stack[]'s actual order
+// (band_stack[1] is "60M", band_stack[2] is "40M"), a real pre-existing
+// bug elsewhere (hw_settings.ini's per-band memory-slot loading uses
+// them directly) that's out of scope to fix here, but real enough that
+// this function avoids relying on them at all.
+void apply_region_band_limits(int region){
+	int max_bands = sizeof(band_stack)/sizeof(struct band);
+	int i80 = -1, i40 = -1;
+	for (int i = 0; i < max_bands; i++){
+		if (!strcmp(band_stack[i].name, "80M"))
+			i80 = i;
+		else if (!strcmp(band_stack[i].name, "40M"))
+			i40 = i;
+	}
+	if (i80 < 0 || i40 < 0)
+		return;
 
-#define VFO_A 0 
+	switch (region){
+		case 1: // Europe/Africa/Middle East/former USSR
+			band_stack[i80].start = 3500000; band_stack[i80].stop = 3800000;
+			band_stack[i40].start = 7000000; band_stack[i40].stop = 7200000;
+			break;
+		case 3: // Asia-Pacific
+			band_stack[i80].start = 3500000; band_stack[i80].stop = 3900000;
+			band_stack[i40].start = 7000000; band_stack[i40].stop = 7200000;
+			break;
+		case 2: // Americas -- also the fallback/default, matching this
+			// fork's original hardcoded values, so an unset/invalid
+			// region changes nothing for anyone who never touches it
+		default:
+			band_stack[i80].start = 3500000; band_stack[i80].stop = 4000000;
+			band_stack[i40].start = 7000000; band_stack[i40].stop = 7300000;
+			break;
+	}
+}
+
+#define VFO_A 0
 #define VFO_B 1 
 //int	vfo_a_freq = 7000000;
 //int	vfo_b_freq = 14000000;
@@ -459,8 +506,15 @@ struct field main_controls[] = {
 	// Settings Panel
 	{"#mycallsign", NULL, 1000, -1000, 400, 149, "MYCALLSIGN", 70, "CALL", FIELD_TEXT, 
 		"", 3,10,1,0},
-	{"#mygrid", NULL, 1000, -1000, 400, 149, "MYGRID", 70, "NOWHERE", FIELD_TEXT, 
+	{"#mygrid", NULL, 1000, -1000, 400, 149, "MYGRID", 70, "NOWHERE", FIELD_TEXT,
 		"", 4,6,1,0},
+	// ITU region (1/2/3) -- amateur band edges genuinely differ by
+	// region for some bands (80M/40M; see apply_region_band_limits()).
+	// Default "2" preserves this fork's existing hardcoded behavior
+	// (band_stack[]'s original 40M=7.0-7.3 etc. was already Region-2-
+	// shaped) for anyone who never touches the new setting.
+	{"#region", NULL, 1000, -1000, 400, 149, "REGION", 70, "2", FIELD_NUMBER,
+		"", 1,3,1,0},
 	{"#passkey", NULL, 1000, -1000, 400, 149, "PASSKEY", 70, "123", FIELD_TEXT, 
 		"", 0,32,1,0},
 	{"#xota_loc", NULL, 1000, -1000, 400, 149, "LOCATION", 70, "PEAK/PARK/ISLE", FIELD_TEXT,
@@ -3211,6 +3265,13 @@ void cmd_exec(char *cmd){
 		if (f)
 			set_field(f->cmd, args);
 	}
+	// re-apply band_stack[]'s 80M/40M edges the moment the setting
+	// actually changes, not just at next daemon restart
+	else if (!strcmp(exec, "REGION")) {
+		struct field *f = get_field_by_label(exec);
+		if (f && !set_field(f->cmd, args))
+			apply_region_band_limits(atoi(get_field("#region")->value));
+	}
 	// the normal case, finally
 	else {
 		char field_name[32];
@@ -3331,6 +3392,10 @@ int main( int argc, char* argv[] ) {
 		"Loading default.ini instead\n");
   	ini_parse(STATEDIR "/default_settings.ini", user_settings_handler, NULL);
   }
+
+	// apply the persisted region's 80M/40M band edges now that settings
+	// (including #region itself) have actually loaded
+	apply_region_band_limits(atoi(get_field("#region")->value));
 
 	//the logger fields may have an unfinished qso details
 	call_wipe();
