@@ -627,6 +627,37 @@ select, select option, input {
 	display: none;
 }
 
+/* Spectrum/waterfall gain+zero sliders -- display-only remap of the
+   magnitude value used to pick each waterfall pixel's color (see
+   waterfall_update() in the script), independent of RX RF (the real
+   audio/CAT gain). Mirrors WSJT-X's Wide Graph Gain/Zero control pair,
+   split the same way (spectrum stage, waterfall stage) even though
+   zbitxd only has the one waterfall canvas to feed. */
+#wf_gain_controls {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 10px;
+	padding: 3px 6px;
+	background-color: black;
+}
+
+.wfgain-item {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+}
+
+.wfgain-label {
+	color: #3dacbf;
+	font-size: 11px;
+	font-weight: bold;
+	white-space: nowrap;
+}
+
+.wfgain-slider {
+	width: 90px;
+}
+
 #waterfall_wrap {
 	position: relative;
 }

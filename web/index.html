@@ -353,6 +353,16 @@
 					<span id="REF_reading"/></span>
 				</div>
 			</div><!-- end of tx_meters -->
+			<div id="wf_gain_controls">
+				<div class="wfgain-item"><span class="wfgain-label">SPEC GAIN</span
+					><input type="range" class="wfgain-slider" id="spec_gain_slider" min="0" max="200" step="1" value="100" /></div>
+				<div class="wfgain-item"><span class="wfgain-label">SPEC ZERO</span
+					><input type="range" class="wfgain-slider" id="spec_zero_slider" min="-50" max="50" step="1" value="0" /></div>
+				<div class="wfgain-item"><span class="wfgain-label">WF GAIN</span
+					><input type="range" class="wfgain-slider" id="wf_gain_slider" min="0" max="200" step="1" value="100" /></div>
+				<div class="wfgain-item"><span class="wfgain-label">WF ZERO</span
+					><input type="range" class="wfgain-slider" id="wf_zero_slider" min="-50" max="50" step="1" value="0" /></div>
+			</div><!-- end of wf_gain_controls -->
 			<div id="waterfall_wrap" width="100%">
 				<canvas id="waterfall" width="600" height="80"></canvas>
 				<canvas id="waterfall_overlay" width="600" height="80"></canvas>
@@ -523,6 +533,19 @@ var spots = null;
 var logbook_bottom_row_id = -1;
 var logbook_top_row_id= 0;
 var sound_mute = false;
+
+// Waterfall gain/zero controls (display-only, see waterfall_update()).
+// Persisted in localStorage since these are a personal visual-taste
+// calibration, not a radio setting -- no reason to lose it on reload
+// or send it to the server.
+function wf_gain_load(key, fallback){
+	var v = parseFloat(localStorage.getItem(key));
+	return isNaN(v) ? fallback : v;
+}
+var spec_gain = wf_gain_load("spec_gain", 100);
+var spec_zero = wf_gain_load("spec_zero", 0);
+var wf_gain = wf_gain_load("wf_gain", 100);
+var wf_zero = wf_gain_load("wf_zero", 0);
 
 /* oz7bx gridmap -- container div commented out above; GRIDMAP.init()
    would throw on a null container (its own code assumes one exists),
@@ -1009,6 +1032,19 @@ function waterfall_update(update){
 		var v0 = (update.charCodeAt(bin0+3) - 32) * 2;
 		var v1 = (update.charCodeAt(bin1+3) - 32) * 2;
 		var v = v0 + (v1 - v0) * frac;
+
+		// Two-stage gain/zero remap, display-only -- mirrors WSJT-X's
+		// Wide Graph controls (separate Gain+Zero pairs for the spectrum
+		// trace and the waterfall). zbitxd has no spectrum trace anymore
+		// (removed earlier), but both stages still feed the one waterfall
+		// canvas here rather than collapsing to a single control, so the
+		// knobs behave the way WSJT-X users already expect. Neither stage
+		// touches the audio RX RF sees -- this only remaps how the same
+		// magnitude value picks a color. At defaults (gain=100 i.e. x1,
+		// zero=0) this is the identity transform.
+		v = (v - spec_zero) * (spec_gain / 100);
+		v = (v - wf_zero) * (wf_gain / 100);
+
 		if (v > 100)
 			v = 100;
 		if (v < 0)
@@ -2784,6 +2820,7 @@ $(".sbitx-panel-title").on("click", close_panel);
 $(".sbitx-text-field").on("change keydown paste input",sbitx_text_changed);
 $(".linear-slider").on("input", on_linear_moved);
 $(".linear").on("click",  linear_toggle);
+wf_gain_controls_init();
 $(".macro-btn").on("click", logger_trigger_macro);
 el("waterfall_overlay").addEventListener("mousedown", wf_overlay_click);
 el("waterfall_overlay").addEventListener("touchstart", wf_overlay_click);
@@ -2954,6 +2991,34 @@ function on_linear_moved(event){
 //we just duplicate it on the slider
 function update_linear(event){
 	event.parentNode.querySelector(".linear-slider").value = event.value;
+}
+
+// Waterfall/spectrum gain+zero sliders -- purely client-side display
+// controls (see waterfall_update()), not sent to the server via
+// websocket_send like the .linear-slider controls above. Persisted to
+// localStorage on every change so a calibrated setting survives reload.
+function wf_gain_controls_init(){
+	el("spec_gain_slider").value = spec_gain;
+	el("spec_zero_slider").value = spec_zero;
+	el("wf_gain_slider").value = wf_gain;
+	el("wf_zero_slider").value = wf_zero;
+
+	el("spec_gain_slider").addEventListener("input", function(e){
+		spec_gain = parseFloat(e.target.value);
+		localStorage.setItem("spec_gain", spec_gain);
+	});
+	el("spec_zero_slider").addEventListener("input", function(e){
+		spec_zero = parseFloat(e.target.value);
+		localStorage.setItem("spec_zero", spec_zero);
+	});
+	el("wf_gain_slider").addEventListener("input", function(e){
+		wf_gain = parseFloat(e.target.value);
+		localStorage.setItem("wf_gain", wf_gain);
+	});
+	el("wf_zero_slider").addEventListener("input", function(e){
+		wf_zero = parseFloat(e.target.value);
+		localStorage.setItem("wf_zero", wf_zero);
+	});
 }
 
 /* close any open linear controls if clicked outside*/
