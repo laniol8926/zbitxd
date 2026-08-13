@@ -2675,13 +2675,12 @@ const WF_SCROLL_INTERVAL_MS = 50;
 
 // FT8/FT4 top-to-bottom scroll duration -- deliberately NOT tied to a
 // single decode period anymore (that was 15s/7.5s, one FT8/FT4 cycle
-// exactly). User's own follow-up request after using the one-period
-// version live: slow it down so several periods' worth of history stay
-// visible on screen at once (3 FT8 periods, 6 FT4 periods, at 45s),
-// rather than each cycle wiping the previous one off the top edge.
-// Same value for both modes on purpose -- this is about how much
-// history to keep on screen, not about matching a protocol timing.
-const WF_SCROLL_DURATION_SEC = 45;
+// exactly). Started at 45s (several periods' worth of history on screen
+// at once rather than each cycle wiping the previous one off the top
+// edge), reduced to 30s after further live testing. Same value for both
+// modes on purpose -- this is about how much history to keep on screen,
+// not about matching a protocol timing.
+const WF_SCROLL_DURATION_SEC = 30;
 
 // FT8/FT4 scroll rate, in rows/second -- recomputed by
 // waterfall_setup_scroll_rate() any time the canvas height changes
@@ -2717,11 +2716,29 @@ function waterfall_setup_scroll_rate(mode){
 	waterfall_clear();
 }
 
+// Fills the whole canvas with a plausible-looking low-level noise
+// texture (same "low v -> dark blue" color mapping waterfall_build_row()
+// uses for real data, just fed random values instead) rather than solid
+// black. Called on mode entry/resize -- filling with real black meant
+// the waterfall visibly scrolled real data down into an obviously empty
+// area for the first ~30s after opening the app; a noise-filled canvas
+// looks normal/populated from the very first frame, with real data
+// naturally overwriting it as it scrolls in.
 function waterfall_clear(){
 	var w = el("waterfall");
+	if (w.width == 0 || w.height == 0)
+		return;
 	var ctx = w.getContext("2d", {willReadFrequently:true});
-	ctx.fillStyle = "black";
-	ctx.fillRect(0, 0, w.width, w.height);
+	var img = ctx.createImageData(w.width, w.height);
+	var i = 0;
+	for (var n = 0; n < w.width * w.height; n++){
+		var v = Math.random() * 15;
+		img.data[i++] = 0;
+		img.data[i++] = 0;
+		img.data[i++] = v * 12;
+		img.data[i++] = 255;
+	}
+	ctx.putImageData(img, 0, 0);
 }
 
 // FT8/FT4 continuous scroll -- new rows enter at the top and push older
@@ -2766,12 +2783,16 @@ const WF_MARKER_HEIGHT = 14;
 // period-start markers (matching the same UTC boundaries/format as the
 // Band Activity and CQ Panel divider rows) make that gap self-
 // explanatory instead of looking like a glitch.
+// No background fill -- the marker's own row is drawn directly on top
+// of whatever spectrum data is already there (waterfall_scroll_tick()
+// only shifts the rows *below* this one; these top WF_MARKER_HEIGHT
+// rows still hold whatever was last drawn there, not blank canvas), so
+// the line/label overlay the real waterfall content instead of
+// blanking out a solid strip across it. User's ask, direct: "the
+// background should be transparent."
 function waterfall_draw_period_marker(ctx, width, period_start_ms){
 	ctx.fillStyle = "red";
 	ctx.fillRect(0, 0, width, 2);
-	ctx.fillStyle = "black";
-	ctx.fillRect(0, 2, width, WF_MARKER_HEIGHT - 2);
-	ctx.fillStyle = "red";
 	ctx.font = "10px monospace";
 	ctx.textBaseline = "top";
 	ctx.fillText(waterfall_utc_label(period_start_ms), 2, 3);
