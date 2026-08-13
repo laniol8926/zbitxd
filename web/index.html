@@ -1889,19 +1889,27 @@ function FT8_format_period_label(label){
 	return label.substring(0,2) + ":" + label.substring(2,4) + ":" + label.substring(4,6) + " UTC";
 }
 
+// Same logical message, ignoring the leading UTC timestamp token and
+// any whitespace-width differences -- the server echoes your own
+// queued reply through more than one XML tag (e.g. WSJTX-Q then
+// WSJTX-TX), each with its *own* timestamp (queued-at vs. actual-slot
+// time: confirmed live, "195246.4  TX  1573 ~ N5TLH AI5II EM72" then
+// "195300    TX  1573 ~ N5TLH AI5II EM72" -- not byte-identical, so
+// the original exact-string de-dup check missed it entirely).
+function ft8_message_signature(text){
+	return deco_strip(text).replace(/^\s*\S+\s*/, "").replace(/\s+/g, " ").trim();
+}
+
 function FT8_list_append(list_id, text, style){
 
-	// Skip an exact-duplicate of the immediately preceding entry -- the
-	// server can echo the same logical message through more than one
-	// XML tag at once (e.g. WSJTX-RX and WSJTX-Q both carrying your own
-	// queued reply right after clicking a CQ line to start a QSO, see
-	// update_data()'s separate per-tag-type loops), which otherwise
-	// shows up as the identical line appearing twice -- confirmed live
-	// by direct user report: one click doubled the RX Frequency panel
-	// entry, a double-click quadrupled it.
+	// Skip a duplicate of the immediately preceding entry (same
+	// signature, timestamp ignored) -- see ft8_message_signature()'s
+	// comment. Confirmed live by direct user report: one click doubled
+	// the RX Frequency panel entry, a double-click quadrupled it.
 	var existing_ol = el(list_id).querySelector("ol");
 	var last_item = existing_ol.lastElementChild;
-	if (last_item && last_item.dataset && last_item.dataset.message === deco_strip(text))
+	if (last_item && last_item.dataset && last_item.dataset.message
+			&& ft8_message_signature(last_item.dataset.message) === ft8_message_signature(text))
 		return;
 
 	var item = document.createElement("li");
