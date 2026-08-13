@@ -1626,6 +1626,21 @@ static void focus_field(struct field *f){
 
 
 
+// Returns 1 if freq falls within any of band_stack[]'s defined bands,
+// 0 otherwise. Used to refuse tuning outside amateur allocations
+// entirely (e.g. 11m/CB, ~27 MHz, was never a band_stack[] entry) --
+// unlike apply_region_band_limits() above, which only refines *which*
+// amateur band's edges apply, this doesn't depend on getting per-
+// region numbers exactly right: any genuinely out-of-band frequency is
+// rejected regardless of region.
+int freq_in_any_band(int freq){
+	int max_bands = sizeof(band_stack)/sizeof(struct band);
+	for (int i = 0; i < max_bands; i++)
+		if (band_stack[i].start <= freq && freq <= band_stack[i].stop)
+			return 1;
+	return 0;
+}
+
 // setting the frequency is complicated by having to take care of the
 // rit/split and power levels associated with each frequency
 void set_operating_freq(int dial_freq, char *response){
@@ -1653,6 +1668,19 @@ void set_operating_freq(int dial_freq, char *response){
 	{
 			sprintf(freq_request, "r1:freq=%d", dial_freq);
 	}
+
+	// refuse to actually apply an out-of-band frequency -- see
+	// freq_in_any_band()'s comment. response's real buffer size varies
+	// by caller (some as small as 10 bytes), so this deliberately
+	// doesn't write a custom message into it -- logged to the journal
+	// instead for operator visibility.
+	int req_freq = 0;
+	sscanf(freq_request, "r1:freq=%d", &req_freq);
+	if (!freq_in_any_band(req_freq)){
+		fprintf(stderr, "set_operating_freq: refused %d Hz, outside any defined amateur band\n", req_freq);
+		return;
+	}
+
 	//get back to setting the frequency
 	sdr_request(freq_request, response);
 }
