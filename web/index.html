@@ -353,6 +353,9 @@
 					<span id="REF_reading"/></span>
 				</div>
 			</div><!-- end of tx_meters -->
+			<div class="wfgain-item wfgain-toggle-row"><label
+				><input type="checkbox" id="wf_gain_controls_toggle" checked
+				/> Show waterfall gain controls</label></div>
 			<div id="wf_gain_controls">
 				<div class="wfgain-item"><span class="wfgain-label">SPEC GAIN</span
 					><input type="range" class="wfgain-slider" id="spec_gain_slider" min="0" max="200" step="1" value="100" /></div>
@@ -3331,6 +3334,23 @@ function wf_gain_controls_init(){
 	el("wf_zero_slider").addEventListener("input", function(e){
 		wf_zero = parseFloat(e.target.value);
 		localStorage.setItem("wf_zero", wf_zero);
+	});
+
+	// hide/show the whole gain-controls row -- user's own reasoning:
+	// once calibrated these are rarely touched, only occasionally again
+	// if the waterfall starts looking odd, so they don't need to stay
+	// visible taking up space all the time. The checkbox itself lives
+	// outside #wf_gain_controls so it's still reachable to show them
+	// again after hiding. Persisted separately from the slider values
+	// themselves (those should never reset; whether the row is shown
+	// is purely a display preference).
+	var controls_visible = localStorage.getItem("wf_gain_controls_visible");
+	controls_visible = (controls_visible === null) ? true : (controls_visible === "true");
+	el("wf_gain_controls_toggle").checked = controls_visible;
+	el("wf_gain_controls").style.display = controls_visible ? "flex" : "none";
+	el("wf_gain_controls_toggle").addEventListener("change", function(e){
+		el("wf_gain_controls").style.display = e.target.checked ? "flex" : "none";
+		localStorage.setItem("wf_gain_controls_visible", e.target.checked);
 	});
 }
 
