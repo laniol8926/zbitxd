@@ -534,6 +534,18 @@ select, select option, input {
 		width: auto;
 		max-width: none;
 	}
+	/* #keypad_panel's fixed left:260px (picked to clear the frequency
+	   display on a normal desktop-width screen) pushes it mostly or
+	   fully off the right edge on a narrow screen -- confirmed live:
+	   "that keypad repositioned itself so i can't close it" turned out
+	   to mean the panel itself, unable to fit at that fixed offset, not
+	   the drag mechanism (already fully excluded for this panel). */
+	#keypad_panel {
+		left: 5px;
+		right: 5px;
+		width: auto;
+		max-width: none;
+	}
 }
 
 .connect-panel-intro {
@@ -1128,8 +1140,15 @@ body {
 	   same way #connect_panel/#settings_panel already are (fixed
 	   left/top below the toolbar) instead, offset from the left edge
 	   far enough to clear the frequency display specifically. */
-	left: 260px;
 	top: 60px;
+	/* left:260px alone pushed the panel mostly/fully off the right edge
+	   on a narrow screen (confirmed live: "that keypad repositioned
+	   itself so i can't close it" -- turned out to be this, not the
+	   drag mechanism, already fully excluded for this panel). min()
+	   backs off from 260px on any viewport too narrow to fit the panel
+	   plus its own min-width (260px) and a small margin, without
+	   needing to guess/hardcode a specific breakpoint. */
+	left: min(260px, calc(100vw - 270px));
 	z-index: 1000;
 }
 
