@@ -853,6 +853,14 @@ body {
 	/*padding: 7 0 7 0;*/
 }
 
+/* Tune actually keys the transmitter with a steady tone -- light green
+   background while active is a clear, ongoing reminder it's on until
+   clicked again, not just the "Stop Tune" label text. */
+#tune_toggle.tune-active {
+	background-color: lightgreen;
+	color: black;
+}
+
 .sbitxv3-macro {
 	text-align: left;
 	width: 75px;

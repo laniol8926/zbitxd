@@ -2647,6 +2647,7 @@ function toggle_tune(){
 	tune_on = !tune_on;
 	websocket_send("TUNE " + (tune_on ? "ON" : "OFF"));
 	el("tune_toggle").innerHTML = tune_on ? "Stop Tune" : "Tune";
+	el("tune_toggle").classList.toggle("tune-active", tune_on);
 }
 
 // shutdown -h/-r now takes several real seconds (stopping services,
