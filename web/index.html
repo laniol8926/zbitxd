@@ -2695,9 +2695,16 @@ const WF_SCROLL_DURATION_SEC = 45;
 // waterfall_scroll_tick()'s pacing (see there for why it's elapsed-
 // time-based rather than a fixed 1-row-per-tick counter).
 var wf_rows_per_sec = 20;
-var wf_scroll_start_time = null;
 var wf_rows_emitted = 0;
 var wf_last_period_index = null;
+
+// Accumulates real elapsed time only while *not* transmitting (see
+// waterfall_scroll_tick()) -- TX time contributes nothing to it, so the
+// scroll genuinely stops rather than pausing visually and then bursting
+// through a backlog of "owed" rows the moment RX resumes. User's ask,
+// direct: "the waterfall should stop during a transmit cycle."
+var wf_rx_elapsed_sec = 0;
+var wf_last_tick_time = null;
 
 // mode: pass explicitly from mode_set() (which knows new_mode
 // authoritatively -- see waterfall_calc_height()'s comment on why
@@ -2716,7 +2723,8 @@ function waterfall_setup_scroll_rate(mode){
 	// canvas -- start the current period over rather than let the
 	// pacing math produce a jump.
 	last_wf_row = null;
-	wf_scroll_start_time = null;
+	wf_rx_elapsed_sec = 0;
+	wf_last_tick_time = null;
 	wf_rows_emitted = 0;
 	wf_last_period_index = null;
 	waterfall_clear();
@@ -2812,18 +2820,28 @@ function waterfall_scroll_tick(){
 	if (w.height == 0)
 		return;
 
-	if (wf_scroll_start_time == null)
-		wf_scroll_start_time = Date.now();
+	var now = Date.now();
+	if (wf_last_tick_time == null)
+		wf_last_tick_time = now;
+	var dt = (now - wf_last_tick_time) / 1000;
+	wf_last_tick_time = now;
 
-	var elapsed_sec = (Date.now() - wf_scroll_start_time) / 1000;
-	var target_total = Math.floor(elapsed_sec * wf_rows_per_sec);
+	// TX time doesn't accumulate at all -- the scroll (and the period
+	// markers below, since nothing here runs past this point while
+	// transmitting) genuinely stops instead of freezing the displayed
+	// content while still advancing position, which would otherwise
+	// visibly slide the frozen image down the screen during TX.
+	if (in_tx)
+		return;
+	wf_rx_elapsed_sec += dt;
+
+	var target_total = Math.floor(wf_rx_elapsed_sec * wf_rows_per_sec);
 	var rows_needed = target_total - wf_rows_emitted;
 	if (rows_needed <= 0)
 		return;
 
 	var mode = el("MODE").value;
 	var period_ms = waterfall_period_ms(mode);
-	var now = Date.now();
 	var period_index = Math.floor(now / period_ms);
 	var ctx = w.getContext("2d", {willReadFrequently:true});
 
