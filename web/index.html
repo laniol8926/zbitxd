@@ -906,12 +906,29 @@ function submit_frequency(){
 
 /* waterfall and spectrum */
 
+// Set around a fullscreen transition (see the fullscreenchange listener
+// below) so the resize event that immediately follows it doesn't
+// recalculate the waterfall's height. Entering fullscreen frees up
+// window.innerHeight (browser chrome/tabs/URL bar hidden), which the
+// normal viewport-percentage formula would read as "give the waterfall
+// more room" -- but that came at the cost of pushing the bottom of the
+// Band Activity/CQ/RX Frequency panels off-screen, needing a scroll to
+// see them again ("switching to full screen should not recale [sic]
+// that waterfall" -- direct user ask). A real resize (phone rotation,
+// manually resizing the browser window) should still recalculate
+// normally; only a fullscreen toggle's own resize is suppressed.
+var wf_height_locked_for_fullscreen = false;
+document.addEventListener("fullscreenchange", function(){
+	wf_height_locked_for_fullscreen = true;
+	setTimeout(function(){ wf_height_locked_for_fullscreen = false; }, 300);
+});
+
 function resize_ui(){
 	var b = $("body");
 	var sidebar_width = $("#sidebar").width();
 	if ($("#sidebar")[0].style.display == "none")
 		sidebar_width = 0;
-	
+
 	log("resize_ui w = " + b.width() + " h = " + b.height());
 
 	el("waterfall").width = b.width()-sidebar_width;//-sidebar.width;
@@ -919,9 +936,12 @@ function resize_ui(){
 	el("CW_ui").width = b.width()-sidebar_width;//-sidebar.width;
 	// recalculate on every resize, not just mode changes -- this is what
 	// picks up a phone orientation flip (fires as a resize event) without
-	// needing the user to switch modes.
-	el("waterfall").height = waterfall_calc_height();
-	waterfall_setup_scroll_rate();
+	// needing the user to switch modes. Skipped specifically around a
+	// fullscreen transition -- see wf_height_locked_for_fullscreen above.
+	if (!wf_height_locked_for_fullscreen){
+		el("waterfall").height = waterfall_calc_height();
+		waterfall_setup_scroll_rate();
+	}
 	sync_wf_overlay_size();
 	el("waterfall_scale").width = b.width()-sidebar_width;
 	draw_wf_scale();
@@ -944,7 +964,7 @@ function draw_wf_scale(){
 	var ctx = sc.getContext("2d");
 	ctx.fillStyle = "black";
 	ctx.fillRect(0, 0, sc.width, sc.height);
-	ctx.fillStyle = "#3dacbf";
+	ctx.fillStyle = "white";
 	ctx.textBaseline = "top";
 
 	var hz_per_pixel = sc.width / 3000;
@@ -3098,11 +3118,13 @@ $("#MODE").on("change", mode_changed);
 // authenticates against the Pi's actual system accounts, not a
 // separate credential), per user's ask -- replaces the app's own
 // in-page console/log panel, which show_console_panel() still exists
-// to open but is no longer bound to any button. Navigates the current
-// tab rather than opening a new one -- user won't be operating the
-// radio app while in CMD, so there's no need for both up at once.
+// to open but is no longer bound to any button. Opens in a new tab
+// (was window.location.href, navigating the current tab away) -- that
+// meant closing the terminal closed the radio app's own tab along with
+// it, since there was nothing left to go "back" to. A new tab leaves
+// the app's own tab alive and still connected the whole time.
 $("#console-open").on("click", function(){
-	window.location.href = "http://" + location.hostname + ":7681/";
+	window.open("http://" + location.hostname + ":7681/", "_blank");
 });
 $("#telnet-open").on("click", show_telnet_panel);
 $("#keyboard-open").on("click", show_keyboard);
