@@ -89,6 +89,7 @@ void write_console_semantic(const char *text, const text_span_semantic *sem, int
 int web_get_console(char *buff, int max);
 int is_in_tx();
 void abort_tx();
+void update_tx_active_field();
 void remote_execute(const char *command);
 int remote_update_field(int i, char *text);
 void web_get_spectrum(char *buff);

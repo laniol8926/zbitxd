@@ -3305,6 +3305,18 @@ function response_handler(response){
 		    FT8_lists_clear();
 			show_selected_band_store(args);
 			break;
+		case 'TXACTIVE':
+			// server-side "will transmit again on its own" state
+			// (in_tx || pending FT8 repeat/auto-QSO-continue), pushed
+			// on every real change AND in the bulk field push on
+			// login -- so a client reconnecting after a dropped
+			// connection or hard reload (which always starts with
+			// cq_active = false) learns the radio is still calling
+			// CQ or auto-continuing a QSO, instead of showing F1 as
+			// idle while it keeps transmitting unseen.
+			cq_active = (args == "1");
+			el("F1").classList.toggle("toggle-active", cq_active);
+			break;
 		case 'MODE':
 			mode_set(args); 
 			//There is no break statement here, MODE continues to default case

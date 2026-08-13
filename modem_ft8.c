@@ -958,6 +958,7 @@ void ft8_tx(char *message, int freq){
 		ft8_repeat = 1;
 	else
 		ft8_repeat = field_int("FT8_REPEAT");
+	update_tx_active_field();
 
 	LOG(LOG_DEBUG, "%05d ft8_tx '%s' even? %d ft8_cq_alt %d ft8_xota %d '%s'\n",
 		wallclock_day_ms % 60000, ft8_tx_text, ft8_tx1st, ft8_cq_alt, ft8_xota, ft8_xota_text);
@@ -993,6 +994,7 @@ void ft8_tx_3f(const char* call_to, const char* call_de, const char* extra) {
 		ft8_repeat = 1;
 	else
 		ft8_repeat = field_int("FT8_REPEAT");
+	update_tx_active_field();
 }
 
 void *ft8_thread_function(void *ptr){
@@ -1062,6 +1064,11 @@ void ft8_poll(int tx_is_on){
 		if (ft8_tx_nsamples == 0){
 			tx_off();
 			ft8_repeat = ft8_repeat_save;
+			// tx_off() -> modem_abort() -> ft8_abort() just zeroed
+			// #tx_active along with ft8_repeat -- now that ft8_repeat
+			// is restored, re-sync the field so it doesn't stay wrong
+			// until the next real mutation
+			update_tx_active_field();
 		}
 		return;
 	}
@@ -1084,6 +1091,7 @@ void ft8_poll(int tx_is_on){
 		if (ft8_tx_nsamples)
 			tx_on(TX_SOFT);
 		ft8_repeat--;
+		update_tx_active_field();
 	}
 }
 
@@ -1396,6 +1404,7 @@ void ft8_process(char *message, ftx_operation operation){
 		ft8_abort();
 		enter_qso(); // W9JES
 		ft8_repeat = 0;
+		update_tx_active_field();
 		return;
 	}
 
@@ -1407,6 +1416,7 @@ void ft8_process(char *message, ftx_operation operation){
 		enter_qso();
 		call_wipe();
 		ft8_repeat = 1;
+		update_tx_active_field();
 	}
 
 	//beyond this point, we need to have a call filled up in the logger
@@ -1435,4 +1445,9 @@ void ft8_init(){
 void ft8_abort(){
 	ft8_tx_nsamples = 0;
 	ft8_repeat = 0;
+	update_tx_active_field();
+}
+
+int ft8_is_repeating(){
+	return ft8_repeat > 0;
 }

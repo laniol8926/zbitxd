@@ -14,3 +14,4 @@ void ft8_tx_3f(const char* call_to, const char* call_de, const char* extra);
 void ft8_poll(int tx_is_on);
 float ft8_next_sample();
 void ft8_process(char *message, ftx_operation operation);
+int ft8_is_repeating();

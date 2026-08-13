@@ -607,6 +607,13 @@ struct field main_controls[] = {
     "", 0,10000, 1, COMMON_CONTROL},
   { "#batt", NULL, 1000, -1000, 50, 50, "VBATT", 40, "300", FIELD_NUMBER,
     "", 0,10000, 1, COMMON_CONTROL},
+	// tracks is_in_tx() || ft8_is_repeating() -- a real field (not just a
+	// C global) so a client that reconnects mid-CQ/mid-QSO after a
+	// dropped connection or hard reload learns the radio is still going
+	// to transmit on its own, via the normal bulk field push on login
+	// (get_updates(c,1)), instead of silently missing it entirely.
+  { "#tx_active", NULL, 1000, -1000, 50, 50, "TXACTIVE", 40, "0", FIELD_NUMBER,
+    "", 0,1, 1, COMMON_CONTROL},
   { "bridge", NULL, 1000, -1000, 50, 50, "BRIDGE", 40, "100", FIELD_NUMBER,
     "", 10,100, 1, COMMON_CONTROL},
 	//cw, ft8 and many digital modes need abort
@@ -2253,6 +2260,7 @@ void tx_on(int trigger){
 		//printf("TX\n");
 		//tlog("tx_on", freq->value, trigger);
 	}
+	update_tx_active_field();
 
 	tx_start_time = millis();
 }
@@ -2273,6 +2281,7 @@ void tx_off(){
 		//printf("RX\n");
 		//tlog("tx_off", response, millis()-tx_start_time);
 	}
+	update_tx_active_field();
 	sound_input(0); //it is a low overhead call, might as well be sure
 }
 
@@ -2619,6 +2628,11 @@ int get_tx_data_length(){
 
 int is_in_tx(){
 	return in_tx;
+}
+
+// see #tx_active's field-table comment
+void update_tx_active_field(){
+	set_field("#tx_active", (is_in_tx() || ft8_is_repeating()) ? "1" : "0");
 }
 
 
