@@ -2655,6 +2655,34 @@ function ui_tick(){
 // aligned with the server's.
 const BAND_STACK_ORDER = ["80M","60M","40M","30M","20M","17M","15M","12M","10M"];
 
+// Exact start/stop Hz ranges from sbitx_daemon.c's own band_stack[] --
+// kept in sync manually since the client has no way to fetch them at
+// runtime. Used to keep the BAND dropdown honest against the real
+// frequency (see the 'FREQ' response case) rather than the separately-
+// persisted "last band button explicitly clicked in this app" value
+// (SELBAND) it showed before, which could silently drift out of sync
+// with reality -- confirmed live: dropdown showed 40M on startup while
+// the radio was actually on 20M.
+const BAND_RANGES = [
+	["80M", 3500000, 4000000],
+	["60M", 5250000, 5500000],
+	["40M", 7000000, 7300000],
+	["30M", 10100000, 10150000],
+	["20M", 14000000, 14400000],
+	["17M", 18068000, 18168000],
+	["15M", 21000000, 21500000],
+	["12M", 24890000, 24990000],
+	["10M", 28000000, 29700000],
+];
+
+function freq_to_band(freq_hz){
+	for (var i = 0; i < BAND_RANGES.length; i++){
+		if (freq_hz >= BAND_RANGES[i][1] && freq_hz <= BAND_RANGES[i][2])
+			return BAND_RANGES[i][0];
+	}
+	return null;
+}
+
 function show_selected_band_store(args) {
 	const band_name = BAND_STACK_ORDER[Math.floor(args/10)];
 	const store = args%10+1;
@@ -3062,6 +3090,13 @@ function response_handler(response){
 				el("VFOA").value = args;
 			else
 				el("VFOB").value = args;
+			// keep BAND showing the band the radio is actually on --
+			// setting .value directly (not via a real user interaction)
+			// does not fire sbitx_selection_changed's 'change' handler,
+			// so this can't accidentally send a band-switch command.
+			var actual_band = freq_to_band(parseInt(args));
+			if (actual_band && el("BAND").value != actual_band)
+				el("BAND").value = actual_band;
 			draw_dial();
 			break;
 		case 'macros_list':
