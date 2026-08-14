@@ -1279,6 +1279,69 @@ function draw_wf_overlay(){
 		ctx.lineTo(tx_x + 0.5, ov.height);
 		ctx.stroke();
 		ctx.fillText("TX", tx_x + 3, 22);
+
+		waterfall_record_period_boundary(mode);
+		draw_period_markers(ctx, ov.width, wf.height);
+	}
+}
+
+// Records a snapshot (wf_rx_elapsed_sec at that exact moment) the
+// first time each period boundary is crossed, so draw_period_markers()
+// can compute each marker's on-screen position independently of the
+// content-scroll's own pacing/catch-up bookkeeping. Cheap to call from
+// every draw_wf_overlay() invocation -- just a Math.floor + comparison
+// in the common case where no new boundary has been crossed.
+function waterfall_record_period_boundary(mode){
+	var period_ms = waterfall_period_ms(mode);
+	var boundary_ms = Math.floor(Date.now() / period_ms) * period_ms;
+	if (boundary_ms === wf_last_boundary_ms)
+		return;
+	// null only on the very first call (or right after a mode switch/
+	// resize) -- don't draw a marker for a period that was already
+	// partway through before we started watching, only ones that
+	// genuinely begin from here on.
+	if (wf_last_boundary_ms !== null)
+		wf_period_boundaries.push({ms: boundary_ms, elapsed_sec: wf_rx_elapsed_sec});
+	wf_last_boundary_ms = boundary_ms;
+}
+
+// Draws every period-boundary line still within the visible waterfall
+// history (up to ~3 for FT8, ~6 for FT4 at the 45s scroll duration).
+// Position is (wf_rx_elapsed_sec now - wf_rx_elapsed_sec when this
+// boundary was recorded) * wf_rows_per_sec -- deliberately the SAME
+// clock the content-scroll pacing itself uses (wf_rx_elapsed_sec, not
+// raw Date.now()), so a marker's position stays aligned with the
+// spectrum content around it: both freeze together during TX and
+// resume together afterward, rather than the marker drifting
+// independently on its own wall-clock timeline. Previously the marker
+// was baked directly into the scrolling spectrum bitmap and charged
+// against the same row-emission budget used for real content -- at
+// this canvas's slow, intentional scroll rate (height/45s) that caused
+// either a multi-second freeze right after each boundary (when charged
+// in full) or a growing misalignment between the drawn line and the
+// true boundary (when the charge was capped to fix the freeze).
+// Confirmed live, both before and after this fix, by hashing/sampling
+// the actual canvas pixels across a real boundary rather than trusting
+// the pacing math. User: "there is a issue with the red UTC line not
+// agreeing with the start of the 15 second block... it is obvious
+// when looking at the display that it is not at the start because you
+// can see the 2 second quiet decode time and it should show up at the
+// end of that."
+function draw_period_markers(ctx, width, height){
+	while (wf_period_boundaries.length > 0){
+		var y = (wf_rx_elapsed_sec - wf_period_boundaries[0].elapsed_sec) * wf_rows_per_sec;
+		if (y < height)
+			break;
+		wf_period_boundaries.shift(); // oldest boundary has scrolled off-screen
+	}
+	for (var i = 0; i < wf_period_boundaries.length; i++){
+		var b = wf_period_boundaries[i];
+		var y = Math.round((wf_rx_elapsed_sec - b.elapsed_sec) * wf_rows_per_sec);
+		ctx.fillStyle = "red";
+		ctx.fillRect(0, y, width, 2);
+		ctx.font = "10px monospace";
+		ctx.textBaseline = "top";
+		ctx.fillText(waterfall_utc_label(b.ms), 2, y + 3);
 	}
 }
 
@@ -2945,7 +3008,6 @@ const WF_SCROLL_DURATION_SEC = 45;
 // time-based rather than a fixed 1-row-per-tick counter).
 var wf_rows_per_sec = 20;
 var wf_rows_emitted = 0;
-var wf_last_period_index = null;
 
 // Accumulates real elapsed time only while *not* transmitting (see
 // waterfall_scroll_tick()) -- TX time contributes nothing to it, so the
@@ -2954,6 +3016,14 @@ var wf_last_period_index = null;
 // direct: "the waterfall should stop during a transmit cycle."
 var wf_rx_elapsed_sec = 0;
 var wf_last_tick_time = null;
+
+// Snapshots of wf_rx_elapsed_sec at each recent FT8/FT4 period
+// boundary, oldest first -- see draw_period_markers()'s own comment
+// for why markers are positioned from this instead of raw elapsed
+// wall-clock time. wf_last_boundary_ms just tracks which boundary was
+// most recently recorded, so each one is only pushed once.
+var wf_period_boundaries = [];
+var wf_last_boundary_ms = null;
 
 // mode: pass explicitly from mode_set() (which knows new_mode
 // authoritatively -- see waterfall_calc_height()'s comment on why
@@ -2975,7 +3045,8 @@ function waterfall_setup_scroll_rate(mode){
 	wf_rx_elapsed_sec = 0;
 	wf_last_tick_time = null;
 	wf_rows_emitted = 0;
-	wf_last_period_index = null;
+	wf_period_boundaries = [];
+	wf_last_boundary_ms = null;
 	waterfall_clear();
 }
 
@@ -3035,32 +3106,6 @@ function waterfall_utc_label(ms){
 	return FT8_format_period_label(hh + mm + ss);
 }
 
-const WF_MARKER_HEIGHT = 14;
-
-// Solid red line + UTC label, inserted at the top of the canvas exactly
-// like a scroll row so it becomes part of the same shifting bitmap and
-// tracks down with everything else for free -- no separate overlay/
-// position-tracking needed. User's ask, verbatim reasoning: at the
-// old one-period-per-screen rate the ~2.36s decode/dead-time gap after
-// each ~12.64s transmission was obvious as a visual artifact; explicit
-// period-start markers (matching the same UTC boundaries/format as the
-// Band Activity and CQ Panel divider rows) make that gap self-
-// explanatory instead of looking like a glitch.
-// No background fill -- the marker's own row is drawn directly on top
-// of whatever spectrum data is already there (waterfall_scroll_tick()
-// only shifts the rows *below* this one; these top WF_MARKER_HEIGHT
-// rows still hold whatever was last drawn there, not blank canvas), so
-// the line/label overlay the real waterfall content instead of
-// blanking out a solid strip across it. User's ask, direct: "the
-// background should be transparent."
-function waterfall_draw_period_marker(ctx, width, period_start_ms){
-	ctx.fillStyle = "red";
-	ctx.fillRect(0, 0, width, 2);
-	ctx.font = "10px monospace";
-	ctx.textBaseline = "top";
-	ctx.fillText(waterfall_utc_label(period_start_ms), 2, 3);
-}
-
 function waterfall_scroll_tick(){
 	if (last_wf_row == null)
 		return;
@@ -3076,62 +3121,27 @@ function waterfall_scroll_tick(){
 	wf_last_tick_time = now;
 
 	// TX time doesn't accumulate at all -- the scroll (and the period
-	// markers below, since nothing here runs past this point while
-	// transmitting) genuinely stops instead of freezing the displayed
-	// content while still advancing position, which would otherwise
-	// visibly slide the frozen image down the screen during TX.
+	// markers, which track this same wf_rx_elapsed_sec clock -- see
+	// draw_period_markers()'s own comment) genuinely stop instead of
+	// freezing the displayed content while still advancing position,
+	// which would otherwise visibly slide the frozen image down the
+	// screen during TX.
 	if (in_tx)
 		return;
 	wf_rx_elapsed_sec += dt;
+	// period markers are a separate overlay, redrawn fresh every tick
+	// from wf_rx_elapsed_sec directly -- decoupled entirely from the
+	// content-scroll pacing below, so their position is always exact
+	// regardless of whether row-insertion is currently paused catching
+	// up on schedule budget (see draw_period_markers()).
+	draw_wf_overlay();
 
 	var target_total = Math.floor(wf_rx_elapsed_sec * wf_rows_per_sec);
 	var rows_needed = target_total - wf_rows_emitted;
 	if (rows_needed <= 0)
 		return;
 
-	var mode = el("MODE").value;
-	var period_ms = waterfall_period_ms(mode);
-	var period_index = Math.floor(now / period_ms);
 	var ctx = w.getContext("2d", {willReadFrequently:true});
-
-	// wf_last_period_index starting null means we don't know when the
-	// *current* (possibly already-in-progress) period began, so the
-	// first tick after a mode switch/resize never draws a marker for
-	// it -- only for periods that genuinely start while already
-	// watching.
-	if (wf_last_period_index !== null && period_index !== wf_last_period_index){
-		var shifted = ctx.getImageData(0, 0, w.width, w.height);
-		ctx.putImageData(shifted, 0, WF_MARKER_HEIGHT);
-		waterfall_draw_period_marker(ctx, w.width, period_index * period_ms);
-		// Charging the marker's full pixel height against the schedule
-		// budget (as this used to do) is correct for long-term rate
-		// accuracy, but at this canvas's actual scroll rate
-		// (height/45s, often only ~3 rows/sec) a 14px marker represents
-		// several real SECONDS of "already earned" budget -- so
-		// rows_needed stayed <= 0, and the waterfall visibly froze,
-		// for 4+ real seconds after every single marker. Confirmed
-		// live by hashing the canvas's own pixel content every ~300ms
-		// across a real period boundary: solid, unchanging hash for
-		// over 4 seconds starting right at the marker. User: "the
-		// waterfall stall happens at the beginning of the 2 second
-		// silence period and exists until the beginning of the next
-		// 15s cycle" -- this is what was actually causing that, not
-		// (only) genuine on-air silence during FT8's dead-time gap.
-		// Capping the charge to at most ~1 real second's worth of the
-		// current rate bounds the freeze to something barely
-		// perceptible (about the length of one normal inter-tick gap)
-		// while still charging *something* per marker, so the
-		// long-term rate doesn't drift unboundedly faster over a long
-		// session -- the same failure mode the original full charge
-		// was written to prevent, just traded for a much smaller,
-		// bounded amount instead of eliminating the charge entirely.
-		wf_rows_emitted += Math.min(WF_MARKER_HEIGHT, Math.ceil(wf_rows_per_sec));
-		wf_last_period_index = period_index;
-		draw_wf_overlay();
-		return;
-	}
-	wf_last_period_index = period_index;
-
 	var img = waterfall_build_row(last_wf_row, ctx, w.width);
 
 	var shifted = ctx.getImageData(0, 0, w.width, w.height);
@@ -3140,7 +3150,6 @@ function waterfall_scroll_tick(){
 		ctx.putImageData(img, 0, y);
 
 	wf_rows_emitted = target_total;
-	draw_wf_overlay();
 }
 
 function waterfall_calc_height(){
