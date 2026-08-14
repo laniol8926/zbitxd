@@ -1961,17 +1961,40 @@ function ft8_message_signature(text){
 	return deco_strip(text).replace(/^\s*\S+\s*/, "").replace(/\s+/g, " ").trim();
 }
 
+// Tracks, per list, the signature of a "Q" (queued) entry that hasn't
+// yet been confirmed by its matching "TX" (actually sent) line -- see
+// FT8_list_append()'s own comment for why this has to be a one-shot
+// marker rather than "does this match the last item in the list".
+var FT8_pending_queued_signature = {};
+
 function FT8_list_append(list_id, text, style){
 
-	// Skip a duplicate of the immediately preceding entry (same
-	// signature, timestamp ignored) -- see ft8_message_signature()'s
-	// comment. Confirmed live by direct user report: one click doubled
-	// the RX Frequency panel entry, a double-click quadrupled it.
-	var existing_ol = el(list_id).querySelector("ol");
-	var last_item = existing_ol.lastElementChild;
-	if (last_item && last_item.dataset && last_item.dataset.message
-			&& ft8_message_signature(last_item.dataset.message) === ft8_message_signature(text))
+	// ft8_tx() writes a "Q" line the instant a message is queued, then
+	// ftx_start_tx() writes its own "TX" line for the same burst when it
+	// actually transmits -- both describing the same single event, so
+	// showing both doubled every entry (confirmed live: one click
+	// doubled the RX Frequency panel entry, a double-click quadrupled
+	// it). But FT8_REPEAT (default 5) makes ftx_start_tx() -- and only
+	// ftx_start_tx() -- fire again for each repeat, with an *identical*
+	// signature every time (same message, same frequency). A first
+	// attempt at this fix compared against "the immediately preceding
+	// list item" and matched Q->TX specifically, but since a suppressed
+	// entry never actually gets appended, the "preceding item" never
+	// advances past that original Q -- so repeats 2-5 kept comparing
+	// against the same stale entry and were silently dropped forever
+	// too. Confirmed live: "not all CQ's show up in the rx frequency
+	// panel." Fixed with a one-shot pending marker instead: a "Q" sets
+	// it, the *first* matching "TX" clears it (suppressing only that
+	// one same-burst duplicate), and any further identical "TX" (a real
+	// repeat) finds nothing pending and appends normally.
+	var sig = ft8_message_signature(text);
+	if (style === "Q") {
+		FT8_pending_queued_signature[list_id] = sig;
+	}
+	else if (style === "TX" && FT8_pending_queued_signature[list_id] === sig) {
+		FT8_pending_queued_signature[list_id] = null;
 		return;
+	}
 
 	var item = document.createElement("li");
 	FT8_stylize_message_item(item, text, style);
