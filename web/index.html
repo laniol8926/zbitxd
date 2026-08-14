@@ -3103,11 +3103,29 @@ function waterfall_scroll_tick(){
 		var shifted = ctx.getImageData(0, 0, w.width, w.height);
 		ctx.putImageData(shifted, 0, WF_MARKER_HEIGHT);
 		waterfall_draw_period_marker(ctx, w.width, period_index * period_ms);
-		// count the marker itself as consumed schedule budget, or the
-		// elapsed-time catch-up math would keep trying to make up the
-		// "missing" rows_needed rows on top of it, permanently drifting
-		// the scroll rate faster than intended.
-		wf_rows_emitted += WF_MARKER_HEIGHT;
+		// Charging the marker's full pixel height against the schedule
+		// budget (as this used to do) is correct for long-term rate
+		// accuracy, but at this canvas's actual scroll rate
+		// (height/45s, often only ~3 rows/sec) a 14px marker represents
+		// several real SECONDS of "already earned" budget -- so
+		// rows_needed stayed <= 0, and the waterfall visibly froze,
+		// for 4+ real seconds after every single marker. Confirmed
+		// live by hashing the canvas's own pixel content every ~300ms
+		// across a real period boundary: solid, unchanging hash for
+		// over 4 seconds starting right at the marker. User: "the
+		// waterfall stall happens at the beginning of the 2 second
+		// silence period and exists until the beginning of the next
+		// 15s cycle" -- this is what was actually causing that, not
+		// (only) genuine on-air silence during FT8's dead-time gap.
+		// Capping the charge to at most ~1 real second's worth of the
+		// current rate bounds the freeze to something barely
+		// perceptible (about the length of one normal inter-tick gap)
+		// while still charging *something* per marker, so the
+		// long-term rate doesn't drift unboundedly faster over a long
+		// session -- the same failure mode the original full charge
+		// was written to prevent, just traded for a much smaller,
+		// bounded amount instead of eliminating the charge entirely.
+		wf_rows_emitted += Math.min(WF_MARKER_HEIGHT, Math.ceil(wf_rows_per_sec));
 		wf_last_period_index = period_index;
 		draw_wf_overlay();
 		return;
