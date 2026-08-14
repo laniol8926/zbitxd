@@ -563,6 +563,10 @@ struct field main_controls[] = {
 		"", 0,20,1,0},
 	{"#audio_status", NULL, 1000, -1000, 400, 149, "AUDIOSTATUS", 70, "", FIELD_TEXT,
 		"", 0,20,1,0},
+	// see time_is_synchronized()'s comment -- FT4/FT8 are slot-timed,
+	// clock drift silently misses whole transmit/decode windows
+	{"#time_status", NULL, 1000, -1000, 400, 149, "TIMESTATUS", 70, "", FIELD_TEXT,
+		"", 0,20,1,0},
 	// forces an immediate settings save (see save_user_settings()'s 30s
 	// throttle) -- sent by the settings panel's "Update" button so an
 	// explicit save doesn't silently get lost on a quick page reload
@@ -896,6 +900,39 @@ int get_field_value_by_label(const char *label, char *value){
 }
 
 
+// FT4/FT8 are slot-timed (ft8_poll()/ftx_would_send() expect/transmit
+// within tight UTC-aligned windows -- FT4 7.5s, FT8 15s), so a drifted
+// system clock silently misses whole slots rather than failing loudly.
+// `timedatectl show --property=NTPSynchronized --value` reports "yes"/
+// "no" regardless of which NTP client is actually running underneath
+// (systemd-timesyncd or chrony both integrate with it) -- checked here
+// rather than assuming the OS-level setup is always correct.
+// Throttled: this spawns a subprocess, and remote_update_field() is
+// called on every client poll (many times a second) -- re-checking
+// that often would be wasteful on a Pi Zero 2 W (this project already
+// hit a real CPU-overload bug from over-frequent work in a hot path,
+// see project notes), and NTP's own poll interval is on the order of
+// minutes anyway, so a few seconds of staleness here costs nothing.
+int time_is_synchronized(){
+	static int cached = 1; // optimistic until the first real check
+	static time_t last_checked = 0;
+	time_t now = time(NULL);
+
+	if (now - last_checked < 15)
+		return cached;
+	last_checked = now;
+
+	FILE *pf = popen("timedatectl show --property=NTPSynchronized --value 2>/dev/null", "r");
+	if (!pf)
+		return cached; // keep the last known value rather than guessing
+
+	char line[32];
+	if (fgets(line, sizeof(line), pf))
+		cached = !strncmp(line, "yes", 3);
+	pclose(pf);
+	return cached;
+}
+
 //prepares to send the latest value of a field to the remote head
 int remote_update_field(int i, char *text){
 	struct field * f = active_layout + i;
@@ -933,6 +970,10 @@ int remote_update_field(int i, char *text){
 		else
 			s = cap ? "Capture only" : "Playback only";
 		sprintf(text, "AUDIOSTATUS %s", s);
+		return 1;
+	}
+	if (!strcmp(f->label, "TIMESTATUS")){
+		sprintf(text, "TIMESTATUS %s", time_is_synchronized() ? "Synced" : "Not synced");
 		return 1;
 	}
 

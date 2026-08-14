@@ -307,6 +307,11 @@
 			<button id="audio_connect" class="logger-button">Connect Audio</button>
 			<input id="AUDIOSTATUS" class="connect-status" type="text" readonly tabindex="-1" />
 		</div>
+		<div class="settings-element">
+			<span class="settings-label">Clock Sync:</span>
+			<input id="TIMESTATUS" class="connect-status" type="text" readonly tabindex="-1" />
+			(FT4/FT8 need an accurate clock to transmit/decode in the right time slot)
+		</div>
 	</div><!-- end of connect_panel -->
 
 	<div id="keypad_panel" class="sbitx-panel">
@@ -3338,6 +3343,8 @@ function response_handler(response){
 						draw_dial();
 					else if (cmd == "RIGSTATUS" || cmd == "AUDIOSTATUS")
 						e.classList.toggle("connect-status-ok", args == "Connected");
+					else if (cmd == "TIMESTATUS")
+						e.classList.toggle("connect-status-ok", args == "Synced");
 				}
 
 			}
