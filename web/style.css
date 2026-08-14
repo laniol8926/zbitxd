@@ -1065,6 +1065,17 @@ body {
 	display: none;
 }
 
+/* ESC button hidden, not removed -- now fully redundant with the TX
+   Enabled indicator's own click-to-abort (both just send abort=1), and
+   user's keyboard isn't reliable enough to lean on the Escape key
+   instead, so the on-screen button lost its remaining purpose. Stays
+   in the DOM since logger_abort() (what it called) is still used
+   elsewhere -- CW keyboard shortcuts, FT8_cq() -- unrelated to this
+   button specifically. */
+#esc {
+	display: none;
+}
+
 
 /* specific controls */
 #TEXT {
