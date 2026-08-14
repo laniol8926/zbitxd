@@ -1964,10 +1964,9 @@ function FT8_stylize_message_item(item, text, style) {
     var mycallsign = $("#MYCALLSIGN").val().toUpperCase();
     var mygrid = $("#MYGRID").val().substring(0,4).toUpperCase();
     // console.log("FT8_stylize_message_item: vars", tilde_pos, m1, m2, m3, m4, mycallsign, mygrid);
-    if(style == 'Q') {
-	item.className = "sbitx-list-item wsjtx-message-queued";
-    }
-    else if (deco_strip(m1) == mycallsign){
+    // "Q" (queued) style never reaches here -- FT8_list_append() skips
+    // it before creating an item at all, see its own comment.
+    if (deco_strip(m1) == mycallsign){
 	item.className = "sbitx-list-item wsjtx-message-for-me";
     }
     else if (deco_strip(m2) == mycallsign){
@@ -2013,51 +2012,24 @@ function FT8_format_period_label(label){
 	return label.substring(0,2) + ":" + label.substring(2,4) + ":" + label.substring(4,6) + " UTC";
 }
 
-// Same logical message, ignoring the leading UTC timestamp token and
-// any whitespace-width differences -- the server echoes your own
-// queued reply through more than one XML tag (e.g. WSJTX-Q then
-// WSJTX-TX), each with its *own* timestamp (queued-at vs. actual-slot
-// time: confirmed live, "195246.4  TX  1573 ~ N5TLH AI5II EM72" then
-// "195300    TX  1573 ~ N5TLH AI5II EM72" -- not byte-identical, so
-// the original exact-string de-dup check missed it entirely).
-function ft8_message_signature(text){
-	return deco_strip(text).replace(/^\s*\S+\s*/, "").replace(/\s+/g, " ").trim();
-}
-
-// Tracks, per list, the signature of a "Q" (queued) entry that hasn't
-// yet been confirmed by its matching "TX" (actually sent) line -- see
-// FT8_list_append()'s own comment for why this has to be a one-shot
-// marker rather than "does this match the last item in the list".
-var FT8_pending_queued_signature = {};
-
 function FT8_list_append(list_id, text, style){
 
-	// ft8_tx() writes a "Q" line the instant a message is queued, then
-	// ftx_start_tx() writes its own "TX" line for the same burst when it
-	// actually transmits -- both describing the same single event, so
-	// showing both doubled every entry (confirmed live: one click
-	// doubled the RX Frequency panel entry, a double-click quadrupled
-	// it). But FT8_REPEAT (default 5) makes ftx_start_tx() -- and only
-	// ftx_start_tx() -- fire again for each repeat, with an *identical*
-	// signature every time (same message, same frequency). A first
-	// attempt at this fix compared against "the immediately preceding
-	// list item" and matched Q->TX specifically, but since a suppressed
-	// entry never actually gets appended, the "preceding item" never
-	// advances past that original Q -- so repeats 2-5 kept comparing
-	// against the same stale entry and were silently dropped forever
-	// too. Confirmed live: "not all CQ's show up in the rx frequency
-	// panel." Fixed with a one-shot pending marker instead: a "Q" sets
-	// it, the *first* matching "TX" clears it (suppressing only that
-	// one same-burst duplicate), and any further identical "TX" (a real
-	// repeat) finds nothing pending and appends normally.
-	var sig = ft8_message_signature(text);
-	if (style === "Q") {
-		FT8_pending_queued_signature[list_id] = sig;
-	}
-	else if (style === "TX" && FT8_pending_queued_signature[list_id] === sig) {
-		FT8_pending_queued_signature[list_id] = null;
+	// "Q" is ft8_tx()'s queued-placeholder line, written the instant
+	// F1/a macro is clicked -- timestamped at click time, not when the
+	// message actually transmits. ftx_start_tx() writes its own "TX"
+	// line, with the real transmission timestamp, once the burst
+	// actually goes out (and again for each FT8_REPEAT repeat). Never
+	// displaying "Q" at all means the entry that appears is always the
+	// real one, at the real time -- simpler and more correct than the
+	// earlier approach here, which displayed the "Q" placeholder
+	// immediately and tried to de-dup the *real* "TX" line against it
+	// (backwards: that kept the click-timestamped entry and discarded
+	// the real-transmission-timestamped one). User: "when i click F1
+	// CQ button I get an entry... showing that cq with the timestamp
+	// of the click. the entry should happen when the transmission
+	// starts."
+	if (style === "Q")
 		return;
-	}
 
 	var item = document.createElement("li");
 	FT8_stylize_message_item(item, text, style);
