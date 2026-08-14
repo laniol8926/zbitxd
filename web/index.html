@@ -2359,6 +2359,27 @@ function logger_abort(event){
 	clear_cq_highlight();
 }
 
+// TX Enabled indicator doubles as a click-to-abort kill switch while
+// red: a queued CQ/reply not yet transmitted, an active FT8_REPEAT
+// cycle between bursts, or literal RF-on right now are all covered by
+// the same abort=1 this handler already uses -- one control that
+// works regardless of which of those states it's currently in. No-op
+// while grey (nothing armed to abort). User's ask, direct: "if the
+// transmission enabled box is red and i click in that box it disables
+// transmitting... if a calling cq is pending... this will let me
+// abort that queued transmission and if for some reason i need to
+// immediately stop transmitting i can just click on the red box and
+// the transmission stops."
+function tx_enabled_indicator_clicked(){
+	if (!cq_active)
+		return;
+	websocket_send("abort=1");
+	clear_cq_highlight();
+	// optimistic local update for instant feedback -- the server's own
+	// TXACTIVE field push will confirm/correct this shortly after
+	el("tx_enabled_indicator").classList.remove("tx-active");
+}
+
 function show_in_qrz_window(callsign) {
 	var url = "https://www.qrz.com/db/" + callsign;
 	if (qrz_window == null || qrz_window.closed)
@@ -3477,6 +3498,7 @@ $("#vfo_swap").on("click", vfo_set);
 // logger buttons
 $("#wipe").on("click", logger_wipe);
 $("#esc").on("click", logger_abort);
+$("#tx_enabled_indicator").on("click", tx_enabled_indicator_clicked);
 $("#qrz").on("click", logger_qrz);
 $("#logger-log").on("click", logger_enter_qso);
 //$("#macros").on("click", logger_toggle_macros);

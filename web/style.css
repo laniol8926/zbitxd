@@ -1042,14 +1042,17 @@ body {
 	color: white;
 }
 
-/* TX Enabled -- passive status indicator (no user interaction), white
-   label text always, background turns red only while actually
-   transmitting (see switch_to_tx()/switch_to_rx()). */
+/* TX Enabled -- status indicator, white label text always, background
+   turns red whenever armed or transmitting (see the TXACTIVE case in
+   response_handler()). Also a click-to-abort kill switch while red
+   (see tx_enabled_indicator's click handler) -- cursor only shows as
+   clickable in that state, since clicking it while grey does nothing. */
 .tx-enabled-indicator .sbitxv3-label {
 	color: white;
 }
 .tx-enabled-indicator.tx-active {
 	background-color: red;
+	cursor: pointer;
 }
 
 /* TX TONE box hidden, not removed -- user verified the waterfall
