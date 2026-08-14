@@ -1787,14 +1787,12 @@ function switch_to_tx(){
 	log("setting in_tx true");
 	$("#tx_meters").show();
 	in_tx = true;
-	el("tx_enabled_indicator").classList.add("tx-active");
 }
 
 function switch_to_rx(){
 	$("#tx_meters").hide();
 	log("setting in_tx false");
 	in_tx = false;
-	el("tx_enabled_indicator").classList.remove("tx-active");
 }
 
 /* wsjtx functionality */
@@ -3349,6 +3347,17 @@ function response_handler(response){
 			// idle while it keeps transmitting unseen.
 			cq_active = (args == "1");
 			el("F1").classList.toggle("toggle-active", cq_active);
+			// Also the sole authority for the TX Enabled indicator now
+			// (switch_to_tx()/switch_to_rx() no longer touch it) --
+			// this already covers both "literally transmitting right
+			// now" (is_in_tx()) and "armed, will key up again shortly"
+			// (ft8_is_repeating()), so the indicator turns red the
+			// instant CQ/a reply is actually queued, not just during
+			// the brief windows RF is literally on. User: "when i
+			// click Q/F1, I have enabled transmit so the transmit
+			// enabled box should turn red. right now it turns red
+			// when the actual transmission starts."
+			el("tx_enabled_indicator").classList.toggle("tx-active", cq_active);
 			break;
 		case 'TUNE':
 			// server is now the authority on tune_on (it has a 5s
