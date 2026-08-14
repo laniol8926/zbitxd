@@ -36,6 +36,10 @@ static char ft8_xota_text[14];
 ftx_message_t ftx_tx_msg;
 ftx_message_t ftx_xota_msg;
 static int ft8_rx_buff_index = 0;
+// real wallclock_day_ms at the moment ft8_rx_buff_index was actually
+// reset to 0 for the CURRENT slot (set in ft8_rx()'s slot_time<500
+// branch) -- see sbitx_ft8_decode()'s own comment on why DT needs this
+static int ft8_rx_buff_start_ms = -1;
 static int ft8_tx_buff_index = 0;
 static int ft8_tx_nsamples = 0;
 // ft8_tx_buffer/ft8_tx_nsamples/ft8_tx_buff_index are written by
@@ -619,6 +623,41 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 	const int packet_time_ms = is_ft8 ? 15000 : 7500;
 	const int raw_ms = (wallclock_day_ms / packet_time_ms) * packet_time_ms;
 
+	// DT needs to be measured from the TRUE slot boundary (raw_ms), not
+	// from wherever ft8_rx_buff_index actually got reset to 0 for this
+	// slot -- that reset (ft8_rx()'s slot_time<500 branch) only runs on
+	// its own ~500ms-granularity check plus real audio-callback timing,
+	// so buffer index 0 can land up to ~500ms+ *after* the true boundary.
+	// Measured live: this part is actually tiny in practice (~5-7ms), so
+	// it's kept for correctness but isn't the real story below.
+	const float dt_buffer_start_correction_sec = (ft8_rx_buff_start_ms >= 0) ?
+		(ft8_rx_buff_start_ms - raw_ms) / 1000.0f : 0.0f;
+
+	// The dominant DT error turned out to be a fixed offset inherent to
+	// ft8_lib's own candidate-finder, not a timing bug in this app.
+	// Proven by dumping the EXACT signal[]/num_samples buffer this
+	// function is about to decode to a WAV file and running real jt9
+	// (WSJT-X's own decoder) on the IDENTICAL samples -- same audio, same
+	// moment, zero environmental confound. Across 10 paired captures
+	// (n=288 jt9 decodes vs n=158 decodes here), jt9's DT clustered
+	// zero-centered (mean 0.18s, median 0.1s, matching real WSJT-X/
+	// WSJT-Z), while ft8_lib's own time_offset on the exact same audio
+	// clustered ~0.65-0.7s higher (mean 0.83s, median 0.8s) and was
+	// NEVER negative -- the formula itself already matches ft8_lib's own
+	// reference demo tool exactly, so this is a real, consistent
+	// difference in the two libraries' own window-alignment conventions,
+	// not a bug to hunt further inside this app's own capture pipeline.
+	// User: "the numbers are way off compared to what i see running
+	// wsjt-x or wsjt-z... .7 .8 1.5 etc is not correct compared to wsjt
+	// showing 0.1, 0.2, or 0.0." Calibrated empirically rather than
+	// derived analytically from ftx_find_candidates()'s own internals
+	// (a nontrivial correlation search) -- if a future ft8_lib update
+	// changes its own windowing, this constant would need re-measuring
+	// the same way (dump a buffer, compare against real jt9 on it).
+	const float dt_algorithm_calibration_sec = -0.7f;
+
+	const float dt_correction_sec = dt_buffer_start_correction_sec + dt_algorithm_calibration_sec;
+
 	int i;
 	char mycallsign_upper[20];
 	char mycallsign[20];
@@ -662,7 +701,8 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 
         int freq_hz = lroundf((cand->freq_offset + (float)cand->freq_sub / mon.wf.freq_osr) / mon.symbol_period);
 		//~ printf("freq_hz: (%d + %d / %d) / %f = %d\n", cand->freq_offset, cand->freq_sub, mon.wf.freq_osr, mon.symbol_period, freq_hz);
-        float time_sec = (cand->time_offset + (float)cand->time_sub / mon.wf.time_osr) * mon.symbol_period;
+        float time_sec = (cand->time_offset + (float)cand->time_sub / mon.wf.time_osr) * mon.symbol_period
+			+ dt_correction_sec;
 
         ftx_message_t message;
         ftx_decode_status_t status;
@@ -1057,8 +1097,10 @@ void ft8_rx(int32_t *samples, int count) {
 	}
 //~ printf("time %d -> %d; slot %d; ft8_rx_buff_index %d\n", time_was % 60000, wallclock_day_ms % 60000, slot_time, ft8_rx_buff_index);
 
-	if (slot_time < 500)
+	if (slot_time < 500){
 		ft8_rx_buff_index = 0;
+		ft8_rx_buff_start_ms = wallclock_day_ms;
+	}
 
 	//we should have at least 6 or 12 seconds of samples to decode
 	if (ft8_rx_buff_index >= 13 * min_secs && slot_time > slot_time_decode) {
