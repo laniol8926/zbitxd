@@ -3428,6 +3428,20 @@ el("waterfall_overlay").addEventListener("touchstart", wf_overlay_click);
 //specific control handler
 $("#sound_mute").on("click", () => { sound_mute = !sound_mute;});
 el("dial").addEventListener("wheel", change_freq, { passive: false });
+// The dial's own wheel handler calls preventDefault() (tunes instead
+// of scrolling), but nowhere else in #pan_adapter (waterfall scale,
+// waterfall itself, the gain-controls row when shown) did -- so a
+// wheel gesture anywhere else in the display just fell through to the
+// browser's native page scroll. On a small screen where the page
+// already doesn't fully fit (confirmed live: real overflow even with
+// the gain-controls row hidden), that native scroll visibly shifted
+// everything below the waterfall scale, and could scroll the scale
+// itself off-screen -- confirmed live by direct user report: "when i
+// shift up i loose visibility to the waterfall scale." This app has
+// no reason to page-scroll via mouse wheel at all (the decode lists
+// already scroll independently via their own overflow), so absorb it
+// everywhere in the display rather than just on the dial.
+el("pan_adapter").addEventListener("wheel", function(e){ e.preventDefault(); }, { passive: false });
 $("#dial").on("click", function(){ open_panel("keypad_panel"); });
 $(".keypad-btn").on("click", keypad_button_clicked);
 $("#REF").on("change", draw_meters);
