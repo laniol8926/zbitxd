@@ -3351,6 +3351,17 @@ function response_handler(response){
 			cq_active = (args == "1");
 			el("F1").classList.toggle("toggle-active", cq_active);
 			break;
+		case 'TUNE':
+			// server is now the authority on tune_on (it has a 5s
+			// timeout of its own -- see tune_started_ms), so this needs
+			// to reflect the real field, not just what toggle_tune()'s
+			// own click last set locally: the button/label used to
+			// stay stuck on "Stop Tune" after the server auto-stopped
+			// it, or after a reconnect mid-tune.
+			tune_on = (args == "ON");
+			el("tune_toggle").innerHTML = tune_on ? "Stop Tune" : "Tune";
+			el("tune_toggle").classList.toggle("toggle-active", tune_on);
+			break;
 		case 'MODE':
 			mode_set(args); 
 			//There is no break statement here, MODE continues to default case

@@ -2022,6 +2022,16 @@ int do_bandwidth(struct field *f, int event, int a, int b, int c){
 }
 
 static char tune_tx_saved_mode[100]={0};
+// Tune keys the transmitter with a steady tone and has no natural end
+// condition of its own (unlike FT8/CW, nothing ever calls tx_off() for
+// it on a timer) -- left running, it can key the transmitter
+// indefinitely, a real risk for a QRP-class rig not built for a
+// sustained carrier. tune_started_ms (0 = not running) is checked in
+// ui_tick(), which polls at roughly 1kHz, so a 5s timeout fires within
+// a few ms of the deadline regardless of whether any client is even
+// still connected to say "TUNE OFF" itself.
+#define TUNE_TIMEOUT_MS 5000
+static unsigned int tune_started_ms = 0;
 
 //called for RIT as well as the main tuning
 int do_tuning(struct field *f, int event, int a, int b, int c){
@@ -2539,6 +2549,14 @@ bool ui_tick(){
 
 	ticks++;
 
+	// see tune_started_ms's own comment -- Tune has no natural end
+	// condition, checked here so the timeout still fires even with no
+	// client connected to click "Stop Tune"
+	if (tune_started_ms && millis() - tune_started_ms >= TUNE_TIMEOUT_MS){
+		puts("TUNE timed out");
+		do_control_action("TUNE OFF");
+	}
+
 	while (q_length(&q_remote_commands) > 0){
 		//read each command until the 
 		char remote_cmd[1000];
@@ -2967,23 +2985,35 @@ void do_control_action(char *cmd){
 		change_band(request); 		
 	}
 	else if(!strcmp(request, "TUNE ON")){
-		puts("Turning on TUNE");	
+		puts("Turning on TUNE");
 		strcpy(tune_tx_saved_mode, get_field("r1:mode")->value);
-		//field_set("MODE", "TUNE");	
+		//field_set("MODE", "TUNE");
 		//update_field(get_field("r1:mode"));
 		//this is not correct, but ...
 		char response[200];
 		sdr_request("r1:mode=TUNE", response);
 		delay(100);
 		tx_on(TX_SOFT);
+		tune_started_ms = millis();
+		// direct value write + update_field(), not field_set() -- field_set()
+		// calls set_field(), which itself calls do_control_action(), and
+		// this function *is* do_control_action(); field_set("TUNE","ON")
+		// here would recurse right back into this same branch
+		struct field *f_tune = get_field("#tune");
+		strcpy(f_tune->value, "ON");
+		update_field(f_tune);
 	}
 	else if(!strcmp(request, "TUNE OFF")){
 		puts("Turning off TUNE");
 		tx_off();
 		if (tune_tx_saved_mode[0]){
-			field_set("MODE", tune_tx_saved_mode);	
+			field_set("MODE", tune_tx_saved_mode);
 			update_field(get_field("r1:mode"));
 		}
+		tune_started_ms = 0;
+		struct field *f_tune = get_field("#tune"); // see the TUNE ON comment re: field_set()
+		strcpy(f_tune->value, "OFF");
+		update_field(f_tune);
 	}
 	else if (!strcmp(request, "REC ON")){
 		char fullpath[PATH_MAX];
