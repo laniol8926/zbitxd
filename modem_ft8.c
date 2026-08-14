@@ -98,10 +98,10 @@ static void ftx_update_clock()
 /*!
     Format the day-time-in-millseconds \a day_ms
     (or wallclock time instead if \a day_ms is -1)
-    as HHMMSS.half-second to the given buffer, and return
+    as HHMMSS to the given buffer, and return
     a pointer to the character after what has been printed
     (e.g. to continue printing something else with sprintf).
-    In practice, it always prints 8 characters and returns buf + 8.
+    Always prints exactly 8 characters and returns buf + 8.
 */
 // TODO move this and ftx_update_clock to sbitx.h or so: use a global clock
 static char *hmst_time_sprint(char *buf, int day_ms)
@@ -113,10 +113,18 @@ static char *hmst_time_sprint(char *buf, int day_ms)
     int h = wallclock_day_s / (3600);
     int m = (wallclock_day_s - (h * 3600)) / 60;
     int s = wallclock_day_s - (h * 3600 + m * 60);
-    int tenth_sec = (dms - (wallclock_day_s * 1000)) / 100;
-    const int len = tenth_sec ?
-	sprintf(buf, "%02d%02d%02d.%01d", h, m, s, tenth_sec) :
-	sprintf(buf, "%02d%02d%02d  ", h, m, s);
+    // used to conditionally append ".<tenths>" when nonzero -- but the
+    // RX decode path (raw_ms, rounded to the slot boundary) never has a
+    // nonzero tenths digit, while the TX/queued path (live
+    // wallclock_day_ms, not rounded) almost always does, so operators'
+    // own CQ/TX lines showed a stray ".7"/".1"/etc that incoming decode
+    // lines never did -- confirmed as unwanted, not a needed feature
+    // (user: "there is a dot and a number appended to the time on my
+    // cq's... it shouldn't be there"). Always the plain whole-second
+    // form now, both paths consistent. Width must stay exactly 8 chars
+    // either way -- other code relies on that (semantic-span column
+    // math, prefix_len calculations).
+    const int len = sprintf(buf, "%02d%02d%02d  ", h, m, s);
     return buf + len;
 }
 
