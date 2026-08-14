@@ -2128,7 +2128,13 @@ function FT8_new_message(text, style){
 	//log("ft8:" + text + ":" + style);
 	var words = text.split(' ');
 	FT8_list_append("wsjtx-activity", text, style) ;
-	if (FT8_message_is_cq(text))
+	// CQ Panel is for stations calling CQ, not the operator's own CQ --
+	// style is "RX" only for genuine incoming decodes ("TX"/"Q" are the
+	// operator's own transmission/queued-to-transmit), so this excludes
+	// the operator's own CQ from a panel meant to show who's out there
+	// to answer, not echo what was just sent (still shows in Band
+	// Activity and RX Frequency, both unaffected by this check)
+	if (style == "RX" && FT8_message_is_cq(text))
 		FT8_list_append("wsjtx-cq", text, style);
 	var mycallsign = $("#MYCALLSIGN").val().toUpperCase();
 	if (words[4] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0)
