@@ -708,15 +708,19 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 			char buf[64];
 			const int message_type = ftx_message_get_i3(&message);
 			//~ char type_utf8[4] = {0xE2, message_type ? 0x91 : 0x93, message_type ? 0xA0 + message_type - 1 : 0xAA, 0 };
-			int prefix_len = 8 + snprintf(hmst_time_sprint(buf, raw_ms), sizeof(buf) - 8, " %3d %+03d %4d ~ ", cand->score, cand->snr, freq_hz);
+			// DT (time delta from the ideal slot boundary, in seconds --
+			// same field WSJT-X/other variants show) replaces cand->score
+			// (an internal sync-confidence number, not a timing value --
+			// not useful to an operator and not shown by any other WSJT
+			// variant). time_sec was already computed above for exactly
+			// this purpose but previously only reached a commented-out
+			// troubleshooting printf (n1qm's note, now superseded).
+			int prefix_len = 8 + snprintf(hmst_time_sprint(buf, raw_ms), sizeof(buf) - 8, " %+4.1f %+03d %4d ~ ", time_sec, cand->snr, freq_hz);
 			int line_len = prefix_len + snprintf(buf + prefix_len, sizeof(buf) - prefix_len, "%s\n", text);
 			if (message_type) // not type 0
 				LOG(LOG_INFO, ">> %d %s\n", message_type, buf);
 			else // type 0 : we care about the subtype (n3)
 				LOG(LOG_INFO, ">> %d.%d %s\n", message_type, ftx_message_get_n3(&message), buf);
-			//For troubleshooting you can display the time offset - n1qm
-			//sprintf(buff, "%s %d %+03d %-4.0f ~  %s\n", time_str, cand->time_offset,
-			//  cand->snr, freq_hz, message.payload);
 			text_span_semantic sem[FTX_MAX_MESSAGE_FIELDS + 4];
 			memset(sem, 0, sizeof(sem));
 			bool my_call_found = false;
@@ -729,7 +733,7 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 			sem[sem_i++].semantic = STYLE_FT8_RX;
 			sem[sem_i].length = 8;
 			sem[sem_i++].semantic = STYLE_TIME;
-			col = 8 + 5; // skip "score"
+			col = 8 + 6; // skip " DT " (1 space + 4-char DT + 1 space)
 			sem[sem_i].start_column = col;
 			sem[sem_i].length = 3;
 			sem[sem_i++].semantic = STYLE_SNR;
