@@ -461,7 +461,7 @@ void rig_generic_list_audio_devices(char *out, size_t out_size)
 void rig_generic_connect(const char *model, const char *device, const char *baud)
 {
 	char port_str[16];
-	char *argv[10];
+	char *argv[12];
 	int i = 0;
 
 	rig_drop();
@@ -481,6 +481,22 @@ void rig_generic_connect(const char *model, const char *device, const char *baud
 	}
 	argv[i++] = "-t";
 	argv[i++] = port_str;
+	// Several backends (this rig included: MCHFQRP piggybacks on the
+	// ft847.c backend, since the mcHF/UHSDR firmware emulates Yaesu
+	// FT-847 CAT commands) default write_delay/post_write_delay to
+	// ~50ms -- a legacy inter-character pacing margin for real Yaesu
+	// hardware on real RS-232, per hamlib's own comment in iofunc.c
+	// ("write_delay is for Yaesu type rigs..require 5 character").
+	// Confirmed live (raw persistent-socket timing straight to
+	// rigctld, bypassing this app entirely): every PTT set was taking
+	// a rock-steady ~308-358ms, sitting directly in the FT8/FT4
+	// TX-arm path. The mcHF's CAT link is a USB-CDC virtual serial
+	// port, not real RS-232, so that pacing requirement doesn't
+	// physically apply here -- disabling it for every connection this
+	// backend makes, not just this rig, since no generic-rig-backend
+	// target used so far needs Yaesu-style byte pacing.
+	argv[i++] = "-C";
+	argv[i++] = "write_delay=0,post_write_delay=0";
 	argv[i] = NULL;
 
 	rigctld_pid = fork();
