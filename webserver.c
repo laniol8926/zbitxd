@@ -153,6 +153,16 @@ void get_audiolist(struct mg_connection *c){
 	mg_ws_send(c, out, strlen(out), WEBSOCKET_OP_TEXT);
 }
 
+// band/mode dial frequency table, for the Settings > Frequencies editable
+// table -- see band_freq_list() in logbook.c
+void get_bandfreqlist(struct mg_connection *c){
+	static char list[2048];
+	char out[2100];
+	band_freq_list(list, sizeof(list));
+	snprintf(out, sizeof(out), "BANDFREQLIST %s", list);
+	mg_ws_send(c, out, strlen(out), WEBSOCKET_OP_TEXT);
+}
+
 char request[200];
 int request_index = 0;
 
@@ -218,6 +228,8 @@ static void web_despatcher(struct mg_connection *c, struct mg_ws_message *wm){
 		get_seriallist(c);
 	else if (!strcmp(field, "audiolist"))
 		get_audiolist(c);
+	else if (!strcmp(field, "bandfreqlist"))
+		get_bandfreqlist(c);
 	else if (!strcmp(field, "refresh"))
 		get_updates(c, 1);
 	else{

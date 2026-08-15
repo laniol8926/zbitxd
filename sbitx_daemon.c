@@ -2737,6 +2737,44 @@ void change_band(char *request){
 		}
 	}
 
+	// FT8/FT4: use the WSJT-X-style band_frequencies table (Settings >
+	// Frequencies) instead of the 4-slot "last position" stack below --
+	// for digital there's exactly one correct dial frequency per
+	// band+mode, so "recall wherever I left off" doesn't apply. Falls
+	// through to the unchanged stack-based behaviour for USB, and also
+	// for FT8/FT4 if this band genuinely has no row yet (shouldn't
+	// normally happen once band_freq_ensure_table() has seeded the
+	// defaults, but band_freq_get() returning <=0 is handled, not
+	// assumed impossible).
+	long table_freq = -1;
+	char cur_mode_str[10];
+	if (old_mode == MODE_FT8 || old_mode == MODE_FT4){
+		mode_name(old_mode, cur_mode_str);
+		table_freq = band_freq_get(band_stack[new_band].name, cur_mode_str);
+	}
+
+	if (table_freq > 0){
+		sprintf(buff, "%ld", table_freq);
+		char resp[100];
+		set_operating_freq(table_freq, resp);
+		field_set("FREQ", buff);
+
+		field_set("MODE", cur_mode_str);
+		update_field(get_field("r1:mode"));
+
+		struct field *bandswitch = get_field_by_label(band_stack[new_band].name);
+		sprintf(bandswitch->value, "%d", band_stack[new_band].index+1);
+		// no stack slot to indicate here (table-driven, not
+		// recall-based) -- always slot 0
+		char selband_buf[8];
+		sprintf(selband_buf, "%d", new_band * 10);
+		set_field("#selband", selband_buf);
+		q_empty(&q_web);
+		console_init();
+		abort_tx();
+		return;
+	}
+
 	//if we are still in the same band, move to the next position
 	if (new_band == old_band){
 		stack = ++band_stack[new_band].index;
@@ -2766,8 +2804,8 @@ void change_band(char *request){
 	char selband_buf[8];
 	sprintf(selband_buf, "%d", new_band * 10 + stack);
 	set_field("#selband", selband_buf);
-	q_empty(&q_web);// inserted by llh 
-  console_init(); // inserted by llh 
+	q_empty(&q_web);// inserted by llh
+  console_init(); // inserted by llh
   // this fixes bug with filter settings not being applied after a band change, not sure why it's a bug - k3ng 2022-09-03
 
 	abort_tx();
@@ -2802,7 +2840,7 @@ void do_control_action(char *cmd){
 		exit(0);
 	}
 	else if (!strncmp(request, "BW ",3)){
-		int bw = atoi(request+3);	
+		int bw = atoi(request+3);
 		set_filter_high_low(bw); //calls do_control_action again to set LOW and HIGH
 		//we have to save this as well
 		save_bandwidth(bw);
@@ -3226,6 +3264,14 @@ void cmd_exec(char *cmd){
 		logbook_delete(atoi(args));
 		update_logs = 1;
 	}
+	else if (!strcmp(exec, "BANDFREQSET")){
+		// args is "<band> <mode> <freq_hz>" -- one command per edited
+		// cell in the web UI's Frequencies settings table
+		char band[10], fmode[10];
+		long freq;
+		if (sscanf(args, "%9s %9s %ld", band, fmode, &freq) == 3 && freq > 0)
+			band_freq_set(band, fmode, freq);
+	}
 	else if (!strcmp(exec, "power")){
 		set_field("#fwdpower", args);
 	}
@@ -3529,6 +3575,12 @@ int main( int argc, char* argv[] ) {
 	// apply the persisted region's 80M/40M band edges now that settings
 	// (including #region itself) have actually loaded
 	apply_region_band_limits(atoi(get_field("#region")->value));
+
+	// self-healing: creates band_frequencies + seeds standard FT8/FT4
+	// calling frequencies if missing, a no-op otherwise (INSERT OR
+	// IGNORE) -- see band_freq_ensure_table()'s own comment for why this
+	// can't just rely on data/create_db.sql alone
+	band_freq_ensure_table();
 
 	//the logger fields may have an unfinished qso details
 	call_wipe();

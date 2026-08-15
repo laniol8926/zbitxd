@@ -507,3 +507,124 @@ void logbook_delete(int id){
 	sprintf(statement, "DELETE FROM logbook WHERE id='%d';", id);
 	sqlite3_exec(db, statement, 0,0, &err_msg);
 }
+
+// WSJT-X-style per-band/per-mode dial frequency table (Settings >
+// Frequencies there). Standard, widely-published FT8/FT4 calling
+// frequencies, used only to seed the table on first run -- INSERT OR
+// IGNORE means a user's own edit (band_freq_set()) always wins once a
+// row exists.
+struct band_freq_default {
+	char *band;
+	char *mode;
+	long freq;
+};
+
+static struct band_freq_default band_freq_defaults[] = {
+	{"80M", "FT8", 3573000}, {"80M", "FT4", 3575000},
+	{"40M", "FT8", 7074000}, {"40M", "FT4", 7047500},
+	{"30M", "FT8", 10136000}, {"30M", "FT4", 10140000},
+	{"20M", "FT8", 14074000}, {"20M", "FT4", 14080000},
+	{"17M", "FT8", 18100000}, {"17M", "FT4", 18104000},
+	{"15M", "FT8", 21074000}, {"15M", "FT4", 21140000},
+	{"12M", "FT8", 24915000}, {"12M", "FT4", 24919000},
+	{"10M", "FT8", 28074000}, {"10M", "FT4", 28180000},
+};
+
+// CREATE TABLE IF NOT EXISTS here (not just in data/create_db.sql) so an
+// already-deployed sbitx.db -- which already has real logged QSOs in it,
+// not something to ever recreate wholesale -- picks up this table too.
+// data/create_db.sql only ever runs against a brand new database (see
+// the Makefile's install target).
+void band_freq_ensure_table(void){
+	char *err_msg;
+
+	if (db == NULL)
+		logbook_open();
+
+	sqlite3_exec(db,
+		"CREATE TABLE IF NOT EXISTS band_frequencies ("
+		"id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,"
+		"band TEXT NOT NULL, mode TEXT NOT NULL, freq INTEGER NOT NULL,"
+		"UNIQUE(band, mode));", 0, 0, &err_msg);
+
+	int n = sizeof(band_freq_defaults) / sizeof(struct band_freq_default);
+	for (int i = 0; i < n; i++){
+		char statement[200];
+		snprintf(statement, sizeof(statement),
+			"INSERT OR IGNORE INTO band_frequencies (band, mode, freq)"
+			" VALUES('%s','%s','%ld');",
+			band_freq_defaults[i].band, band_freq_defaults[i].mode,
+			band_freq_defaults[i].freq);
+		sqlite3_exec(db, statement, 0, 0, &err_msg);
+	}
+}
+
+// Returns -1 if this band/mode has no row yet (shouldn't normally happen
+// once band_freq_ensure_table() has seeded the defaults, but callers
+// should still treat <=0 as "no known frequency" rather than assuming).
+long band_freq_get(const char *band, const char *mode){
+	sqlite3_stmt *stmt;
+	long freq = -1;
+
+	if (db == NULL)
+		logbook_open();
+
+	if (sqlite3_prepare_v2(db,
+			"SELECT freq FROM band_frequencies WHERE band=? AND mode=?;",
+			-1, &stmt, NULL) != SQLITE_OK)
+		return -1;
+	sqlite3_bind_text(stmt, 1, band, -1, SQLITE_STATIC);
+	sqlite3_bind_text(stmt, 2, mode, -1, SQLITE_STATIC);
+	if (sqlite3_step(stmt) == SQLITE_ROW)
+		freq = sqlite3_column_int64(stmt, 0);
+	sqlite3_finalize(stmt);
+	return freq;
+}
+
+void band_freq_set(const char *band, const char *mode, long freq){
+	sqlite3_stmt *stmt;
+
+	if (db == NULL)
+		logbook_open();
+
+	if (sqlite3_prepare_v2(db,
+			"INSERT INTO band_frequencies (band, mode, freq) VALUES(?,?,?)"
+			" ON CONFLICT(band, mode) DO UPDATE SET freq=excluded.freq;",
+			-1, &stmt, NULL) != SQLITE_OK)
+		return;
+	sqlite3_bind_text(stmt, 1, band, -1, SQLITE_STATIC);
+	sqlite3_bind_text(stmt, 2, mode, -1, SQLITE_STATIC);
+	sqlite3_bind_int64(stmt, 3, freq);
+	sqlite3_step(stmt);
+	sqlite3_finalize(stmt);
+}
+
+// Plain-text dump for the client's Frequencies settings table -- one
+// "band mode freq" line per row, same style as
+// rig_generic_list_serial_devices()/rig_generic_list_audio_devices().
+void band_freq_list(char *out, size_t out_size){
+	sqlite3_stmt *stmt;
+	size_t used = 0;
+
+	out[0] = 0;
+	if (db == NULL)
+		logbook_open();
+
+	if (sqlite3_prepare_v2(db,
+			"SELECT band, mode, freq FROM band_frequencies ORDER BY id;",
+			-1, &stmt, NULL) != SQLITE_OK)
+		return;
+
+	while (sqlite3_step(stmt) == SQLITE_ROW){
+		char line[64];
+		int n = snprintf(line, sizeof(line), "%s %s %d\n",
+			sqlite3_column_text(stmt, 0), sqlite3_column_text(stmt, 1),
+			sqlite3_column_int(stmt, 2));
+		if (n > 0 && used + (size_t)n < out_size){
+			memcpy(out + used, line, (size_t)n);
+			used += (size_t)n;
+		}
+	}
+	sqlite3_finalize(stmt);
+	out[used] = 0;
+}

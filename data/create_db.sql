@@ -35,3 +35,17 @@ create table logbook (
 CREATE INDEX gridIx ON logbook (exch_recv);
 CREATE INDEX callIx ON logbook (callsign_recv);
 
+-- WSJT-X-style per-band/per-mode dial frequency table (Settings > Frequencies
+-- there). One row per (band, mode); band_freq_ensure_table() in logbook.c
+-- seeds the standard FT8/FT4 calling frequencies on first run and also
+-- creates this table itself (CREATE TABLE IF NOT EXISTS) so an existing,
+-- already-deployed sbitx.db picks it up too -- this file only runs on a
+-- brand new database, never against one that already exists.
+create table band_frequencies (
+	id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+	band TEXT NOT NULL,
+	mode TEXT NOT NULL,
+	freq INTEGER NOT NULL,
+	UNIQUE(band, mode)
+);
+

@@ -241,6 +241,40 @@
 			<span id="region_grid_hint"></span>
 		</div>
 		<div class="settings-element">
+			<span class="settings-label">Frequencies (kHz):</span>
+			<table id="bandfreq_table">
+				<thead><tr><th></th><th>FT8</th><th>FT4</th></tr></thead>
+				<tbody>
+					<tr><td>80M</td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_80M_FT8" /></td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_80M_FT4" /></td></tr>
+					<tr><td>40M</td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_40M_FT8" /></td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_40M_FT4" /></td></tr>
+					<tr><td>30M</td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_30M_FT8" /></td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_30M_FT4" /></td></tr>
+					<tr><td>20M</td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_20M_FT8" /></td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_20M_FT4" /></td></tr>
+					<tr><td>17M</td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_17M_FT8" /></td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_17M_FT4" /></td></tr>
+					<tr><td>15M</td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_15M_FT8" /></td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_15M_FT4" /></td></tr>
+					<tr><td>12M</td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_12M_FT8" /></td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_12M_FT4" /></td></tr>
+					<tr><td>10M</td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_10M_FT8" /></td>
+						<td><input type="number" step="0.1" class="bandfreq_input" id="bandfreq_10M_FT4" /></td></tr>
+				</tbody>
+			</table>
+			Selecting a band while in FT8/FT4 mode retunes straight to these frequencies.
+		</div>
+
+		<div class="settings-element">
 			<span class="settings-label">Telnet Server:</span>
 			<input type="text" class="settings_input sbitx-text-input" size="17"
 				id="TELNETURL" />
@@ -2702,11 +2736,42 @@ function update_region_grid_hint(){
 		+ " -- doesn't account for national exceptions (e.g. Russia), confirm before relying on it.";
 }
 
+// parses band_freq_list()'s "band mode freq_hz" lines (one per row) into
+// the settings panel's Frequencies table -- shown in kHz, same convention
+// as the keypad's own frequency entry
+function populate_bandfreq_table(text){
+	var lines = text.split("\n");
+	for (var i = 0; i < lines.length; i++){
+		var parts = lines[i].split(" ");
+		if (parts.length < 3)
+			continue;
+		var input = el("bandfreq_" + parts[0] + "_" + parts[1]);
+		if (input)
+			input.value = (parseInt(parts[2]) / 1000).toFixed(1);
+	}
+}
+
+// sends one BANDFREQSET per table cell that has a value -- input ids are
+// "bandfreq_<BAND>_<MODE>", neither of which ever contains "_" itself
+function save_bandfreq_table(){
+	var inputs = document.querySelectorAll(".bandfreq_input");
+	for (var i = 0; i < inputs.length; i++){
+		var input = inputs[i];
+		if (!input.value)
+			continue;
+		var parts = input.id.split("_");
+		var freq_hz = Math.round(parseFloat(input.value) * 1000);
+		if (freq_hz > 0)
+			websocket_send("BANDFREQSET " + parts[1] + " " + parts[2] + " " + freq_hz);
+	}
+}
+
 function open_settings(){
 	open_panel("settings_panel");
 	//set the focs to the pin
 	el("PASSKEY").focus();
 	update_region_grid_hint();
+	websocket_send("bandfreqlist");
 }
 
 // dedicated post-login "connect to radio / connect audio" panel -- separate
@@ -2733,6 +2798,7 @@ function save_settings(){
 	websocket_send("PASSKEY " + el("PASSKEY").value);
 	websocket_send("SIDETONE " + el("SIDETONE").value);
 	websocket_send("TELNETURL " + el("TELNETURL").value);
+	save_bandfreq_table();
 	// Rig/audio device fields live in connect_panel now (see connect_rig()/
 	// connect_audio()), which each already force their own immediate save --
 	// nothing to send for them here.
@@ -3312,6 +3378,9 @@ function response_handler(response){
 			break;
 		case 'AUDIOLIST':
 			populate_datalist("audio_device_options", args);
+			break;
+		case 'BANDFREQLIST':
+			populate_bandfreq_table(args);
 			break;
 		case 'SPECTRUM':
 		case 'WATERFALL':
