@@ -10,6 +10,7 @@ void logbook_open();
 bool logbook_grid_exists(char *id);
 bool logbook_caller_exists(char * id);
 void logbook_delete(int id);
+int export_adif(char *path, char *start_date, char *end_date);
 void message_add(char *mode, unsigned int frequency, int outgoing, char *message);
 void band_freq_ensure_table(void);
 long band_freq_get(const char *band, const char *mode);

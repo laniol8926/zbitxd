@@ -298,10 +298,10 @@ void message_add(char *mode, unsigned int frequency, int outgoing, char *message
 	}
 }
 
-void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent, 
+void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 	char *rst_recv, char *exchange_recv){
 	char statement[1000], *err_msg, date_str[11], time_str[5];
-	char freq[12], log_freq[12], mode[10], mycallsign[12];
+	char freq[12], log_freq[12], mode[10], mycallsign[12], comments[64];
 
 	time_t log_time = time(NULL);
 	struct tm *tmp = gmtime(&log_time);
@@ -309,17 +309,42 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 	get_field_value("r1:mode", mode);
 	get_field_value("#mycallsign", mycallsign);
 
-	sprintf(log_freq, "%d", atoi(freq)/1000);
-	
+	// r1:freq alone is just the dial/LO frequency -- audio (FT8/FT4
+	// tone, CW sidetone) is generated at TX_PITCH above it and the
+	// actual on-air QSO frequency is dial + audio offset (USB
+	// convention, always upper sideband regardless of band in this
+	// app), not the bare dial reading. Integer /1000 division used to
+	// floor away the sub-kHz remainder entirely (e.g. a 1866 Hz offset
+	// just vanished instead of showing as .866) -- keep it as the
+	// actual fractional kHz instead, same units export_adif() already
+	// expects (its own /1000.0 to MHz still works unchanged).
+	sprintf(log_freq, "%.3f", (atoi(freq) + field_int("TX_PITCH")) / 1000.0);
+
 	sprintf(date_str, "%04d-%02d-%02d", tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday);
 	sprintf(time_str, "%02d%02d", tmp->tm_hour, tmp->tm_min);
 
+	// generic-rig backend: record which rig actually made this QSO.
+	// RIGMODEL holds "<hamlib model id> <description>" (e.g. "1045
+	// M0NKA mcHF QRP") once picked from the rig catalog -- the id is
+	// the same number passed as rigctld's own "-m" argument in
+	// rig_generic_connect(), but the id alone means nothing to a human
+	// reading the logbook later, so store the description past the
+	// first space instead. Falls back to the bare field (whatever it
+	// is) if no description is present. zBitx-hardware mode has no
+	// rigctld/-m at all, so leave blank.
+	comments[0] = 0;
+	if (generic_rig_mode) {
+		const char *rigmodel = field_str("RIGMODEL");
+		const char *desc = strchr(rigmodel, ' ');
+		snprintf(comments, sizeof(comments), "rig %s", desc ? desc + 1 : rigmodel);
+	}
+
 	sprintf(statement,
 		"INSERT INTO logbook (freq, mode, qso_date, qso_time, callsign_sent,"
-		"rst_sent, exch_sent, callsign_recv, rst_recv, exch_recv) "
-		"VALUES('%s', '%s', '%s', '%s',  '%s','%s','%s',  '%s','%s','%s');",
+		"rst_sent, exch_sent, callsign_recv, rst_recv, exch_recv, comments) "
+		"VALUES('%s', '%s', '%s', '%s',  '%s','%s','%s',  '%s','%s','%s', '%s');",
 			log_freq, mode, date_str, time_str, mycallsign,
-			 rst_sent, exchange_sent, contact_callsign, rst_recv, exchange_recv);
+			 rst_sent, exchange_sent, contact_callsign, rst_recv, exchange_recv, comments);
 
 	if (db == NULL)
 		logbook_open();
