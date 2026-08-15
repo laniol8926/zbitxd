@@ -2124,6 +2124,16 @@ function FT8_list_append(list_id, text, style){
 	var ol = el(list_id).querySelector("ol");
 	var was_at_bottom = (ol.scrollHeight - ol.scrollTop - ol.clientHeight) < 20;
 
+	// CQ panel reads newest-first (prepended), everything else stays
+	// chronological (appended) -- see the reversed-divider comment
+	// below for why that's more than just swapping append<->prepend.
+	// User: operational controls live at the top of the window, so
+	// finding the newest CQ caller at the *bottom* of a scrolling list
+	// meant constant eye travel between the two -- surfacing the
+	// newest entry right at the top, next to the controls, cuts that
+	// down.
+	var reversed = (list_id === "wsjtx-cq");
+
 	// blank/labeled divider between decode periods -- lots of decodes
 	// on a busy band otherwise blend into one dense, undifferentiated
 	// scroll. Skipped on the very first entry (nothing to divide yet),
@@ -2131,20 +2141,64 @@ function FT8_list_append(list_id, text, style){
 	// thread of the current QSO, not a general decode feed, and
 	// chopping it up with period breaks works against reading it as
 	// one continuous exchange.
-	var period = FT8_period_label(text);
+	//
+	// deco_strip() first -- server-sent text embeds "#" + a style-code
+	// letter (see deco_get_style()) as a per-token decoration marker,
+	// stripped everywhere else this text gets tokenized (item.id,
+	// item.dataset.message, FT8_message_chosen()) but not here. When a
+	// marker landed right before the leading timestamp, \S+ grabbed it
+	// as part of the token (e.g. "#G150615"), corrupting the divider
+	// label -- confirmed live against real decodes, comparing the
+	// raw server-side "150545 ... CQ POTA K2JB EM68" against what
+	// showed up client-side. Pre-existing bug, not new: the old
+	// forward-looking divider label was reading the same unstripped
+	// text, just less noticeable there.
+	var period = FT8_period_label(deco_strip(text));
 	if (list_id != "wsjtx-rx"){
-		if (period && FT8_list_last_period[list_id] !== undefined
-				&& FT8_list_last_period[list_id] !== period){
-			var divider = document.createElement("li");
-			divider.className = "sbitx-list-divider";
-			divider.textContent = FT8_format_period_label(period);
-			ol.appendChild(divider);
+		if (reversed){
+			// Reversed order still labels a divider with the period it
+			// introduces, same idea as the non-reversed case below --
+			// just introduces it *downward* here (this period's own
+			// entries get prepended right after it, growing between
+			// this divider and whatever was above), since insertion
+			// itself runs newest-first. A new divider always goes at
+			// the absolute top: the previous top divider (if any) is
+			// still correct for the period it's already labeling, now
+			// just pushed down along with that period's entries. Also
+			// covers the very first entry ever (no "skip if nothing to
+			// divide yet" gate, unlike below) -- there needs to be a
+			// divider for the current period even when it's the only
+			// one on screen, so the operator always has a timestamp at
+			// the top of the panel to glance at instead of only the
+			// individual entries' own inline times.
+			if (period && FT8_list_last_period[list_id] !== period){
+				var divider = document.createElement("li");
+				divider.className = "sbitx-list-divider";
+				divider.textContent = FT8_format_period_label(period);
+				ol.insertBefore(divider, ol.firstChild);
+				FT8_list_last_period[list_id] = period;
+			}
+			// Right after the top divider (position 1), not position 0
+			// -- keeps this period's own entries stacking newest-first
+			// between the divider and whatever the previous period
+			// left below, rather than ending up above their own
+			// divider.
+			ol.insertBefore(item, ol.children[1] || null);
+		} else {
+			if (period && FT8_list_last_period[list_id] !== undefined
+					&& FT8_list_last_period[list_id] !== period){
+				var divider = document.createElement("li");
+				divider.className = "sbitx-list-divider";
+				divider.textContent = FT8_format_period_label(period);
+				ol.appendChild(divider);
+			}
+			if (period)
+				FT8_list_last_period[list_id] = period;
+			ol.appendChild(item);
 		}
-		if (period)
-			FT8_list_last_period[list_id] = period;
+	} else {
+		ol.appendChild(item);
 	}
-
-	ol.appendChild(item);
 	// FT8_list_append() used to have no cap at all -- every decode ever
 	// seen (wsjtx-activity/wsjtx-cq/wsjtx-rx) stayed a permanent DOM node
 	// for the life of the page, accumulating thousands of <li> elements
@@ -2157,23 +2211,44 @@ function FT8_list_append(list_id, text, style){
 	// drifting from what's actually on screen.
 	var max_entries = 2 * Math.floor(ol.clientHeight / item.offsetHeight);
 	while (ol.children.length > max_entries)
-		ol.removeChild(ol.firstChild);
-	if (was_at_bottom)
+		ol.removeChild(reversed ? ol.lastChild : ol.firstChild);
+
+	// Trimming a non-reversed (chronological) list removes from the
+	// top one entry at a time, which can strip away a period's own
+	// divider while some of that period's later entries are still
+	// within the cap -- left headerless at the new top of the panel.
+	// (Reversed lists don't have this problem: trimming removes from
+	// the *bottom* there, taking a whole completed period's divider +
+	// entries together in one sweep, never separating them.) Self-heal
+	// by resynthesizing a divider from the new top entry's own
+	// timestamp whenever it isn't already led by one.
+	if (!reversed && list_id != "wsjtx-rx" && ol.firstChild
+			&& !ol.firstChild.classList.contains("sbitx-list-divider")){
+		var top_period = FT8_period_label(ol.firstChild.dataset.message);
+		if (top_period){
+			var divider = document.createElement("li");
+			divider.className = "sbitx-list-divider";
+			divider.textContent = FT8_format_period_label(top_period);
+			ol.insertBefore(divider, ol.firstChild);
+			// the divider itself now also counts against max_entries
+			while (ol.children.length > max_entries)
+				ol.removeChild(ol.children[1] || ol.firstChild);
+			// that re-trim can wipe out every entry this divider was
+			// meant to introduce -- if nothing real is left under it
+			// (end of list, or straight into the next divider), it's
+			// just a dangling empty header, drop it too
+			if (!ol.children[1] || ol.children[1].classList.contains("sbitx-list-divider"))
+				ol.removeChild(ol.firstChild);
+		}
+	}
+	// Reversed lists always insert the newest entry at scrollTop 0, so
+	// it's already visible with no scroll adjustment needed -- forcing
+	// scrollTop back to 0 here would yank focus away from older history
+	// the user deliberately scrolled down to read/click, the same
+	// footgun was_at_bottom already exists to avoid for the normal
+	// (appended) case below.
+	if (!reversed && was_at_bottom)
 		ol.scrollTop = ol.scrollHeight;
-}
-
-function FT8_transmit(message){
-	websocket_send("key " +  message + "\n");
-	log("FT8 tx: " + message);
-	FT8_list_append("wsjtx-rx", message);
-}
-
-function FT8_cq(event){
-	logger_wipe();
-	logger_abort();
-	var cq_type = el("ft8_cq_kindof").value;
-	FT8_transmit(cq_type + " "  + el("MYCALLSIGN").value.toUpperCase() 
-			+ " " + el("MYGRID").value.substring(0,4).toUpperCase());
 }
 
 //you can choose messages that are:
