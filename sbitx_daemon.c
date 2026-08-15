@@ -3282,6 +3282,17 @@ void cmd_exec(char *cmd){
 	else if (!strcmp(exec, "FT8_check")) {
 		pre_ft8_check(args);
 	}
+	// Test-only: the real RX decode pipeline (sbitx_ft8_decode() in
+	// modem_ft8.c) calls ft8_process(buf, FTX_CONTINUE_QSO) directly
+	// for every genuine decoded message addressed to us once a QSO is
+	// already under way (signal report / RR73 / RRR / 73) -- there was
+	// no client-reachable way to exercise that path without a second
+	// real station on the air. Lets a synthetic mid-QSO reply be
+	// injected the same way a real decode would arrive, to verify the
+	// exchange/logging state machine end to end on the dummy load.
+	else if (!strcmp(exec, "FT8CONTINUE")) {
+		ft8_process(args, FTX_CONTINUE_QSO);
+	}
 	else if (!strcmp(exec, "callsign")){
 		strcpy(get_field("#mycallsign")->value,args); 
 		sprintf(response, "\n[Your callsign is set to %s]\n", get_field("#mycallsign")->value);
