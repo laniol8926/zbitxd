@@ -646,6 +646,19 @@ struct field main_controls[] = {
 		"ON/OFF", 0,0,0, FT8_CONTROL},
   { "#ft8_repeat", NULL, 1000, -1000, 50, 50, "FT8_REPEAT", 40, "5", FIELD_NUMBER,
     "", 1, 10, 1, FT8_CONTROL},
+	// Replaces the old free-text TEXT box for CQ variants (user used to
+	// type e.g. "CQ DX AI5II EM72" by hand) -- picked here instead,
+	// spliced into the F1 macro's composed CQ text in do_macro(). "CQ"
+	// (not "") is the plain/no-op option deliberately -- set_field()'s
+	// FIELD_SELECTION matching uses strtok(b, "/"), which silently
+	// skips empty/leading tokens, so a leading "/" here to represent ""
+	// as the first option can never actually be matched: any attempt
+	// to set the field to "" falls through to strtok()'s last real
+	// token instead (silently landing on "SOTA"). Simplest safe fix is
+	// to just never rely on an empty-string option here, rather than
+	// touching strtok() matching shared by every other selection field.
+	{"#cq_kind", NULL, 1000, -1000, 50, 50, "CQKIND", 40, "CQ", FIELD_SELECTION,
+		"CQ/DX/POTA/IOTA/SOTA", 0, 0, 0, FT8_CONTROL},
 
 	{"#telneturl", NULL, 1000, -1000, 400, 149, "TELNETURL", 70, "dxc.nc7j.com:7373", FIELD_TEXT, 
 		"", 0,32,1, 0},
@@ -2186,6 +2199,20 @@ int do_macro(struct field *f, int event, int a, int b, int c){
 
 		buff[0] = 0;
 	 	macro_exec(fn_key, buff);
+
+		// F1/CQ only -- FT8.mc's template always composes "CQ <mycall>
+		// <mygrid>", so splice a POTA/SOTA/etc marker in right after
+		// "CQ " when picked, same spot a user used to type it by hand
+		// into the (now removed) free-text TEXT box, e.g. "CQ POTA
+		// AI5II EM72".
+		if (fn_key == 1 && !strncmp(buff, "CQ ", 3)) {
+			const char *kind = field_str("CQKIND");
+			if (strcmp(kind, "CQ") != 0) {
+				char tagged[256];
+				snprintf(tagged, sizeof(tagged), "CQ %s %s", kind, buff + 3);
+				strcpy(buff, tagged);
+			}
+		}
 
 		mode = get_field("r1:mode")->value;
 

@@ -1055,6 +1055,31 @@ body {
 	cursor: pointer;
 }
 
+/* FT8_TX1ST's click-to-toggle box (replaced the old ON/OFF <select>,
+   see ft8_txslot_clicked()) -- styled to actually look clickable
+   instead of like a plain readout. */
+.ft8-txslot-value {
+	cursor: pointer;
+	text-align: center;
+	line-height: 20px;
+	background-color: #0c2333;
+	border: solid 1px black;
+	color: white;
+}
+.ft8-txslot-value:hover {
+	background-color: #17435c;
+}
+
+/* CQKIND (F1's CQ-variant picker) -- now the only visible label for
+   this control (its own #TEXT-label div was dropped as redundant,
+   since the select's own default option already reads "CQ"), so it
+   needs to be wide enough on its own to show the longest option
+   (POTA/IOTA/SOTA, 4 chars) without clipping -- the base
+   .sbitxv3-selection width (48px) was sized for 2-3 char values. */
+#CQKIND {
+	width: 68px;
+}
+
 /* TX TONE box hidden, not removed -- user verified the waterfall
    click-to-tune sets TX_PITCH correctly, making the manual entry box
    redundant, but #TX_PITCH/#slider_TX_PITCH are still read directly by

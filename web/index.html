@@ -101,11 +101,8 @@
 				<option value="xOTA">xOTA</option>
 			</select>
 		</div><div class="sbitxv3-control">
-			<div class="sbitxv3-label">TX1ST</div>
-			<select class="sbitxv3-selection sbitx-selection" id="FT8_TX1ST">
-				<option value="ON">ON</option>
-				<option value="OFF">OFF</option>
-			</select>
+			<div class="sbitxv3-label">SLOT</div>
+			<div class="sbitxv3-selection ft8-txslot-value" id="FT8_TX1ST" tabindex="0">EVEN</div>
 		</div><div class="linear" id="linear_TX_PITCH">
     		<div class="linear-label">TX TONE</div>
     			<input type="number" id="TX_PITCH" min="10" max="4000" class="linear-value" />
@@ -125,6 +122,15 @@
 			<input type="checkbox" id="wf_gain_controls_toggle" checked />
 		</div><div class="sbitxv3-control tx-enabled-indicator" id="tx_enabled_indicator">
 			<div class="sbitxv3-label">TX Enabled</div>
+		</div><button class="sbitxv3-btn macro-btn" id="F1">F1</button>
+		<div class="sbitxv3-control">
+			<select class="sbitxv3-selection sbitx-selection" id="CQKIND">
+				<option value="CQ">CQ</option>
+				<option value="DX">DX</option>
+				<option value="POTA">POTA</option>
+				<option value="IOTA">IOTA</option>
+				<option value="SOTA">SOTA</option>
+			</select>
 		</div>
 	<br/>
 		<div class="linear" id="linear_DRIVE">
@@ -183,13 +189,10 @@
 			<select class="sbitxv3-selection sbitx-selection" id="MACRO">
 			</select>
 		</div>
-		<button class="sbitxv3-btn" id="esc">ESC</button
-		><button class="sbitxv3-btn macro-btn" id="F1">F1</button>
+		<button class="sbitxv3-btn" id="esc">ESC</button>
 		<button class="sbitxv3-btn" id="console-open">CMD</button
 		><button class="sbitxv3-btn" id="connect-open">RADIO</button
 		><button class="sbitxv3-btn" id="settings-open">SET</button>
-		<input type="text" class="sbitx-text-input sbitx-text-field"
-			id="TEXT" placeholder="TEXT" size="20" />
 	</div><!-- end of maincontrols -->
 		<span id="restore-btn" onclick="toggle_fullscreen();"> &#X21F3; </span>
 	<div id="sidebar">
@@ -1712,6 +1715,21 @@ function sbitx_button_clicked(event){
 	websocket_send(id);
 }
 
+
+// FT8_TX1ST replaced its ON/OFF <select> with this single clickable box
+// -- "TX1ST" (transmit first) only made sense once you already knew it
+// meant first-half vs. second-half of each FT8/FT4 slot pair. Shows the
+// actual meaningful state directly instead: EVEN (:00/:30) or ODD
+// (:15/:45), matching ftx_would_send()'s own two_slot_clock<15000 check
+// in modem_ft8.c (ON -> that branch -> the :00/:30 pair -- even
+// seconds). .value here is a plain JS property (divs have no native
+// form value) used purely as internal state; response_handler()'s
+// default case already sets it like any other field, so the FT8_TX1ST
+// special case there just has to also refresh what's actually shown.
+function ft8_txslot_clicked(){
+	var e = el("FT8_TX1ST");
+	websocket_send("FT8_TX1ST " + (e.value == "ON" ? "OFF" : "ON"));
+}
 
 function sbitx_selection_changed(event){
 	var e = event.currentTarget;
@@ -3496,6 +3514,8 @@ function response_handler(response){
 						e.classList.toggle("connect-status-ok", args == "Connected");
 					else if (cmd == "TIMESTATUS")
 						e.classList.toggle("connect-status-ok", args == "Synced");
+					else if (cmd == "FT8_TX1ST")
+						e.textContent = (args == "ON") ? "EVEN" : "ODD";
 				}
 
 			}
@@ -3581,6 +3601,7 @@ $("#vfo_swap").on("click", vfo_set);
 $("#wipe").on("click", logger_wipe);
 $("#esc").on("click", logger_abort);
 $("#tx_enabled_indicator").on("click", tx_enabled_indicator_clicked);
+$("#FT8_TX1ST").on("click", ft8_txslot_clicked);
 $("#qrz").on("click", logger_qrz);
 $("#logger-log").on("click", logger_enter_qso);
 //$("#macros").on("click", logger_toggle_macros);
