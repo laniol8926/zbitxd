@@ -31,6 +31,11 @@
 
 static float ft8_rx_buffer[FT8_MAX_BUFF];
 static float ft8_tx_buffer[FT8_MAX_BUFF];
+// Scratch copy of the RX buffer used only by sbitx_ft8_decode()'s
+// successive-interference-cancellation passes -- see its own comment.
+// Static (not stack) to match ft8_rx_buffer/ft8_tx_buffer's own sizing
+// convention and avoid a ~844KB stack allocation every decode cycle.
+static float ft8_sic_residual[FT8_MAX_BUFF];
 static char ft8_tx_text[128];
 static char ft8_xota_text[14];
 ftx_message_t ftx_tx_msg;
@@ -604,6 +609,72 @@ static int message_callsign_count(const ftx_message_offsets_t *spans)
 	return ret;
 }
 
+// Successive interference cancellation: once a candidate has actually
+// been decoded (LDPC already recovered its exact 77-bit payload, error
+// corrected), regenerate its clean waveform and subtract it from the
+// residual signal before the next decode pass -- lets weaker signals
+// that were masked/overlapping the strong one get found on a later
+// pass. Reconstructs from the decoded payload itself (via the existing
+// ft8_encode()/synth_gfsk() TX-side machinery) rather than resynthesizing
+// from captured phase data (ft8_lib's own monitor_resynth(), disabled in
+// this fork behind WATERFALL_USE_PHASE -- doubling the waterfall's
+// memory for phase storage on a Pi Zero 2 W) -- more accurate anyway,
+// since LDPC already gives the ideal noise-free bit sequence.
+//
+// Amplitude is estimated by least-squares matched-filter scaling (the
+// standard technique: the scale that minimizes residual energy over the
+// overlap is sum(signal*synth)/sum(synth*synth)) rather than guessed
+// from the candidate's score/SNR, which aren't in the same units as raw
+// sample amplitude.
+static void sic_subtract_candidate(const monitor_t *mon, const ftx_candidate_t *cand,
+	const ftx_message_t *message, bool is_ft4, float *residual, int num_samples)
+{
+	int num_tones = is_ft4 ? FT4_NN : FT8_NN;
+	float symbol_period = is_ft4 ? FT4_SYMBOL_PERIOD : FT8_SYMBOL_PERIOD;
+	float symbol_bt = is_ft4 ? FT4_SYMBOL_BT : FT8_SYMBOL_BT;
+	int sample_rate = 12000;
+
+	uint8_t tones[FT4_NN > FT8_NN ? FT4_NN : FT8_NN];
+	if (is_ft4)
+		ft4_encode(message->payload, tones);
+	else
+		ft8_encode(message->payload, tones);
+
+	int freq_hz = lroundf((cand->freq_offset + (float)cand->freq_sub / mon->wf.freq_osr) / mon->symbol_period);
+	// Raw ft8_lib-internal alignment -- deliberately NOT including
+	// dt_algorithm_calibration_sec, which is purely a *display*
+	// calibration against jt9's own DT convention, not a real offset
+	// into this buffer.
+	float raw_time_sec = (cand->time_offset + (float)cand->time_sub / mon->wf.time_osr) * mon->symbol_period;
+	int sample_offset = lroundf(raw_time_sec * sample_rate);
+
+	int n_spsym = (int)(0.5f + sample_rate * symbol_period);
+	int n_wave = num_tones * n_spsym;
+	float synth[n_wave];
+	synth_gfsk(tones, num_tones, (float)freq_hz, symbol_bt, symbol_period, sample_rate, synth);
+
+	// Overlap region between the synthesized waveform and the actual
+	// buffer -- candidates near either edge of the capture window can
+	// run off either end.
+	int start = sample_offset < 0 ? 0 : sample_offset;
+	int end = sample_offset + n_wave > num_samples ? num_samples : sample_offset + n_wave;
+	if (start >= end)
+		return;
+
+	double dot_sr = 0, dot_ss = 0;
+	for (int i = start; i < end; ++i){
+		float s = synth[i - sample_offset];
+		dot_sr += (double)residual[i] * s;
+		dot_ss += (double)s * s;
+	}
+	if (dot_ss <= 0)
+		return;
+	float scale = (float)(dot_sr / dot_ss);
+
+	for (int i = start; i < end; ++i)
+		residual[i] -= scale * synth[i - sample_offset];
+}
+
 static int sbitx_ft8_decode(float *signal, int num_samples)
 {
     int sample_rate = 12000;
@@ -671,11 +742,47 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 		mycallsign_upper[i] = toupper(mycallsign[i]);
 	mycallsign_upper[i] = 0;
 
+    // Scratch copy for successive interference cancellation -- signal
+    // (ft8_rx_buffer) itself isn't touched, each pass works against the
+    // residual with every candidate actually decoded so far subtracted
+    // out (see sic_subtract_candidate()).
+    if (num_samples > FT8_MAX_BUFF)
+        num_samples = FT8_MAX_BUFF;
+    memcpy(ft8_sic_residual, signal, num_samples * sizeof(float));
+
+    // Successive interference cancellation: each additional pass rebuilds
+    // the waterfall from the residual and searches it again, catching
+    // weaker signals that were masked by a stronger overlapping one on
+    // the first pass -- the real technique behind most of jt9/WSJT-X's
+    // sensitivity advantage over a single-pass decoder (n=288 jt9
+    // decodes vs n=158 here on identical audio, task #25); ft8_lib
+    // itself has no SIC of its own. Stops early once a pass adds
+    // nothing new, since further passes on an unchanged residual just
+    // burn CPU for no gain -- current single-pass decode time
+    // (793-891ms) leaves real headroom for a few extra passes within
+    // the ~2s/15s-cycle real-time budget, but that budget still needs
+    // confirming on real hardware once this is deployed.
+    const int kMaxPasses = 3;
+
+    // Hash table for decoded messages (to check for duplicates), shared
+    // across all passes so a signal that survives incomplete
+    // cancellation and reappears in a later pass's candidate list isn't
+    // double-counted or subtracted twice.
+    int num_decoded = 0;
+    ftx_message_t decoded[kMax_decoded_messages];
+    ftx_message_t* decoded_hashtable[kMax_decoded_messages];
+    for (int i = 0; i < kMax_decoded_messages; ++i)
+        decoded_hashtable[i] = NULL;
+
+    int n_decodes = 0;
+    int crc_mismatches = 0;
+
+    for (int pass = 0; pass < kMaxPasses; ++pass){
     monitor_init(&mon, &mon_cfg);
 
     // Process the waveform data frame by frame - you could have a live loop here with data from an audio device
     for (int frame_pos = 0; frame_pos + mon.block_size <= num_samples; frame_pos += mon.block_size)
-        monitor_process(&mon, signal + frame_pos);
+        monitor_process(&mon, ft8_sic_residual + frame_pos);
 
 //    LOG(LOG_DEBUG, "Waterfall accumulated %d symbols\n", mon.wf.num_blocks);
 //    LOG(LOG_INFO, "Max magnitude: %.1f dB\n", mon.max_mag);
@@ -684,19 +791,7 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
     ftx_candidate_t candidate_list[kMax_candidates];
     int num_candidates = ftx_find_candidates(&mon.wf, kMax_candidates, candidate_list, kMin_score);
 
-    // Hash table for decoded messages (to check for duplicates)
-    int num_decoded = 0;
-    ftx_message_t decoded[kMax_decoded_messages];
-    ftx_message_t* decoded_hashtable[kMax_decoded_messages];
-
-    // Initialize hash table pointers
-    for (int i = 0; i < kMax_decoded_messages; ++i)
-    {
-        decoded_hashtable[i] = NULL;
-    }
-
-    int n_decodes = 0;
-    int crc_mismatches = 0;
+    int new_this_pass = 0;
     // Go over candidates and attempt to decode messages
     for (int idx = 0; idx < num_candidates; ++idx)
     {
@@ -747,6 +842,8 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
            memcpy(&decoded[idx_hash], &message, sizeof(message));
            decoded_hashtable[idx_hash] = &decoded[idx_hash];
            ++num_decoded;
+           ++new_this_pass;
+           sic_subtract_candidate(&mon, cand, &message, !is_ft8, ft8_sic_residual, num_samples);
 
             char text[FTX_MAX_MESSAGE_LENGTH];
 			ftx_message_offsets_t spans;
@@ -842,11 +939,15 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 			n_decodes++;
         }
     }
+    monitor_free(&mon);
+    LOG(LOG_DEBUG, "SIC pass %d: %d new decodes (total %d)\n", pass, new_this_pass, n_decodes);
+    if (new_this_pass == 0)
+        break;
+    }
     //LOG(LOG_INFO, "Decoded %d messages\n", num_decoded);
     if (crc_mismatches)
         LOG(LOG_DEBUG, "%d CRC mismatches\n", crc_mismatches);
 
-    monitor_free(&mon);
     hashtable_cleanup(10);
 
     return n_decodes;
