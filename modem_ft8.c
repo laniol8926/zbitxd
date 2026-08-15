@@ -866,6 +866,26 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 		    ++crc_mismatches;
                 //~ else if (status.ldpc_errors > 0)
                     //~ LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
+                // TEMPORARY, task #25 OSD-estimate investigation only --
+                // remove once done. Dumps this real candidate's raw LLRs
+                // (what blind + AP decode both just failed on) so they
+                // can be tested offline against PyFT8's real osd_decode()
+                // to get a measured, not guessed, recovery rate.
+                {
+                    static int llr_dump_count = 0;
+                    if (llr_dump_count < 300) {
+                        float llr[FTX_LDPC_N];
+                        ftx_extract_llr(&mon.wf, cand, llr);
+                        char path[64];
+                        snprintf(path, sizeof(path), "/tmp/ft8_llr_%d_%d.bin", wallclock_day_ms, llr_dump_count);
+                        FILE *lf = fopen(path, "wb");
+                        if (lf) {
+                            fwrite(llr, sizeof(float), FTX_LDPC_N, lf);
+                            fclose(lf);
+                        }
+                        ++llr_dump_count;
+                    }
+                }
                 continue;
             }
         }
