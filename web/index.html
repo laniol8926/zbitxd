@@ -301,7 +301,7 @@
 					style="text-transform:none;" list="rig_model_options" autocomplete="off" />
 			<datalist id="rig_model_options"></datalist>
 			<button id="rig_model_refresh" class="logger-button" title="Re-scan hamlib's rig list">&#x27f3;</button>
-			(type to search hamlib's rig list, or enter a bare model number)
+			<div class="settings-hint">type to search hamlib's rig list, or enter a bare model number</div>
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Rig Device:</span><input id="RIGDEVICE"
@@ -309,12 +309,12 @@
 					list="rig_device_options" autocomplete="off" />
 			<datalist id="rig_device_options"></datalist>
 			<button id="rig_device_refresh" class="logger-button" title="Re-scan serial devices">&#x27f3;</button>
-			(prefer a /dev/serial/by-id/... entry -- stable across reboots/replugging)
+			<div class="settings-hint">prefer a /dev/serial/by-id/... entry -- stable across reboots/replugging</div>
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Rig Baud:</span><input id="RIGBAUD"
 					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;" />
-			(blank = rigctld's own default for the selected model; not every rig uses 9600)
+			<div class="settings-hint">blank = rigctld's own default for the selected model; not every rig uses 9600</div>
 		</div>
 		<div class="settings-element">
 			<span class="settings-label"></span>
@@ -342,7 +342,7 @@
 		<div class="settings-element">
 			<span class="settings-label">Clock Sync:</span>
 			<input id="TIMESTATUS" class="connect-status" type="text" readonly tabindex="-1" />
-			(FT4/FT8 need an accurate clock to transmit/decode in the right time slot)
+			<div class="settings-hint">FT4/FT8 need an accurate clock to transmit/decode in the right time slot</div>
 		</div>
 	</div><!-- end of connect_panel -->
 

@@ -565,6 +565,27 @@ select, select option, input {
 	white-space: nowrap;
 }
 
+/* #connect_panel's rig/audio rows always want label-on-top, hint-below --
+   unlike #settings_panel's rows, this isn't just a narrow-viewport thing
+   (see the mobile-vs-desktop-login report this fixes): the label-left/
+   hint-beside-input layout only happened to arise on a wide desktop
+   viewport because everything fit on one inline line; on a phone it
+   wrapped onto separate lines by accident. Pin the phone's layout
+   unconditionally instead of leaving it to viewport-width happenstance. */
+#connect_panel .settings-label {
+	display: block;
+	width: auto;
+	text-align: left;
+	margin-bottom: 4px;
+}
+
+.settings-hint {
+	display: block;
+	color: #888;
+	font-size: 9pt;
+	margin-top: 4px;
+}
+
 .settings_input {
 	text-transform:uppercase;
 }
