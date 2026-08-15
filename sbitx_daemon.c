@@ -3293,6 +3293,14 @@ void cmd_exec(char *cmd){
 	else if (!strcmp(exec, "FT8CONTINUE")) {
 		ft8_process(args, FTX_CONTINUE_QSO);
 	}
+	// TEMPORARY, task #25 SIC validation only -- remove once done.
+	// Re-runs sbitx_ft8_decode() against a previously captured WAV
+	// (see the matching dump in modem_ft8.c) so the same real audio
+	// can be decoded again under a different build.
+	else if (!strcmp(exec, "DECODEFILE")) {
+		int n = ft8_decode_file(args);
+		fprintf(stderr, "DECODEFILE %s -> %d decodes\n", args, n);
+	}
 	else if (!strcmp(exec, "callsign")){
 		strcpy(get_field("#mycallsign")->value,args); 
 		sprintf(response, "\n[Your callsign is set to %s]\n", get_field("#mycallsign")->value);

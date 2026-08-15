@@ -15,3 +15,5 @@ void ft8_poll(int tx_is_on);
 float ft8_next_sample();
 void ft8_process(char *message, ftx_operation operation);
 int ft8_is_repeating();
+// TEMPORARY, task #25 SIC validation only -- remove once done.
+int ft8_decode_file(const char *path);

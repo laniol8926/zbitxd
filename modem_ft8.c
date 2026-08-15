@@ -750,6 +750,22 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
         num_samples = FT8_MAX_BUFF;
     memcpy(ft8_sic_residual, signal, num_samples * sizeof(float));
 
+    // TEMPORARY, task #25 SIC validation only -- remove once done.
+    // Captures the first 12 real decode cycles' raw audio to disk
+    // (same technique as the earlier DT-calibration jt9 comparison),
+    // so kMaxPasses=1 vs 3 can be re-run against IDENTICAL real audio
+    // via the DECODEFILE test command below, rather than comparing
+    // across two different moments of real traffic.
+    {
+        static int sic_dump_count = 0;
+        if (sic_dump_count < 12) {
+            char path[64];
+            snprintf(path, sizeof(path), "/tmp/ft8_sic_%d_%d.wav", wallclock_day_ms, sic_dump_count);
+            save_wav(signal, num_samples, sample_rate, path);
+            ++sic_dump_count;
+        }
+    }
+
     // Successive interference cancellation: each additional pass rebuilds
     // the waterfall from the residual and searches it again, catching
     // weaker signals that were masked by a stronger overlapping one on
@@ -951,6 +967,23 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
     hashtable_cleanup(10);
 
     return n_decodes;
+}
+
+// TEMPORARY, task #25 SIC validation only -- remove once done, along
+// with the dump in sbitx_ft8_decode() above and the DECODEFILE command
+// in cmd_exec(). Re-runs the real decoder (whatever kMaxPasses is
+// currently compiled in) against a previously captured WAV file, so the
+// same real audio can be decoded again under a different build without
+// needing fresh live traffic.
+int ft8_decode_file(const char *path){
+	static float file_signal[FT8_MAX_BUFF];
+	int num_samples = FT8_MAX_BUFF;
+	int file_sample_rate = 0;
+	if (load_wav(file_signal, &num_samples, &file_sample_rate, path) != 0){
+		fprintf(stderr, "ft8_decode_file: failed to load %s\n", path);
+		return -1;
+	}
+	return sbitx_ft8_decode(file_signal, num_samples);
 }
 
 static bool encode_xota() {
