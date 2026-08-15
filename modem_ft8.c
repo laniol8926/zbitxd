@@ -63,8 +63,13 @@ static bool ft8_cq_alt = false;
 static bool ft8_xota = false;
 
 static const int kMin_score = 10; // Minimum sync score threshold for candidates
-static const int kMax_candidates = 120;
-static const int kLDPC_iterations = 20;
+// Matched to ft8_lib's own reference demo tool (ft8_lib/demo/decode_ft8.c
+// uses 140/25) -- this app had been running slightly below that. Part of
+// closing the sensitivity gap vs jt9/WSJT-X on identical audio (task #25,
+// n=288 jt9 decodes vs n=158 here); real headroom for this exists since
+// current decode time (793-891ms) is well under the ~2s/15s-cycle budget.
+static const int kMax_candidates = 140;
+static const int kLDPC_iterations = 25;
 
 static const int kMax_decoded_messages = 50;
 
