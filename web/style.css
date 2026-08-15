@@ -689,6 +689,18 @@ select, select option, input {
 
 .wfgain-slider {
 	width: 90px;
+	/* Safari (real-device report: shows on Linux/Chromium, missing on a
+	   phone -- reproduced the "checkbox toggles, layout shifts slightly,
+	   nothing renders" report by checking the actual rendered box: the
+	   flex container/slider positions are correct even at real phone
+	   width, isolating this to the range input itself) gives
+	   <input type=range> no intrinsic height inside a flex container,
+	   so it collapses to 0x0 and vanishes -- Chromium/Firefox size it
+	   fine without any explicit height, which is how this went unnoticed
+	   on desktop. flex-shrink:0 stops the same collapse from squeezing
+	   its width down instead once given real space to shrink into. */
+	height: 16px;
+	flex-shrink: 0;
 }
 
 #waterfall_scale {
