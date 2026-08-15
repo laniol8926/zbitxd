@@ -3585,7 +3585,22 @@ int main( int argc, char* argv[] ) {
 	//the logger fields may have an unfinished qso details
 	call_wipe();
 
-	macro_load(get_field("#current_macro")->value, NULL);
+	// Recurring incident (see project notes): #current_macro's compile-time
+	// default is "" -- if user_settings.ini never actually persisted a
+	// real value (fresh install, or settings wiped/reverted across a
+	// deploy), this silently left the F1/CQ macro completely non-
+	// functional with zero trace anywhere. macro_load() now logs its own
+	// failures; this also self-heals by falling back to FT8 (the only
+	// macro set this fork actually uses -- CW was dropped entirely) and
+	// persisting that correction, so a bad #current_macro doesn't keep
+	// failing silently on every subsequent restart too.
+	if (macro_load(get_field("#current_macro")->value, NULL) != 0){
+		fprintf(stderr, "startup: macro_load failed for #current_macro=[%s], falling back to FT8\n",
+			get_field("#current_macro")->value);
+		set_field("#current_macro", "FT8");
+		if (macro_load("FT8", NULL) != 0)
+			fprintf(stderr, "startup: fallback macro_load(\"FT8\") also failed -- macro table is empty\n");
+	}
 
 	//now set the frequency of operation and more to vfo_a
   set_field("r1:freq", get_field("#vfo_a_freq")->value);

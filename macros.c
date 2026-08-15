@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <dirent.h>
+#include <errno.h>
 #include "sdr_ui.h"
 #include "configure.h"
 
@@ -75,8 +76,16 @@ void macro_label(int fn_key, char *label){
 }
 
 int  macro_load(const char *filename, char *output){
-	if (!filename || !filename[0])
+	if (!filename || !filename[0]){
+		// the recurring "F1/CQ silently doesn't work" incident (see
+		// project notes): #current_macro's compile-time default is ""
+		// -- this fires whenever whatever called us (startup or a live
+		// "macro <name>" command) never got a real name, and previously
+		// left zero trace anywhere to explain why the macro table ended
+		// up empty
+		fprintf(stderr, "macro_load: no macro name given (empty filename)\n");
 		return -2;
+	}
 
 	char macro_line[255];
 	char full_path[PATH_MAX];
@@ -86,8 +95,11 @@ int  macro_load(const char *filename, char *output){
 	strcat(full_path, ".mc");
 	FILE *pf = fopen(full_path, "r");
 
-	if(!pf)
+	if(!pf){
+		fprintf(stderr, "macro_load: could not open %s: %s\n",
+			full_path, strerror(errno));
 		return -1;
+	}
 
 	memset(macro_table, 0, sizeof(macro_table));
 	int i = 0; 
@@ -119,7 +131,8 @@ int  macro_load(const char *filename, char *output){
 
 		//expect a comma before the macro text
 		if (*p != ','){
-			//printf("Macro loading %s, Expected a comma before [%s]\n", full_path, p);
+			fprintf(stderr, "macro_load: %s: expected a comma before [%s], skipping line\n",
+				full_path, p);
 			continue;
 		}
 		
