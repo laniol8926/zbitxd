@@ -670,6 +670,10 @@ static void sic_subtract_candidate(const monitor_t *mon, const ftx_candidate_t *
 	if (dot_ss <= 0)
 		return;
 	float scale = (float)(dot_sr / dot_ss);
+	// TEMPORARY: diagnostic for why SIC found zero new decodes on real
+	// audio -- restore to LOG_DEBUG (or drop) after.
+	LOG(LOG_INFO, "SIC subtract: freq %dHz offset %d samples [%d,%d) scale %f\n",
+		freq_hz, sample_offset, start, end, scale);
 
 	for (int i = start; i < end; ++i)
 		residual[i] -= scale * synth[i - sample_offset];
@@ -741,6 +745,35 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 	for (i = 0; i < strlen(mycallsign); i++)
 		mycallsign_upper[i] = toupper(mycallsign[i]);
 	mycallsign_upper[i] = 0;
+
+	// AP (a-priori) decoding: WSJT-X/jt9's own single-pass decoder gets
+	// most of its real sensitivity advantage this way, not from
+	// successive interference cancellation alone (confirmed by reading
+	// its actual source, lib/ft8/ft8b.f90/ft8_decode.f90, in
+	// wsjt-z-2.0.18 -- task #25). When a candidate fails a normal blind
+	// LDPC decode, retried with the CALL_TO field's bits forced to
+	// "addressed to my own callsign" -- the single highest-value
+	// hypothesis, since those are the messages we most need to hear
+	// (replies to our own CQ, or continuing an existing QSO). A wrong
+	// guess is still caught by the normal CRC check afterward, same as
+	// any other decode attempt, so this can't produce false decodes,
+	// only recover real ones a blind decode missed.
+	//
+	// Built once per decode cycle (not per candidate/pass) since
+	// mycallsign doesn't change mid-cycle -- ftx_message_encode_std()
+	// packs "CALL_TO CALL_DE EXTRA" into 29+29+16+3 bits (see
+	// message.c's own comment); only the first 29 bits (CALL_TO) are
+	// real here, the placeholder DE callsign/grid are discarded.
+	uint8_t ap_known_bits[29];
+	bool ap_available = false;
+	if (mycallsign_upper[0]) {
+		ftx_message_t ap_msg;
+		if (ftx_message_encode_std(&ap_msg, &hash_if, mycallsign_upper, "K1ABC", "FN00") == FTX_MESSAGE_RC_OK) {
+			for (int b = 0; b < 29; ++b)
+				ap_known_bits[b] = (ap_msg.payload[b / 8] >> (7 - (b % 8))) & 1;
+			ap_available = true;
+		}
+	}
 
     // Scratch copy for successive interference cancellation -- signal
     // (ft8_rx_buffer) itself isn't touched, each pass works against the
@@ -823,12 +856,18 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
         ftx_message_t message;
         ftx_decode_status_t status;
         if (!ftx_decode_candidate(&mon.wf, cand, kLDPC_iterations, &message, &status)){
-            // printf("000000 %3d %+4.2f %4.0f ~  ---\n", cand->score, time_sec, freq_hz);
-	    if (status.crc_calculated != status.crc_extracted)
-		++crc_mismatches;
-            //~ else if (status.ldpc_errors > 0)
-                //~ LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
-            continue;
+            // Blind decode failed -- retry once assuming this candidate
+            // is addressed to us (CALL_TO = mycallsign) before giving up
+            // on it entirely. See ap_known_bits' own comment above.
+            if (!ap_available || !ftx_decode_candidate_ap(&mon.wf, cand, kLDPC_iterations,
+                    ap_known_bits, 29, &message, &status)){
+                // printf("000000 %3d %+4.2f %4.0f ~  ---\n", cand->score, time_sec, freq_hz);
+	        if (status.crc_calculated != status.crc_extracted)
+		    ++crc_mismatches;
+                //~ else if (status.ldpc_errors > 0)
+                    //~ LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
+                continue;
+            }
         }
 
         LOG(LOG_DEBUG, "Checking hash table for %4.1fs / %dHz [%d]...\n", time_sec, freq_hz, cand->score);
@@ -956,7 +995,10 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
         }
     }
     monitor_free(&mon);
-    LOG(LOG_DEBUG, "SIC pass %d: %d new decodes (total %d)\n", pass, new_this_pass, n_decodes);
+    // TEMPORARY: bumped to LOG_INFO (from LOG_DEBUG, compiled out at
+    // this file's LOG_LEVEL) while debugging why SIC found zero new
+    // decodes on real captured audio -- restore to LOG_DEBUG after.
+    LOG(LOG_INFO, "SIC pass %d: %d new decodes (total %d)\n", pass, new_this_pass, n_decodes);
     if (new_this_pass == 0)
         break;
     }
