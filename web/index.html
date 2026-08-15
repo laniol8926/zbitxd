@@ -2033,15 +2033,6 @@ function FT8_stylize_message_item(item, text, style) {
 // clock over a long session).
 var FT8_list_last_period = {};
 
-// FT8_list_append() used to have no cap at all -- every decode ever seen
-// (wsjtx-activity/wsjtx-cq/wsjtx-rx) stayed a permanent DOM node for the
-// life of the page, so a long session on a busy band accumulated
-// thousands of <li> elements over a few hours. These panels are only
-// ~10 rows tall on screen and are for seeing what's happening *now*, not
-// deep scrollback -- kept deliberately small (a few decode cycles'
-// worth), not just "large enough to never matter".
-var FT8_LIST_MAX_ENTRIES = 50;
-
 function FT8_period_label(text){
 	var token_list = text.match(/\S+/g);
 	return (token_list && token_list.length > 0) ? token_list[0] : null;
@@ -2136,9 +2127,18 @@ function FT8_list_append(list_id, text, style){
 	}
 
 	ol.appendChild(item);
-	// drop oldest entries (including any aged-out period dividers) once
-	// past the cap -- see FT8_LIST_MAX_ENTRIES's own comment
-	while (ol.children.length > FT8_LIST_MAX_ENTRIES)
+	// FT8_list_append() used to have no cap at all -- every decode ever
+	// seen (wsjtx-activity/wsjtx-cq/wsjtx-rx) stayed a permanent DOM node
+	// for the life of the page, accumulating thousands of <li> elements
+	// over a long session on a busy band. These panels are for seeing
+	// what's happening *now*, not deep scrollback, so capped at 2x the
+	// panel's own actual visible row count -- measured live from the
+	// real rendered DOM (container height / this item's own rendered
+	// height) rather than a fixed guess, so it stays correct across
+	// different screens/zoom levels/font rendering instead of silently
+	// drifting from what's actually on screen.
+	var max_entries = 2 * Math.floor(ol.clientHeight / item.offsetHeight);
+	while (ol.children.length > max_entries)
 		ol.removeChild(ol.firstChild);
 	if (was_at_bottom)
 		ol.scrollTop = ol.scrollHeight;
