@@ -1139,13 +1139,37 @@ void ft8_poll(int tx_is_on){
 		// FT4: two transmissions take 15 secs; are we interested in the first slot or the second?
 		// FT8: two transmissions take 30 secs; are we interested in the first slot or the second?
 		const int slot_time = is_ft4 ? wallclock_day_ms % 7500 : wallclock_day_ms % 15000;
-		LOG(LOG_DEBUG, "%05d ft8_poll: tx_is_on %d ft8_tx_nsamples %d start '%s'\n",
-			wallclock_day_ms % 60000, tx_is_on, ft8_tx_nsamples, ft8_xota ? ft8_xota_text : ft8_tx_text);
-		ftx_start_tx(slot_time); // modulate audio at current frequency setting
-		if (ft8_tx_nsamples)
-			tx_on(TX_SOFT);
-		ft8_repeat--;
-		update_tx_active_field();
+
+		// ftx_would_send() is true for this whole half-window, not just
+		// its first instant -- ft8_poll() runs ~10x/sec (see modems.c),
+		// so a message queued (e.g. F1 clicked) partway into an
+		// already-open window used to fire right here, seeding
+		// ftx_start_tx()'s buffer index from slot_time (seconds already
+		// elapsed), keying up mid-burst instead of at the real slot
+		// boundary. User: "the radio started to transmit as soon as i
+		// clicked... it should have waited until the beginning of the
+		// next 15 second [slot]." Gate on slot_time so we only ever key
+		// up right at the true start of a window -- anything later just
+		// defers to the next poll, which keeps returning true for the
+		// rest of this window and then goes false until the next one
+		// opens, arriving here again with a small slot_time right at
+		// that real boundary. 200ms (2x the ~100ms poll interval, as
+		// jitter margin) rather than the 1000ms ftx_start_tx() itself
+		// uses to zero out a small offset -- other stations' decoders
+		// are synced to the true slot start, so this needs to stay
+		// tight, not just "close enough to not be considered a
+		// mid-burst start." Comfortably under that 1000ms threshold
+		// means a pass here always zeroes the buffer index too, i.e.
+		// starts from sample 0, never partway into the waveform.
+		if (slot_time < 200) {
+			LOG(LOG_DEBUG, "%05d ft8_poll: tx_is_on %d ft8_tx_nsamples %d start '%s'\n",
+				wallclock_day_ms % 60000, tx_is_on, ft8_tx_nsamples, ft8_xota ? ft8_xota_text : ft8_tx_text);
+			ftx_start_tx(slot_time); // modulate audio at current frequency setting
+			if (ft8_tx_nsamples)
+				tx_on(TX_SOFT);
+			ft8_repeat--;
+			update_tx_active_field();
+		}
 	}
 }
 
