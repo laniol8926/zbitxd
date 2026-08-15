@@ -2033,6 +2033,15 @@ function FT8_stylize_message_item(item, text, style) {
 // clock over a long session).
 var FT8_list_last_period = {};
 
+// FT8_list_append() used to have no cap at all -- every decode ever seen
+// (wsjtx-activity/wsjtx-cq/wsjtx-rx) stayed a permanent DOM node for the
+// life of the page, so a long session on a busy band accumulated
+// thousands of <li> elements over a few hours. These panels are only
+// ~10 rows tall on screen and are for seeing what's happening *now*, not
+// deep scrollback -- kept deliberately small (a few decode cycles'
+// worth), not just "large enough to never matter".
+var FT8_LIST_MAX_ENTRIES = 50;
+
 function FT8_period_label(text){
 	var token_list = text.match(/\S+/g);
 	return (token_list && token_list.length > 0) ? token_list[0] : null;
@@ -2127,6 +2136,10 @@ function FT8_list_append(list_id, text, style){
 	}
 
 	ol.appendChild(item);
+	// drop oldest entries (including any aged-out period dividers) once
+	// past the cap -- see FT8_LIST_MAX_ENTRIES's own comment
+	while (ol.children.length > FT8_LIST_MAX_ENTRIES)
+		ol.removeChild(ol.firstChild);
 	if (was_at_bottom)
 		ol.scrollTop = ol.scrollHeight;
 }
