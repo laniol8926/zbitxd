@@ -63,8 +63,8 @@
 			</select>
 		</div>
 		<div class="sbitxv3-control" id="dial">
-    		<span id="current_freq">A:00.000.000</span> 
-			<span id="other_freq">B: 00.000.000</span>
+    		<span id="current_freq">00.000.000</span>
+			<span id="other_freq"></span>
 		</div><div class="sbitxv3-control">
 				<div class="sbitxv3-label">BAND</div>
 				<select class="sbitxv3-selection sbitx-selection" id="BAND">
@@ -124,6 +124,7 @@
 			<div class="sbitxv3-label">TX Enabled</div>
 		</div><button class="sbitxv3-btn macro-btn" id="F1">F1</button>
 		<div class="sbitxv3-control">
+			<div class="sbitxv3-label">Calling</div>
 			<select class="sbitxv3-selection sbitx-selection" id="CQKIND">
 				<option value="CQ">CQ</option>
 				<option value="DX">DX</option>
@@ -151,12 +152,6 @@
 				<option value="100K">100K</option>
 			</select>
 		</div><div class="sbitxv3-control">
-			<div class="sbitxv3-label">VFO</div>
-			<select class="sbitxv3-selection sbitx-selection" id="VFO">
-				<option value="A">A</option>
-				<option value="B">B</option>
-			</select>
-		</div><div class="sbitxv3-control">
 			<div class="sbitxv3-label">SPLIT</div>
 			<select class="sbitxv3-selection sbitx-selection" id="SPLIT">
 				<option value="OFF">OFF</option>
@@ -169,7 +164,7 @@
 				<option value="ON">ON</option>
 			</select>
 		</div><div class="sbitxv3-control power-control">
-			<div class="sbitxv3-label">Power</div>
+			<div class="sbitxv3-label">Reboot</div>
 			<!-- was two separate Reboot/Shutdown buttons -- one-shot
 			     action select instead, space-saving. Not .sbitx-selection
 			     (the generic handler sends a raw, unconfirmed
@@ -815,56 +810,24 @@ function update_freq(freq){
 /* All tuning related functions including the soft-kob, drawing the dial etc. */
 
 
-function vfo_set(event){
-	var vfo_a = el("VFOA").value;
-	var vfo_b = el("VFOB").value;
-	var vfo   = el("VFO").value; //which one is used?
-	var f = el("FREQ").value;
-
-	var btn_id = event.currentTarget.id;
-
-	if (btn_id == 'vfo_reset'){
-		if (vfo == 'A')
-			vfo_b = vfo_a;
-		else
-			vfo_a = vfo_b;
-	}
-	else if (btn_id == "vfo_swap"){
-		var swap = vfo_a;
-		vfo_a = vfo_b;
-		vfo_b = swap;
-	}
-	websocket_send("VFOB " + vfo_b);
-	websocket_send("VFOA " + vfo_a);
-	el("VFOA").value = vfo_a;
-	el("VFOB").value = vfo_b;
-	if (vfo == 'A')
-		websocket_send("FREQ " + vfo_a);
-	else
-		websocket_send("FREQ " + vfo_b);
-	draw_dial();
-}
-
 //draw_dial is called after setting FREQ to the current freq
 function draw_dial(){
 	var freq = el("FREQ").value;
 	var split = el("SPLIT").value;
 	var rit   = el("RIT").value;
-	var vfo_a = el("VFOA").value;
 	var vfo_b = el("VFOB").value;
-	var vfo   = el("VFO").value; //which one is used?
 	var rit_delta = el("RIT_DELTA").value;
 
 	if (rit == "ON"){
 		if (in_tx == 1){
 			el("current_freq").innerHTML = "TX&nbsp;" + freq2str(freq);
-			el("other_freq").innerHTML = 
-				"RX&nbsp;" + freq2str((parseInt(freq)+ parseInt(rit_delta)).toString()); 
+			el("other_freq").innerHTML =
+				"RX&nbsp;" + freq2str((parseInt(freq)+ parseInt(rit_delta)).toString());
 		}
 		else {
-			el("current_freq").innerHTML = 
+			el("current_freq").innerHTML =
 				"RX&nbsp;" + freq2str((parseInt(freq) + parseInt(rit_delta)).toString());
-			el("other_freq").innerHTML = "TX&nbsp;" + freq2str(freq); 
+			el("other_freq").innerHTML = "TX&nbsp;" + freq2str(freq);
 		}
 	}
 	else if (split == "ON") {
@@ -875,27 +838,13 @@ function draw_dial(){
 		else {
 			el("current_freq").innerHTML = "TX&nbsp;" + freq2str(vfo_b);
 			el("other_freq").innerHTML = "RX&nbsp;" + freq2str(freq);
-			
+
 		}
 	}
-	else if (vfo == 'A'){
-		if (!in_tx){
-			el("current_freq").innerHTML = "A&nbsp;" + freq2str(freq);
-			el("other_freq").innerHTML =  "B&nbsp;" + freq2str(vfo_b);
-		} else {
-			el("current_freq").innerHTML = "TX&nbsp;" + freq2str(vfo_a);
-			el("other_freq").innerHTML = "B&nbsp;" + freq2str(freq);
-		}
+	else {
+		el("current_freq").innerHTML = freq2str(freq);
+		el("other_freq").innerHTML = "";
 	}
-	else if (vfo == 'B'){
-		if (!in_tx){
-			el("current_freq").innerHTML = "B&nbsp;" + freq2str(freq);
-			el("other_freq").innerHTML = "A&nbsp;" + freq2str(vfo_a);
-		} else {
-			el("current_freq").innerHTML =  "TX&nbsp;" + freq2str(freq);
-			el("other_freq").innerHTML = "A&nbsp;" + freq2str(vfo_a);
-		}
-	}	
 }
 
 
@@ -3496,11 +3445,7 @@ function response_handler(response){
 			log("freq " + args);
 			if (e)
 				e.value = args;
-			//update the selected VFO
-			if (el("VFO").value  == 'A')
-				el("VFOA").value = args;
-			else
-				el("VFOB").value = args;
+			el("VFOA").value = args;
 			// keep BAND showing the band the radio is actually on --
 			// setting .value directly (not via a real user interaction)
 			// does not fire sbitx_selection_changed's 'change' handler,
@@ -3668,9 +3613,6 @@ $("#console-open").on("click", function(){
 $("#telnet-open").on("click", show_telnet_panel);
 $("#keyboard-open").on("click", show_keyboard);
 $("#MACRO").on("change", logger_get_macro_file);
-//vfo buttons
-$("#vfo_reset").on("click", vfo_set);
-$("#vfo_swap").on("click", vfo_set);
 
 // logger buttons
 $("#wipe").on("click", logger_wipe);

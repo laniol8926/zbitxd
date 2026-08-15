@@ -2961,36 +2961,7 @@ void do_control_action(char *cmd){
 	else if (!strncmp(request, "RIT", 3))
 		update_field(get_field("r1:freq"));
 	else if (!strncmp(request, "SPLIT", 5)){
-		update_field(get_field("r1:freq"));	
-		if (!strcmp(get_field("#vfo")->value, "B"))
-			set_field("#vfo", "A");
-	}
-	else if (!strcmp(request, "VFO B")){
-		struct field *f = get_field("r1:freq");
-		struct field *vfo = get_field("#vfo");
-		struct field *vfo_a = get_field("#vfo_a_freq");
-		struct field *vfo_b = get_field("#vfo_b_freq");
-		if (!strcmp(vfo->value, "B")){
-			//vfo_a_freq = atoi(f->value);
-			strcpy(vfo_a->value, f->value);
-			//sprintf(buff, "%d", vfo_b_freq);
-			set_field("r1:freq", vfo_b->value);
-			settings_updated++;
-		}
-	}
-	else if (!strcmp(request, "VFO A")){
-		struct field *f = get_field("r1:freq");
-		struct field *vfo = get_field("#vfo");
-		struct field *vfo_a = get_field("#vfo_a_freq");
-		struct field *vfo_b = get_field("#vfo_b_freq");
-		//printf("vfo old %s, new %s\n", vfo->value, request);
-		if (!strcmp(vfo->value, "A")){
-		//	vfo_b_freq = atoi(f->value);
-			strcpy(vfo_b->value, f->value);
-	//		sprintf(buff, "%d", vfo_a_freq);
-			set_field("r1:freq", vfo_a->value);
-			settings_updated++;
-		}
+		update_field(get_field("r1:freq"));
 	}
 	else if (!strcmp(request, "KBD ON")){
 		//layout_ui();
