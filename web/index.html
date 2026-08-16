@@ -76,7 +76,7 @@
 					<option value="15M">15M</option>
 					<option value="12M">12M</option>
 					<option value="10M">10M</option>
-				</select><span id="band_store" class="selband"></span>
+				</select>
 			</div><div class="sbitxv3-control rx-control">
 			<div class="sbitxv3-label">AGC </div>
 			<select class="sbitxv3-selection sbitx-selection" id="AGC">
@@ -3074,19 +3074,6 @@ function freq_to_band(freq_hz){
 	return null;
 }
 
-function show_selected_band_store(args) {
-	// no longer sets el("BAND").value here -- SELBAND is a separately-
-	// persisted "last band button explicitly clicked" value (see
-	// freq_to_band()'s comment) that can arrive *after* a 'FREQ' update
-	// during the initial login replay, silently clobbering the correct,
-	// frequency-derived BAND value with a stale one right after it was
-	// fixed (confirmed live: BAND still showed 40M on a 20M radio even
-	// with that fix in place). BAND is purely frequency-derived now;
-	// this function only still updates the band-memory-slot indicator.
-	const store = args%10+1;
-	el("band_store").innerHTML = " " + store;
-}
-
 // waterfall height as a share of the viewport, not a fixed pixel count --
 // a fixed value can't look right in both phone portrait and landscape at
 // once. Clamped so it never collapses on a short landscape screen or
@@ -3480,7 +3467,6 @@ function response_handler(response){
 			break;
 		case 'SELBAND':
 		    FT8_lists_clear();
-			show_selected_band_store(args);
 			break;
 		case 'TXACTIVE':
 			// server-side "will transmit again on its own" state
