@@ -700,6 +700,17 @@ select, select option, input {
 	flex: none;
 }
 
+.panel-toggle-label {
+	float: right;
+	font-size: 9pt;
+	font-weight: normal;
+	color: #aaa;
+	cursor: pointer;
+}
+.panel-toggle-label input {
+	vertical-align: middle;
+}
+
 /* styling the FT8 list */
 .ft8-label {
 	font-size: 9pt;
@@ -963,8 +974,20 @@ body {
 	/*appearance: slider-vertical;*/
 	height: 90px;
 	width: 40px;
-	writing-mode: vertical-lr; 
+	writing-mode: vertical-lr;
 	direction: rtl
+}
+
+/* Live REPEAT countdown -- server broadcasts FT8_REPEATCNT every time
+   ft8_repeat changes; shown as a small corner badge so it doesn't
+   disturb the .linear box's fixed 36px layout. Empty/hidden when not
+   actively counting down. */
+.ft8-repeat-count {
+	position: absolute;
+	bottom: 2px;
+	right: 3px;
+	font-size: 12px;
+	color: white;
 }
 
 .macro-btn {
@@ -994,8 +1017,19 @@ body {
 	background-color: #0033cc;
 }
 
+/* Shrunk from the default 50px linear-value to ~3 characters wide --
+   user's own ask, to free up row space for TX Enabled/Calling to
+   actually share the first row instead of wrapping down. Label text
+   shortened to "RX" (was "RX RF") to match, with the full name moved
+   to a title= mouseover tooltip instead. */
+#linear_IF {
+	min-width: 34px;
+	width: 34px;
+}
+
 .rx-control input {
 	background-color: #0033cc;
+	width: 30px;
 }
 
 .rx-control select {
@@ -1016,6 +1050,30 @@ body {
 #linear_DRIVE, #linear_DRIVE > .linear-dropdown, #linear_DRIVE > .linear-value{
 	background-color: #bf0f0f;
 	border: solid 1px black;
+}
+
+/* Shrunk from the default 50px linear-value to ~3 characters wide,
+   same treatment/reasoning as #linear_IF above -- label shortened to
+   "RF" (was "TX PWR"), full name moved to a title= tooltip. */
+#linear_DRIVE {
+	min-width: 34px;
+	width: 34px;
+}
+#linear_DRIVE > .linear-value {
+	width: 30px;
+}
+
+/* Shrunk to ~4 characters wide, same treatment as #linear_IF/
+   #linear_DRIVE above -- label shortened to "RPT" (was "REPEAT"), full
+   name moved to a title= tooltip. Slightly wider than the 3-char boxes
+   since this one also hosts the countdown badge in its bottom-right
+   corner (.ft8-repeat-count) alongside the number itself. */
+#linear_FT8_REPEAT {
+	min-width: 42px;
+	width: 42px;
+}
+#linear_FT8_REPEAT > .linear-value {
+	width: 38px;
 }
 
 /* Power (Reboot/Shutdown) -- red background/white text, same "worth
@@ -1069,27 +1127,39 @@ body {
    so a wider select still overflowed it and the dropdown arrow ended
    up rendered outside the bordered box -- widen the container to match. */
 .cqkind-control {
-	width: 80px;
+	width: 64px;
+	box-sizing: border-box;
 }
 
 #CQKIND {
-	width: 72px;
+	width: 100%;
+	box-sizing: border-box;
 }
 
 /* AUTO's old ON/OFF/CQ_ALT/xOTA <select> replaced with two stacked,
    mutually-exclusive checkboxes (Auto CQ / A. Ans) -- needs real height
    for two rows plus their own label text, not just the base
    .sbitxv3-control's fixed single-line 36px. */
+/* TX Enabled + (hidden) F1 + Calling, grouped so a narrow (phone)
+   viewport wraps all three to the next line together, never splitting
+   the group mid-way -- confirmed live: Calling landed alone on its own
+   row on phone browsers (Samsung Internet, mobile Chrome) while fitting
+   fine next to TX Enabled on a wide desktop window, since inline-block
+   wrapping alone has no notion of "keep these together." */
+.tx-calling-group {
+	display: inline-block;
+}
+
 .ft8auto-control {
 	height: auto;
 	min-height: 36px;
-	width: 62px;
+	width: 42px;
 	padding-top: 3px;
 }
 
 .ft8auto-row {
 	display: block;
-	font-size: 10px;
+	font-size: 12px;
 	color: white;
 	white-space: nowrap;
 	cursor: pointer;

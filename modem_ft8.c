@@ -1275,9 +1275,11 @@ void ft8_poll(int tx_is_on){
 			tx_off();
 			ft8_repeat = ft8_repeat_save;
 			// tx_off() -> modem_abort() -> ft8_abort() just zeroed
-			// #tx_active along with ft8_repeat -- now that ft8_repeat
-			// is restored, re-sync the field so it doesn't stay wrong
-			// until the next real mutation
+			// #tx_active and #ft8_repeat_count along with ft8_repeat --
+			// now that ft8_repeat is restored, re-sync both fields so
+			// they don't stay wrong (badge stuck at 0 mid-cycle) until
+			// the next real mutation
+			set_field_int("#ft8_repeat_count", ft8_repeat_save > 0 ? ft8_repeat_save : 0);
 			update_tx_active_field();
 		}
 		return;
@@ -1343,13 +1345,12 @@ void ft8_poll(int tx_is_on){
 			// Two different real "give up" moments reach this same
 			// point, so both need to be caught right here, not just the
 			// explicit QSO-completion branches in ft8_process():
-			//  - is_cq: the CQ call's own repeat count would hit 0 while
-			//    still waiting for an answer -- top it back up to
-			//    whatever FT8_REPEAT is *currently* set to (a fresh
-			//    field read, same as ft8_tx()/ft8_tx_3f() always do --
-			//    not a hardcoded number), so it stays in sync with a
-			//    slider change made even while Auto CQ is already
-			//    running.
+			//  - is_cq: the CQ call's own repeat count hit 0 with nobody
+			//    answering after FT8_REPEAT tries -- that's the give-up
+			//    signal, so Auto CQ disarms itself entirely (user's own
+			//    call: "auto cq stops calling cq when the counter gets
+			//    to zero"), same as if TX Enabled had been clicked to
+			//    abort.
 			//  - !is_cq: an in-QSO reply (queued via ft8_tx_3f() -- a
 			//    signal report, RR73, etc) ran out of retries with no
 			//    response, e.g. the other station went silent mid-
@@ -1362,10 +1363,21 @@ void ft8_poll(int tx_is_on){
 			//    silently strand Auto CQ idle forever either.
 			if (ft8_autocq_running && ft8_repeat <= 0){
 				if (is_cq)
-					ft8_repeat = field_int("FT8_REPEAT");
+					// Give up -- nobody answered after FT8_REPEAT tries.
+					// Deliberately leaves #ft8_auto/the checkbox alone
+					// (user's own call): only the armed/running state and
+					// TX Enabled drop, via the normal TXACTIVE update
+					// below once this last burst finishes transmitting.
+					// A bare click on TX Enabled re-arms and starts a
+					// fresh round -- no need to touch the checkbox again.
+					ft8_autocq_stop();
 				else
 					ft8_autocq_resume_pending = true;
 			}
+			// Live countdown for the operator -- broadcast every time
+			// ft8_repeat changes (decrement above, plus any refill just
+			// above it), not just once.
+			set_field_int("#ft8_repeat_count", ft8_repeat > 0 ? ft8_repeat : 0);
 			update_tx_active_field();
 		}
 	}
@@ -1549,13 +1561,9 @@ void ft8_on_start_qso(char *message){
 	}
 	field_set("NR", mygrid);
 	ft8_tx(reply_message, ft8_pitch);
-	// Answering a CQ (m1=="CQ" -- the other two branches above are a
-	// cold-call TO us or breaking into an existing QSO, neither of which
-	// is "trying to get a CQ caller's attention") gets its own retry
-	// count, separate from FT8_REPEAT -- see #ft8_repeat_answer's own
-	// comment in sbitx_daemon.c.
-	if (!strcmp(m1, "CQ"))
-		ft8_repeat = field_int("FT8_REPEATANS");
+	// ft8_tx() above already set ft8_repeat from FT8_REPEAT -- one
+	// shared counter/give-up signal for CQ calls, answering a CQ, and
+	// in-QSO replies alike (user's own call).
 }
 
 void ft8_on_signal_report(){
@@ -1737,6 +1745,12 @@ void ft8_init(){
 void ft8_abort(){
 	ft8_tx_nsamples = 0;
 	ft8_repeat = 0;
+	// Without this, the countdown badge sticks at whatever it last
+	// showed (e.g. a round cancelled mid-cycle at "2") -- ft8_poll()'s
+	// own decrement is the only other place this field gets touched,
+	// and an abort never passes through there. Confirmed live: reload
+	// kept showing a stale non-zero count from before the abort.
+	set_field_int("#ft8_repeat_count", 0);
 	update_tx_active_field();
 }
 
@@ -1755,7 +1769,11 @@ int ft8_is_repeating(){
 // completing in ft8_process() (where Auto CQ should keep going, not
 // stop). Only abort_tx() in sbitx_daemon.c -- the real "operator/system
 // wants everything pending cancelled" boundary (explicit abort click,
-// mode/band/frequency change) -- calls this.
+// mode/band/frequency change) -- calls this. Deliberately does NOT
+// touch #ft8_auto: abort_tx() fires on routine band/mode changes too,
+// and the Auto CQ *selection* is meant to survive those (only the
+// armed/running state should drop) -- see ft8_poll()'s own is_cq
+// give-up branch for the one place the checkbox itself should reset.
 void ft8_autocq_stop(){
 	ft8_autocq_running = false;
 	ft8_autocq_resume_pending = false;

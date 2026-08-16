@@ -647,16 +647,14 @@ struct field main_controls[] = {
 		"ON/OFF", 0,0,0, FT8_CONTROL},
   { "#ft8_repeat", NULL, 1000, -1000, 50, 50, "FT8_REPEAT", 40, "5", FIELD_NUMBER,
     "", 1, 10, 1, FT8_CONTROL},
-	// Separate from FT8_REPEAT above -- that governs retries for a
-	// message sent *during* an already-established QSO (they've replied
-	// at least once); this instead governs retries while just trying to
-	// get a CQ caller's attention in the first place (ft8_on_start_qso()'s
-	// "m1==CQ" branch specifically). User's own reasoning: these are two
-	// different real-world give-up decisions (abandon this one QSO vs.
-	// stop trying this CQ caller and go answer someone else), so sharing
-	// one count between them was wrong.
-  { "#ft8_repeat_answer", NULL, 1000, -1000, 50, 50, "FT8_REPEATANS", 40, "5", FIELD_NUMBER,
-    "", 1, 10, 1, FT8_CONTROL},
+	// Read-only countdown, broadcast from ft8_poll()'s single decrement
+	// point every time ft8_repeat changes -- lets the operator see how
+	// many repeats are left of whatever FT8_REPEAT governs (a CQ call,
+	// answering a CQ, or an in-QSO reply -- one shared counter/one
+	// shared display for all three, per user's own call). Client never
+	// sends this field; it's display-only.
+  { "#ft8_repeat_count", NULL, 1000, -1000, 50, 50, "FT8_REPEATCNT", 40, "0", FIELD_NUMBER,
+    "", 0, 10, 1, FT8_CONTROL},
 	// Replaces the old free-text TEXT box for CQ variants (user used to
 	// type e.g. "CQ DX AI5II EM72" by hand) -- picked here instead,
 	// spliced into the F1 macro's composed CQ text in do_macro(). "CQ"

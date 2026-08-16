@@ -30,7 +30,11 @@
 -->
 	<head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <!-- minimum-scale explicit, not left to each mobile browser's own
+         default interpretation -- user: "I can zoom in but not out" on
+         Samsung Internet/mobile Chrome. Without it, some browsers treat
+         initial-scale as a de facto floor. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=0.5, maximum-scale=5">
     <title>sBitx</title>
     <script src="jquery.min.js"></script>
     <script src="pcm-player.js"></script>
@@ -54,6 +58,14 @@
 		<button class="sbitxv3-btn" id="sound_mute" type="button">Sound</button>
 		<button class="sbitxv3-btn" id="tune_toggle"
 			title="Keys the transmitter with a steady tone -- click again to stop">Tune</button>
+		<div class="linear" id="linear_DRIVE" title="Adjust Transmitter RF Output">
+    	<div class="linear-label">RF</div>
+    	<input type="number" id="DRIVE" min="1" max="100" class="linear-value" />
+     	<div class="linear-dropdown">
+      	<input type="range" class="linear-slider"
+        	id="slider_DRIVE" max="100" min="0" step="5" value="10" />
+			</div>
+		</div>
 		<div class="sbitxv3-control">
 			<div class="sbitxv3-label">MODE</div>
 			<select class="sbitxv3-selection sbitx-selection" id="MODE">
@@ -85,16 +97,16 @@
 				<option value="SLOW">SLOW</option>
 				<option value="OFF">OFF</option>
 			</select>
-		</div><div class="linear rx-control" id="linear_IF">
-    	<div class="linear-label">RX RF</div>
+		</div><div class="linear rx-control" id="linear_IF" title="Adjust Receiver RF Gain">
+    	<div class="linear-label">RX</div>
     	<input type="number" id="IF" min="0" max="100" class="linear-value" />
      	<div class="linear-dropdown">
       	<input type="range" class="linear-slider"
         	id="slider_IF" max="100" min="0" step="1" value="13" />
 			</div>
-    </div><div class="sbitxv3-control ft8auto-control">
-			<label class="ft8auto-row"><input type="checkbox" id="AUTOCQ_CHECK" />Auto CQ</label>
-			<label class="ft8auto-row"><input type="checkbox" id="AUTOANS_CHECK" />A. Ans</label>
+    </div><div class="sbitxv3-control ft8auto-control" title="Enable/Disable Auto CQ and Auto Answer CQ Modes.">
+			<label class="ft8auto-row"><input type="checkbox" id="AUTOCQ_CHECK" />AC</label>
+			<label class="ft8auto-row"><input type="checkbox" id="AUTOANS_CHECK" />AA</label>
 		</div><div class="sbitxv3-control">
 			<div class="sbitxv3-label">SLOT</div>
 			<div class="sbitxv3-selection ft8-txslot-value" id="FT8_TX1ST" tabindex="0">EVEN</div>
@@ -105,23 +117,17 @@
       			<input type="range" class="linear-slider"
         			id="slider_TX_PITCH" max="4000" min="10" step="10" value="1900" />
 				</div>
-			</div><div class="linear" id="linear_FT8_REPEAT">
-    			<div class="linear-label">REPEAT</div>
+			</div><div class="linear" id="linear_FT8_REPEAT" title="Set the Number Of Repeat Transmissions">
+    			<div class="linear-label">RPT</div>
     			<input type="number" id="FT8_REPEAT" min="1" max="10" class="linear-value" />
+    			<span class="ft8-repeat-count" id="FT8_REPEATCNT_DISPLAY"></span>
      		<div class="linear-dropdown">
       		<input type="range" class="linear-slider"
         		id="slider_FT8_REPEAT" max="10" min="1" step="1" value="3" />
 			</div>
-		</div><div class="linear" id="linear_FT8_REPEATANS">
-    			<div class="linear-label">ANS RPT</div>
-    			<input type="number" id="FT8_REPEATANS" min="1" max="10" class="linear-value" />
-     		<div class="linear-dropdown">
-      		<input type="range" class="linear-slider"
-        		id="slider_FT8_REPEATANS" max="10" min="1" step="1" value="5" />
-			</div>
-		</div><div class="sbitxv3-control tx-enabled-indicator" id="tx_enabled_indicator">
+		</div><div class="tx-calling-group"><div class="sbitxv3-control tx-enabled-indicator" id="tx_enabled_indicator">
 			<div class="sbitxv3-label">TX Enabled</div>
-		</div><button class="sbitxv3-btn macro-btn" id="F1">F1</button>
+		</div><button class="sbitxv3-btn macro-btn" id="F1" style="display:none">F1</button>
 		<div class="sbitxv3-control cqkind-control">
 			<div class="sbitxv3-label">Calling</div>
 			<select class="sbitxv3-selection sbitx-selection" id="CQKIND">
@@ -131,16 +137,9 @@
 				<option value="IOTA">IOTA</option>
 				<option value="SOTA">SOTA</option>
 			</select>
-		</div>
+		</div></div>
 	<br/>
-		<div class="linear" id="linear_DRIVE">
-    	<div class="linear-label">TX PWR</div>
-    	<input type="number" id="DRIVE" min="1" max="100" class="linear-value" />
-     	<div class="linear-dropdown">
-      	<input type="range" class="linear-slider"
-        	id="slider_DRIVE" max="100" min="0" step="5" value="10" />
-			</div>
-		</div><div class="sbitxv3-control">	
+		<div class="sbitxv3-control">
 			<div class="sbitxv3-label">STEP</div>
 			<select id="STEP" class="sbitx-selection sbitxv3-selection">
 				<option value="10H">10H</option>
@@ -441,7 +440,7 @@
 				</ol>
 			</div>
 			<div id="wsjtx-cq" class="sbitx-list-container" >
-				<div class="sbitx-list-title">CQ Panel</div>
+				<div class="sbitx-list-title">CQ Panel <label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label></div>
 				<ol size="10" class="sbitx-list-box">
 				</ol>
 			</div>
@@ -2324,7 +2323,13 @@ function FT8_message_chosen(event){
 			websocket_send("PITCH " + rx_freq_num);
 			draw_wf_overlay();
 		}
-		websocket_send("FT8_check "+message_text);
+		// deco_strip() -- server-sent text embeds "#" + a style-code
+		// char before every field (e.g. "#FCQ" = style tag "#F" + literal
+		// "CQ"); the server's own plain-whitespace tokenizer chokes on
+		// that leading '#' (not alphanumeric) and silently produces
+		// empty fields, so it has to come off before this goes back to
+		// the server as a real protocol message.
+		websocket_send("FT8_check "+deco_strip(message_text));
 	}
 
 	/*
@@ -2343,8 +2348,6 @@ function FT8_lists_clear() {
 	document.querySelector('#wsjtx-cq ol').innerHTML ="";
 	document.querySelector('#wsjtx-rx ol').innerHTML ="";
 	FT8_list_last_period = {};
-	// old CQs are gone with the list -- stale on a band change anyway
-	autoans_last_cq_text = null;
 }
 
 function FT8_new_message(text, style){
@@ -2359,10 +2362,14 @@ function FT8_new_message(text, style){
 	// Activity and RX Frequency, both unaffected by this check)
 	if (style == "RX" && FT8_message_is_cq(text)){
 		FT8_list_append("wsjtx-cq", text, style);
-		autoans_last_cq_text = text;
 		// Auto Answer was waiting specifically for a CQ that isn't the
 		// one it just gave up on/finished with -- check whether this
 		// new one qualifies before actually acting on it.
+		// autoans_pick_and_answer() reads the CQ panel's own top entry
+		// itself (see its own comment) rather than the text just
+		// appended here, so this is purely "try again, something new
+		// just showed up" -- the append above must run first so that
+		// entry is actually the one it'll find on top.
 		if (autoans_awaiting_new_cq)
 			autoans_pick_and_answer();
 	}
@@ -2666,7 +2673,6 @@ function clear_cq_highlight(){
 // looks up the logbook and starts the QSO via FTX_START_QSO), aimed at
 // whatever the most recently decoded real CQ is.
 var autoans_running = false;
-var autoans_last_cq_text = null;        // most recent real CQ heard, any station
 var autoans_last_attempted_call = null; // who we just finished with (worked or gave up) -- skipped on the next pick
 var autoans_awaiting_new_cq = false;    // true when the only candidate we have is the one we're avoiding
 var autoans_start_timer = null;         // see autoans_pick_and_answer()'s own comment
@@ -2680,6 +2686,27 @@ function autoans_stop(){
 	}
 }
 
+// Reads the CQ panel's own top entry -- the actual most-recent CQ,
+// straight from the list itself, rather than a separately-tracked "last
+// CQ" variable that can drift out of sync with what's really on top
+// (confirmed live: Auto Answer picked a station from a previous decode
+// period instead of the newest one). FT8_list_append() always prepends
+// new "wsjtx-cq" entries right after the top divider (user's own
+// deliberate "most current at the top, not the bottom" ordering), so
+// the first non-divider <li> is always the true most-recent CQ -- the
+// same single source of truth a human glancing at the panel would use.
+// item.dataset.message (set in FT8_list_append()) is already
+// deco_strip()'d.
+function autoans_current_top_cq(){
+	var ol = el("wsjtx-cq").querySelector("ol");
+	for (var i = 0; i < ol.children.length; ++i){
+		var li = ol.children[i];
+		if (!li.classList.contains("sbitx-list-divider"))
+			return li.dataset.message || null;
+	}
+	return null;
+}
+
 // Picks a target and sends "FT8_check <text>" for it, same as a manual
 // click. Skips autoans_last_attempted_call if it's still the most
 // recent CQ (avoids immediately re-targeting the station we just
@@ -2690,18 +2717,20 @@ function autoans_stop(){
 function autoans_pick_and_answer(){
 	if (!autoans_running)
 		return;
-	if (!autoans_last_cq_text){
+	var cq_text = autoans_current_top_cq();
+	if (!cq_text){
 		autoans_awaiting_new_cq = true;
 		return;
 	}
-	var call = ft8_cq_message_callsign(autoans_last_cq_text);
+	var call = ft8_cq_message_callsign(cq_text);
 	if (call && call === autoans_last_attempted_call){
 		autoans_awaiting_new_cq = true;
 		return;
 	}
 	autoans_awaiting_new_cq = false;
 	autoans_last_attempted_call = call;
-	websocket_send("FT8_check " + autoans_last_cq_text);
+	// cq_text is already deco_strip()'d (see autoans_current_top_cq()).
+	websocket_send("FT8_check " + cq_text);
 	// pre_ft8_check() silently does nothing if this callsign is already
 	// in the logbook and this isn't a repeated identical check (its
 	// dupe-confirmation path, meant for a deliberate second manual
@@ -3688,10 +3717,23 @@ function response_handler(response){
 			// no el("FT8_AUTO") anymore -- replaced by the two checkboxes,
 			// this is their sync point for the server's own bulk field
 			// push on login (always "OFF", see the startup force-reset
-			// in sbitx_daemon.c) and for a future value pushed to every
+			// in sbitx_daemon.c) and for a value pushed to every
 			// connected client, not just the one that changed it.
 			el("AUTOCQ_CHECK").checked = (args == "AUTOCQ");
 			el("AUTOANS_CHECK").checked = (args == "ON");
+			break;
+		case 'FT8_REPEATCNT':
+			// Live countdown badge on the REPEAT control -- server sends
+			// this every time ft8_repeat changes. 0 means not actively
+			// counting down (idle, just reset, or a fresh login) -- show
+			// the full REPEAT setting itself then, not a blank badge, so
+			// it always reads as "how many attempts you're about to get"
+			// (user: "on reload the counter should be equal to whatever
+			// the repeat number is"). #ft8_repeat is earlier in the
+			// field table than #ft8_repeat_count, so on the same bulk
+			// login push FT8_REPEAT's own value is already in place by
+			// the time this case runs.
+			el("FT8_REPEATCNT_DISPLAY").textContent = (args == "0") ? el("FT8_REPEAT").value : args;
 			break;
 		case 'MODE':
 			mode_set(args);
@@ -3801,6 +3843,23 @@ $("#esc").on("click", logger_abort);
 $("#tx_enabled_indicator").on("click", tx_enabled_indicator_clicked);
 $("#FT8_TX1ST").on("click", ft8_txslot_clicked);
 $("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
+// Band Activity is purely informational -- CQ Panel and RX Frequency
+// are the ones that actually matter (user's own call) -- lets it be
+// hidden to reclaim screen space, persisted across reloads the same
+// way panel drag geometry already is (localStorage).
+(function(){
+	var checkbox = el("HIDE_BAND_ACTIVITY_CHECK");
+	function apply(){
+		var hide = localStorage.getItem("hide_band_activity") === "1";
+		el("wsjtx-activity").style.display = hide ? "none" : "";
+		checkbox.checked = hide;
+	}
+	checkbox.addEventListener("change", function(){
+		localStorage.setItem("hide_band_activity", checkbox.checked ? "1" : "0");
+		apply();
+	});
+	apply();
+})();
 $("#qrz").on("click", logger_qrz);
 $("#logger-log").on("click", logger_enter_qso);
 //$("#macros").on("click", logger_toggle_macros);

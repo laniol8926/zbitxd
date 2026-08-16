@@ -65,10 +65,20 @@ static void do_login(struct mg_connection *c, char *key){
 
 	hd_createGridList(); // llh: make the list up to date at the beginning of a session
 
+	// Same "always reset to manual" default main() forces at daemon
+	// startup (see its own comment) -- but that's a one-shot, so a
+	// client reload/reconnect hours into an already-running daemon
+	// never saw it, and could show Auto CQ/A. Ans still checked from
+	// whatever was last selected. User: "the default on reload is that
+	// both the auto cq and the auto answer check boxes should be
+	// unchecked" -- every login gets the same fresh-start default, not
+	// just the very first one after boot.
+	set_field("#ft8_auto", "OFF");
+
 	sprintf(session_cookie, "%x", rand());
 	char response[100];
 	sprintf(response, "login %s", session_cookie);
-	web_respond(c, response);	
+	web_respond(c, response);
 	get_updates(c, 1);
 }
 
