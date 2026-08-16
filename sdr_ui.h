@@ -102,6 +102,7 @@ void write_call_log();
 int macro_load(const char *filename, char *output);
 int macro_exec(int key, char *dest);
 void macro_label(int fn_key, char *label);
+void queue_cq_call();
 void macro_list(char *output);
 void macro_get_keys(char *output);
 

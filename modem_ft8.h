@@ -15,5 +15,12 @@ void ft8_poll(int tx_is_on);
 float ft8_next_sample();
 void ft8_process(char *message, ftx_operation operation);
 int ft8_is_repeating();
+// Arms Auto CQ mode (queues the first CQ call and marks it to keep
+// repeating indefinitely, resuming after each QSO, until aborted) --
+// see the ft8_autocq_running comment in modem_ft8.c for the full design.
+void ft8_autocq_start();
+// Fully terminates Auto CQ mode -- called from abort_tx() only, not
+// ft8_abort() (see ft8_autocq_stop()'s own comment for why).
+void ft8_autocq_stop();
 // TEMPORARY, task #25 SIC validation only -- remove once done.
 int ft8_decode_file(const char *path);

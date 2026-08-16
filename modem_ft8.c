@@ -37,9 +37,7 @@ static float ft8_tx_buffer[FT8_MAX_BUFF];
 // convention and avoid a ~844KB stack allocation every decode cycle.
 static float ft8_sic_residual[FT8_MAX_BUFF];
 static char ft8_tx_text[128];
-static char ft8_xota_text[14];
 ftx_message_t ftx_tx_msg;
-ftx_message_t ftx_xota_msg;
 static int ft8_rx_buff_index = 0;
 // real wallclock_day_ms at the moment ft8_rx_buff_index was actually
 // reset to 0 for the CURRENT slot (set in ft8_rx()'s slot_time<500
@@ -64,8 +62,17 @@ static int ft8_repeat = 5;
 static pthread_t ft8_thread;
 static bool is_cq = false; // is ft8_tx_text a CQ?
 static bool ft8_tx1st = true;
-static bool ft8_cq_alt = false;
-static bool ft8_xota = false;
+// Auto CQ mode (FT8_AUTO=="AUTOCQ"): ft8_autocq_running marks the whole
+// "keep calling CQ until answered or aborted, and keep going after each
+// QSO" session, independent of ft8_repeat's own per-message countdown
+// (which ft8_poll() refuses to let expire while a CQ call is under way
+// in this mode -- see there). ft8_autocq_resume_pending bridges the gap
+// between a completed QSO (ft8_process()'s "73"/"RR73" branches) and
+// the next ft8_poll() cycle actually re-queuing CQ -- can't requeue
+// immediately from ft8_process() itself when a courtesy "73" still
+// needs to go out first, so it's deferred to the next idle poll instead.
+static bool ft8_autocq_running = false;
+static bool ft8_autocq_resume_pending = false;
 
 static const int kMin_score = 10; // Minimum sync score threshold for candidates
 // Matched to ft8_lib's own reference demo tool (ft8_lib/demo/decode_ft8.c
@@ -326,7 +333,7 @@ static void synth_gfsk(const uint8_t* symbols, int n_sym, float f0, float symbol
 }
 
 /*!
-	Encode ftx_tx_msg or ftx_xota_msg payload onto audio carrier \a freq and output to \a signal.
+	Encode ftx_tx_msg payload onto audio carrier \a freq and output to \a signal.
 	@return the number of audio samples
 */
 int sbitx_ftx_msg_audio(int32_t freq, float *signal)
@@ -345,9 +352,9 @@ int sbitx_ftx_msg_audio(int32_t freq, float *signal)
     // Second, encode the binary message as a sequence of FSK tones
     uint8_t tones[num_tones]; // Array of 79 tones (symbols)
     if (is_ft4)
-        ft4_encode(ft8_xota ? ftx_xota_msg.payload : ftx_tx_msg.payload, tones);
+        ft4_encode(ftx_tx_msg.payload, tones);
     else
-        ft8_encode(ft8_xota ? ftx_xota_msg.payload : ftx_tx_msg.payload, tones);
+        ft8_encode(ftx_tx_msg.payload, tones);
 
     // Third, convert the FSK tones into an audio signal
     int sample_rate = 12000;
@@ -362,7 +369,7 @@ int sbitx_ftx_msg_audio(int32_t freq, float *signal)
 
     // Synthesize waveform data (signal) and save it as WAV file
     LOG(LOG_DEBUG, "%05d %s '%s' synth_gfsk %d %f %f %f %d samples %d silence %d\n",
-        wallclock_day_ms % 60000, (is_ft4 ? "FT4" : "FT8"), ft8_xota ? ft8_xota_text : ft8_tx_text, num_tones,
+        wallclock_day_ms % 60000, (is_ft4 ? "FT4" : "FT8"), ft8_tx_text, num_tones,
         frequency, symbol_bt, symbol_period, sample_rate, num_samples, num_silence);
     synth_gfsk(tones, num_tones, frequency, symbol_bt, symbol_period, sample_rate, signal + num_silence);
     return num_total_samples;
@@ -1048,26 +1055,10 @@ int ft8_decode_file(const char *path){
 	return sbitx_ft8_decode(file_signal, num_samples);
 }
 
-static bool encode_xota() {
-    const char *xota = field_str("xOTA");
-    const char *xota_loc = field_str("LOCATION");
-    if (!xota[0] || !xota_loc[0] || !strcmp(xota, "NONE"))
-	return false;
-    else {
-	snprintf(ft8_xota_text, sizeof(ft8_xota_text), "%c%c %s", xota[0], xota[1], xota_loc);
-	LOG(LOG_DEBUG, "%05d encode_xota %s '%s'\n", wallclock_day_ms % 60000, xota, ft8_xota_text);
-	ftx_message_rc_t rc = ftx_message_encode_free(&ftx_xota_msg, ft8_xota_text);
-	if (rc != FTX_MESSAGE_RC_OK)
-	    LOG(LOG_INFO, "failed to encode xOTA message '%s': %d\n", ft8_xota_text, rc);
-    }
-    return true;
-}
-
 /*!
     Returns \c true if we have anything to send at this moment (is it the right time to start?)
     and updates ft8_pitch and is_cq.
-    If ft8_tx_text is a CQ, then it also updates ft8_tx1st, ft8_cq_alt, ft8_xota and ftx_xota_msg
-    according to current settings.
+    If ft8_tx_text is a CQ, then it also updates ft8_tx1st according to current settings.
 */
 static bool ftx_would_send() {
     ftx_update_clock();
@@ -1082,15 +1073,10 @@ static bool ftx_would_send() {
     // otherwise, leave ft8_tx1st as set earlier, e.g. in ft8_process()
     if (is_cq) {
 	ft8_tx1st = !strcmp(field_str("FT8_TX1ST"), "ON");
-	ft8_cq_alt = !strcmp(field_str("FT8_AUTO"), "CQ_ALT");
-	ft8_xota = !strcasecmp(field_str("FT8_AUTO"), "xOTA");
-    } else {
-	ft8_xota = false;
     }
 
     if (is_ft4) {
 	int two_slot_clock = wallclock_day_ms % 15000;
-	int four_slot_clock = wallclock_day_ms % 30000;
 	if (two_slot_clock < 7500) {
 	    if (ft8_tx1st)
 		start = true;
@@ -1098,23 +1084,8 @@ static bool ftx_would_send() {
 	    if (!ft8_tx1st)
 		start = true;
 	}
-	// if we have a timeslot based on even/odd setting, and we would otherwise send CQ,
-	// then decide what to send, or to skip it, in case of xOTA or CQ_alt settings respectively
-	if (start) {
-	    if (is_cq && four_slot_clock > 10000) {
-		// wait until next minute for CQ; either send ft8_xota_text instead, or stay silent
-		if (ft8_xota) { // set from the setting, above
-		    start = encode_xota(); // generate ftx_xota_msg
-		} else if (ft8_cq_alt) {
-		    start = false;
-		}
-	    } else {
-		ft8_xota = false; // regular message this time
-	    }
-	}
     } else {
 	int two_slot_clock = wallclock_day_ms % 30000;
-	int four_slot_clock = wallclock_day_ms % 60000;
 	if (two_slot_clock < 15000) {
 	    if (ft8_tx1st)
 		start = true;
@@ -1122,23 +1093,7 @@ static bool ftx_would_send() {
 	    if (!ft8_tx1st)
 		start = true;
 	}
-	// if we have a timeslot based on even/odd setting, and we would otherwise send CQ,
-	// then decide what to send, or to skip it, in case of xOTA or CQ_alt settings respectively
-	if (start) {
-	    if (is_cq && four_slot_clock > 20000) {
-		// wait until next minute for CQ; either send ft8_xota_text instead, or stay silent
-		if (ft8_xota) { // set from the setting, above
-		    start = encode_xota(); // generate ftx_xota_msg
-		} else if (ft8_cq_alt) {
-		    start = false;
-		}
-	    } else {
-		ft8_xota = false; // regular message this time
-	    }
-	}
     }
-    if (!start)
-	ft8_xota = false;
     return start;
 }
 
@@ -1151,9 +1106,9 @@ static void ftx_start_tx(int offset_ms){
 	ft8_tx_nsamples = sbitx_ftx_msg_audio(freq,  ft8_tx_buffer);
 
 	snprintf(hmst_wallclock_time_sprint(buf), sizeof(buf) - 8, "  TX     %4d ~ %s\n",
-		ft8_pitch, ft8_xota ? ft8_xota_text : ft8_tx_text);
+		ft8_pitch, ft8_tx_text);
 	write_console(STYLE_FT8_TX, buf);
-	message_add("FT8", ft8_pitch, 1, ft8_xota ? ft8_xota_text : ft8_tx_text);
+	message_add("FT8", ft8_pitch, 1, ft8_tx_text);
 
 	const int message_type = ftx_message_get_i3(&ftx_tx_msg);
 	if (message_type) // not type 0
@@ -1167,7 +1122,7 @@ static void ftx_start_tx(int offset_ms){
 	ft8_tx_buff_index = offset_ms * 96;
 	pthread_mutex_unlock(&ft8_tx_state_mutex);
 	LOG(LOG_DEBUG, "%05d ftx_start_tx: starting @index %d based on offset_ms %d '%s'\n",
-		wallclock_day_ms % 60000, ft8_tx_buff_index, offset_ms, ft8_xota ? ft8_xota_text : ft8_tx_text);
+		wallclock_day_ms % 60000, ft8_tx_buff_index, offset_ms, ft8_tx_text);
 }
 
 /*!
@@ -1189,10 +1144,10 @@ void ft8_tx(char *message, int freq){
 
 	strncpy(ft8_tx_text, message, sizeof(ft8_tx_text));
 	const int message_type = ftx_message_get_i3(&ftx_tx_msg);
-	ftx_would_send(); // update wallclock_day_ms, ft8_pitch, ft8_tx1st, ft8_cq_alt, ft8_xota, ft8_xota_text
+	ftx_would_send(); // update wallclock_day_ms, ft8_pitch, ft8_tx1st
 	if (!freq)
 		freq = ft8_pitch;
-	snprintf(hmst_wallclock_time_sprint(buf), sizeof(buf) - 8, "  TX     %4d ~ %s\n", freq, ft8_xota ? ft8_xota_text : ft8_tx_text);
+	snprintf(hmst_wallclock_time_sprint(buf), sizeof(buf) - 8, "  TX     %4d ~ %s\n", freq, ft8_tx_text);
 	write_console(STYLE_FT8_QUEUED, buf);
 	if (message_type) // not type 0
 		LOG(LOG_INFO, "<- %d %s", message_type, buf);
@@ -1213,8 +1168,8 @@ void ft8_tx(char *message, int freq){
 		ft8_repeat = field_int("FT8_REPEAT");
 	update_tx_active_field();
 
-	LOG(LOG_DEBUG, "%05d ft8_tx '%s' even? %d ft8_cq_alt %d ft8_xota %d '%s'\n",
-		wallclock_day_ms % 60000, ft8_tx_text, ft8_tx1st, ft8_cq_alt, ft8_xota, ft8_xota_text);
+	LOG(LOG_DEBUG, "%05d ft8_tx '%s' even? %d autocq %d\n",
+		wallclock_day_ms % 60000, ft8_tx_text, ft8_tx1st, ft8_autocq_running);
 }
 
 /*!
@@ -1236,8 +1191,8 @@ void ft8_tx_3f(const char* call_to, const char* call_de, const char* extra) {
 	const int message_type = ftx_message_get_i3(&ftx_tx_msg);
 	// nice idea to let the user edit the outgoing message right away... but we don't necessarily want to log it
 	// field_set("TEXT", ft8_tx_text);
-	ftx_would_send(); // update ft8_pitch, is_cq, ft8_tx1st, ft8_cq_alt, ft8_xota, ft8_xota_text
-	snprintf(hmst_wallclock_time_sprint(buf), sizeof(buf) - 8, "  TX     %4d ~ %s\n", ft8_pitch, ft8_xota ? ft8_xota_text : ft8_tx_text);
+	ftx_would_send(); // update ft8_pitch, is_cq, ft8_tx1st
+	snprintf(hmst_wallclock_time_sprint(buf), sizeof(buf) - 8, "  TX     %4d ~ %s\n", ft8_pitch, ft8_tx_text);
 	write_console(STYLE_FT8_QUEUED, buf);
 	LOG(LOG_INFO, "<- %d.%c '%s' '%s' '%s'",
 		message_type, message_type ? ' ' : '0' + ftx_message_get_n3(&ftx_tx_msg), call_to, call_de, extra);
@@ -1328,8 +1283,19 @@ void ft8_poll(int tx_is_on){
 		return;
 	}
 
-	if (!ft8_repeat)
+	if (!ft8_repeat && !ft8_autocq_resume_pending)
 		return;
+
+	// Auto CQ: the QSO that just finished (ft8_process()'s "73"/"RR73"
+	// branches) scheduled this instead of re-queuing CQ directly there,
+	// since a courtesy final "73" may still have needed to go out first
+	// -- queue the next CQ call now that we're actually idle again, then
+	// fall through to the normal slot-boundary logic below like any
+	// fresh CQ call.
+	if (!ft8_repeat && ft8_autocq_resume_pending){
+		ft8_autocq_resume_pending = false;
+		queue_cq_call();
+	}
 
 	//we poll for this only once every half-second
 	//we are here only if we are rx-ing and we have a pending transmission
@@ -1364,11 +1330,42 @@ void ft8_poll(int tx_is_on){
 		// starts from sample 0, never partway into the waveform.
 		if (slot_time < 200) {
 			LOG(LOG_DEBUG, "%05d ft8_poll: tx_is_on %d ft8_tx_nsamples %d start '%s'\n",
-				wallclock_day_ms % 60000, tx_is_on, ft8_tx_nsamples, ft8_xota ? ft8_xota_text : ft8_tx_text);
+				wallclock_day_ms % 60000, tx_is_on, ft8_tx_nsamples, ft8_tx_text);
 			ftx_start_tx(slot_time); // modulate audio at current frequency setting
 			if (ft8_tx_nsamples)
 				tx_on(TX_SOFT);
 			ft8_repeat--;
+			// ft8_repeat hitting 0 is the real "give up on this, move
+			// on" signal everywhere else in this file -- if Auto CQ is
+			// running and that ever happens without something noticing,
+			// the radio just sits idle forever with Auto CQ still
+			// technically armed but nothing left scheduled to resume it.
+			// Two different real "give up" moments reach this same
+			// point, so both need to be caught right here, not just the
+			// explicit QSO-completion branches in ft8_process():
+			//  - is_cq: the CQ call's own repeat count would hit 0 while
+			//    still waiting for an answer -- top it back up to
+			//    whatever FT8_REPEAT is *currently* set to (a fresh
+			//    field read, same as ft8_tx()/ft8_tx_3f() always do --
+			//    not a hardcoded number), so it stays in sync with a
+			//    slider change made even while Auto CQ is already
+			//    running.
+			//  - !is_cq: an in-QSO reply (queued via ft8_tx_3f() -- a
+			//    signal report, RR73, etc) ran out of retries with no
+			//    response, e.g. the other station went silent mid-
+			//    exchange without ever sending a final 73/RR73 -- that
+			//    specific dead-end isn't covered by ft8_process()'s
+			//    "73"/"RR73" completion branches at all, since those
+			//    only fire when the *other* station actually replies.
+			//    Schedule the same resume ft8_process() schedules on a
+			//    genuine QSO completion, so this dead-end doesn't
+			//    silently strand Auto CQ idle forever either.
+			if (ft8_autocq_running && ft8_repeat <= 0){
+				if (is_cq)
+					ft8_repeat = field_int("FT8_REPEAT");
+				else
+					ft8_autocq_resume_pending = true;
+			}
 			update_tx_active_field();
 		}
 	}
@@ -1552,6 +1549,13 @@ void ft8_on_start_qso(char *message){
 	}
 	field_set("NR", mygrid);
 	ft8_tx(reply_message, ft8_pitch);
+	// Answering a CQ (m1=="CQ" -- the other two branches above are a
+	// cold-call TO us or breaking into an existing QSO, neither of which
+	// is "trying to get a CQ caller's attention") gets its own retry
+	// count, separate from FT8_REPEAT -- see #ft8_repeat_answer's own
+	// comment in sbitx_daemon.c.
+	if (!strcmp(m1, "CQ"))
+		ft8_repeat = field_int("FT8_REPEATANS");
 }
 
 void ft8_on_signal_report(){
@@ -1683,6 +1687,11 @@ void ft8_process(char *message, ftx_operation operation){
 		ft8_abort();
 		enter_qso(); // W9JES
 		ft8_repeat = 0;
+		// Auto CQ: this QSO is done and we have nothing further to send
+		// -- schedule ft8_poll() to re-queue CQ on its next idle cycle
+		// (see ft8_autocq_resume_pending's own comment).
+		if (ft8_autocq_running)
+			ft8_autocq_resume_pending = true;
 		update_tx_active_field();
 		return;
 	}
@@ -1695,6 +1704,11 @@ void ft8_process(char *message, ftx_operation operation){
 		enter_qso();
 		call_wipe();
 		ft8_repeat = 1;
+		// Auto CQ: our courtesy "73" above still needs to actually go
+		// out first -- resume gets picked up once that single-shot send
+		// finishes and ft8_repeat naturally reaches 0 (see ft8_poll()).
+		if (ft8_autocq_running)
+			ft8_autocq_resume_pending = true;
 		update_tx_active_field();
 	}
 
@@ -1718,7 +1732,6 @@ void ft8_init(){
 	memset(ft8_rx_buffer, 0, sizeof(ft8_rx_buffer));
 	memset(ft8_tx_buffer, 0, sizeof(ft8_tx_buffer));
 	memset(ft8_tx_text, 0, sizeof(ft8_tx_text));
-	memset(ft8_xota_text, 0, sizeof(ft8_xota_text));
 }
 
 void ft8_abort(){
@@ -1728,5 +1741,33 @@ void ft8_abort(){
 }
 
 int ft8_is_repeating(){
-	return ft8_repeat > 0;
+	// || resume_pending keeps the TX Enabled indicator solid red through
+	// the brief gap between a QSO completing and ft8_poll()'s next idle
+	// cycle actually re-queuing CQ, instead of flickering grey for one
+	// poll interval.
+	return ft8_repeat > 0 || ft8_autocq_resume_pending;
+}
+
+// Fully terminates Auto CQ mode -- deliberately NOT part of ft8_abort()
+// above, since that gets called directly (bypassing this) from two
+// normal, non-terminating contexts: the tx_is_on save/restore dance in
+// ft8_poll() (every burst-end, immediately restored) and a QSO
+// completing in ft8_process() (where Auto CQ should keep going, not
+// stop). Only abort_tx() in sbitx_daemon.c -- the real "operator/system
+// wants everything pending cancelled" boundary (explicit abort click,
+// mode/band/frequency change) -- calls this.
+void ft8_autocq_stop(){
+	ft8_autocq_running = false;
+	ft8_autocq_resume_pending = false;
+}
+
+// Arms Auto CQ mode: clicking TX Enabled while idle with FT8_AUTO ==
+// "AUTOCQ" (see cmd_exec()'s AUTOCQSTART command in sbitx_daemon.c).
+// Queues the first CQ call via the same queue_cq_call() every other CQ
+// call in this mode uses (F1's do_macro() branch, the post-QSO resume
+// in ft8_poll()), so all three produce identical CQ text.
+void ft8_autocq_start(){
+	ft8_autocq_running = true;
+	ft8_autocq_resume_pending = false;
+	queue_cq_call();
 }

@@ -92,14 +92,9 @@
       	<input type="range" class="linear-slider"
         	id="slider_IF" max="100" min="0" step="1" value="13" />
 			</div>
-    </div><div class="sbitxv3-control">
-			<div class="sbitxv3-label">AUTO</div>
-			<select class="sbitxv3-selection sbitx-selection" id="FT8_AUTO">
-				<option value="ON">ON</option>
-				<option value="OFF">OFF</option>
-				<option value="CQ_ALT">CQ_ALT</option>
-				<option value="xOTA">xOTA</option>
-			</select>
+    </div><div class="sbitxv3-control ft8auto-control">
+			<label class="ft8auto-row"><input type="checkbox" id="AUTOCQ_CHECK" />Auto CQ</label>
+			<label class="ft8auto-row"><input type="checkbox" id="AUTOANS_CHECK" />A. Ans</label>
 		</div><div class="sbitxv3-control">
 			<div class="sbitxv3-label">SLOT</div>
 			<div class="sbitxv3-selection ft8-txslot-value" id="FT8_TX1ST" tabindex="0">EVEN</div>
@@ -116,6 +111,13 @@
      		<div class="linear-dropdown">
       		<input type="range" class="linear-slider"
         		id="slider_FT8_REPEAT" max="10" min="1" step="1" value="3" />
+			</div>
+		</div><div class="linear" id="linear_FT8_REPEATANS">
+    			<div class="linear-label">ANS RPT</div>
+    			<input type="number" id="FT8_REPEATANS" min="1" max="10" class="linear-value" />
+     		<div class="linear-dropdown">
+      		<input type="range" class="linear-slider"
+        		id="slider_FT8_REPEATANS" max="10" min="1" step="1" value="5" />
 			</div>
 		</div><div class="sbitxv3-control tx-enabled-indicator" id="tx_enabled_indicator">
 			<div class="sbitxv3-label">TX Enabled</div>
@@ -1683,6 +1685,38 @@ function ft8_txslot_clicked(){
 	websocket_send("FT8_TX1ST " + (e.value == "ON" ? "OFF" : "ON"));
 }
 
+// AUTO replaced its ON/OFF/CQ_ALT/xOTA <select> with two mutually-
+// exclusive checkboxes -- still just one underlying FT8_AUTO field
+// server-side (OFF/ON/AUTOCQ), these are a presentation over it. Only
+// one can ever be checked: checking either one always sends the whole
+// new state and un-checks the other locally, rather than tracking them
+// as independent booleans.
+function ft8_auto_checkbox_changed(event){
+	var autocq = el("AUTOCQ_CHECK");
+	var autoans = el("AUTOANS_CHECK");
+	if (event.currentTarget === autocq && autocq.checked)
+		autoans.checked = false;
+	else if (event.currentTarget === autoans && autoans.checked)
+		autocq.checked = false;
+	var value = autocq.checked ? "AUTOCQ" : (autoans.checked ? "ON" : "OFF");
+	websocket_send("FT8_AUTO " + value);
+	// Switching away from whichever mode is actually armed/running right
+	// now (checking the other box, or unchecking the active one) has to
+	// stop it too -- otherwise the checkboxes show one thing while the
+	// radio quietly keeps transmitting under the old mode. Deliberately
+	// keyed off autoans_running/autocq_client_running, not the generic
+	// cq_active -- an unrelated manual F1 CQ call drives that exact same
+	// flag and must NOT be aborted just because these checkboxes changed.
+	if (autoans_running && value != "ON"){
+		websocket_send("abort=1");
+		clear_cq_highlight();
+	}
+	else if (autocq_client_running && value != "AUTOCQ"){
+		websocket_send("abort=1");
+		clear_cq_highlight();
+	}
+}
+
 function sbitx_selection_changed(event){
 	var e = event.currentTarget;
 	if (e.id == "BAND"){
@@ -1690,10 +1724,19 @@ function sbitx_selection_changed(event){
 		// same as the old per-band buttons this replaced, each
 		// matching its own value exactly ("80M" etc) as the command
 		websocket_send(e.value);
+		// server-side band change already calls abort_tx() (see
+		// change_band() in sbitx_daemon.c) -- mirror that stop here so
+		// Auto CQ/Auto Answer's own client-side state doesn't keep
+		// thinking it's still running against the old band.
+		clear_cq_highlight();
 		return;
 	}
 	var id_reading = e.id + "_reading";
 	websocket_send(e.id + " " + e.value);
+	// same reasoning as BAND above -- a mode change also aborts
+	// server-side (modems.c's mode_set())
+	if (e.id == "MODE")
+		clear_cq_highlight();
 	draw_dial();
 }
 
@@ -1926,6 +1969,28 @@ function FT8_message_is_cq(text){
     if (tilde_pos < 0)
 	return false;
     return deco_strip(token_list[tilde_pos + 1]) == "CQ";
+}
+
+// Extracts the calling station's callsign from a real CQ message
+// (FT8_message_is_cq(text) already true), for Auto Answer's "don't
+// immediately re-target the same station" check -- same tilde-relative
+// field layout FT8_stylize_message_item() uses to tell "CQ CALL GRID"
+// (3 fields after the tilde) apart from "CQ DX/POTA/etc CALL GRID" (4
+// fields), just returning the callsign instead of building markup.
+function ft8_cq_message_callsign(text){
+    var token_list = text.match(/\S+/g);
+    if (!token_list)
+	return null;
+    var tilde_pos = -1;
+    for (var i = 3; i < token_list.length; ++i)
+	if (token_list[i] == '~') {
+	    tilde_pos = i;
+	    break;
+	}
+    if (tilde_pos < 0 || deco_strip(token_list[tilde_pos + 1]) != "CQ")
+	return null;
+    var call_idx = (token_list.length == tilde_pos + 4) ? tilde_pos + 2 : tilde_pos + 3;
+    return deco_strip(token_list[call_idx]);
 }
 
 function FT8_stylize_message_item(item, text, style) {
@@ -2174,23 +2239,31 @@ function FT8_list_append(list_id, text, style){
 	// entries together in one sweep, never separating them.) Self-heal
 	// by resynthesizing a divider from the new top entry's own
 	// timestamp whenever it isn't already led by one.
-	if (!reversed && list_id != "wsjtx-rx" && ol.firstChild
-			&& !ol.firstChild.classList.contains("sbitx-list-divider")){
-		var top_period = FT8_period_label(ol.firstChild.dataset.message);
+	// .firstElementChild, not .firstChild -- real-traffic report (found
+	// incidentally while testing an unrelated feature, confirmed via a
+	// live stack trace): ol.firstChild can be a whitespace text node
+	// (from the HTML source's own indentation/formatting between <ol>
+	// and its first <li>), which has no .classList/.dataset, throwing
+	// "Cannot read properties of undefined (reading 'contains')" and
+	// aborting response_handler() partway through, for every message
+	// after it in that same batch.
+	if (!reversed && list_id != "wsjtx-rx" && ol.firstElementChild
+			&& !ol.firstElementChild.classList.contains("sbitx-list-divider")){
+		var top_period = FT8_period_label(ol.firstElementChild.dataset.message);
 		if (top_period){
 			var divider = document.createElement("li");
 			divider.className = "sbitx-list-divider";
 			divider.textContent = FT8_format_period_label(top_period);
-			ol.insertBefore(divider, ol.firstChild);
+			ol.insertBefore(divider, ol.firstElementChild);
 			// the divider itself now also counts against max_entries
 			while (ol.children.length > max_entries)
-				ol.removeChild(ol.children[1] || ol.firstChild);
+				ol.removeChild(ol.children[1] || ol.firstElementChild);
 			// that re-trim can wipe out every entry this divider was
 			// meant to introduce -- if nothing real is left under it
 			// (end of list, or straight into the next divider), it's
 			// just a dangling empty header, drop it too
 			if (!ol.children[1] || ol.children[1].classList.contains("sbitx-list-divider"))
-				ol.removeChild(ol.firstChild);
+				ol.removeChild(ol.firstElementChild);
 		}
 	}
 	// Reversed lists always insert the newest entry at scrollTop 0, so
@@ -2270,6 +2343,8 @@ function FT8_lists_clear() {
 	document.querySelector('#wsjtx-cq ol').innerHTML ="";
 	document.querySelector('#wsjtx-rx ol').innerHTML ="";
 	FT8_list_last_period = {};
+	// old CQs are gone with the list -- stale on a band change anyway
+	autoans_last_cq_text = null;
 }
 
 function FT8_new_message(text, style){
@@ -2282,8 +2357,15 @@ function FT8_new_message(text, style){
 	// the operator's own CQ from a panel meant to show who's out there
 	// to answer, not echo what was just sent (still shows in Band
 	// Activity and RX Frequency, both unaffected by this check)
-	if (style == "RX" && FT8_message_is_cq(text))
+	if (style == "RX" && FT8_message_is_cq(text)){
 		FT8_list_append("wsjtx-cq", text, style);
+		autoans_last_cq_text = text;
+		// Auto Answer was waiting specifically for a CQ that isn't the
+		// one it just gave up on/finished with -- check whether this
+		// new one qualifies before actually acting on it.
+		if (autoans_awaiting_new_cq)
+			autoans_pick_and_answer();
+	}
 	var mycallsign = $("#MYCALLSIGN").val().toUpperCase();
 	if (words[4] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0)
 		FT8_list_append("wsjtx-rx", text, style);
@@ -2463,8 +2545,29 @@ function logger_abort(event){
 // immediately stop transmitting i can just click on the red box and
 // the transmission stops."
 function tx_enabled_indicator_clicked(){
-	if (!cq_active)
+	if (!cq_active){
+		// Auto CQ arm: clicking TX Enabled while idle with Auto CQ
+		// selected queues the first CQ call and starts the
+		// repeat-until-answered-or-aborted loop -- see
+		// ft8_autocq_start() in modem_ft8.c.
+		if (el("AUTOCQ_CHECK").checked){
+			autocq_client_running = true;
+			websocket_send("AUTOCQSTART");
+			return;
+		}
+		// Auto Answer arm: same deliberate manual-intervention
+		// requirement -- checking "A. Ans" alone does nothing, entirely
+		// client-side (see autoans_pick_and_answer()'s own comment).
+		if (el("AUTOANS_CHECK").checked){
+			autoans_running = true;
+			autoans_last_attempted_call = null;
+			autoans_pick_and_answer();
+			return;
+		}
+		// No-op otherwise (manual mode selected): TX Enabled has
+		// nothing to arm, same as before any of this existed.
 		return;
+	}
 	websocket_send("abort=1");
 	clear_cq_highlight();
 	// optimistic local update for instant feedback -- the server's own
@@ -2522,6 +2625,15 @@ function logger_enter_qso(){
 // (also bound to this button, and checks cq_active itself to decide
 // between "F1" and "abort=1") -- this handler only owns the highlight.
 var cq_active = false;
+// Tracks whether the *current* cq_active state was caused by
+// ft8_autocq_start() specifically (client-armed), as opposed to a
+// plain manual F1 click -- both drive the exact same cq_active/
+// TXACTIVE signal, so this is the only way to tell them apart
+// client-side. Needed so switching the AUTO checkboxes away from
+// AUTOCQ can abort a running Auto CQ session without also aborting an
+// unrelated manual F1 CQ call that happens to be active at the same
+// moment.
+var autocq_client_running = false;
 
 function logger_trigger_macro(event){
 	if (event.currentTarget && event.currentTarget.id === "F1"){
@@ -2541,6 +2653,69 @@ function clear_cq_highlight(){
 		cq_active = false;
 		el("F1").classList.remove("toggle-active");
 	}
+	autocq_client_running = false;
+	autoans_stop();
+}
+
+// Auto Answer (A. Ans checked, armed by clicking TX Enabled -- same
+// deliberate manual-intervention requirement as Auto CQ): hunts for CQ
+// callers to answer, entirely client-side. Deliberately doesn't need
+// any new server-side "who's calling CQ" tracking -- it just reuses
+// the exact same "FT8_check <text>" command a manual click on a
+// decoded CQ line already sends (pre_ft8_check() in sbitx_daemon.c
+// looks up the logbook and starts the QSO via FTX_START_QSO), aimed at
+// whatever the most recently decoded real CQ is.
+var autoans_running = false;
+var autoans_last_cq_text = null;        // most recent real CQ heard, any station
+var autoans_last_attempted_call = null; // who we just finished with (worked or gave up) -- skipped on the next pick
+var autoans_awaiting_new_cq = false;    // true when the only candidate we have is the one we're avoiding
+var autoans_start_timer = null;         // see autoans_pick_and_answer()'s own comment
+
+function autoans_stop(){
+	autoans_running = false;
+	autoans_awaiting_new_cq = false;
+	if (autoans_start_timer){
+		clearTimeout(autoans_start_timer);
+		autoans_start_timer = null;
+	}
+}
+
+// Picks a target and sends "FT8_check <text>" for it, same as a manual
+// click. Skips autoans_last_attempted_call if it's still the most
+// recent CQ (avoids immediately re-targeting the station we just
+// worked or gave up on -- user's own concern: "hopefully it is not the
+// same station"); if that's the *only* candidate right now, waits
+// (autoans_awaiting_new_cq) for a genuinely different one to show up
+// instead of sending anything.
+function autoans_pick_and_answer(){
+	if (!autoans_running)
+		return;
+	if (!autoans_last_cq_text){
+		autoans_awaiting_new_cq = true;
+		return;
+	}
+	var call = ft8_cq_message_callsign(autoans_last_cq_text);
+	if (call && call === autoans_last_attempted_call){
+		autoans_awaiting_new_cq = true;
+		return;
+	}
+	autoans_awaiting_new_cq = false;
+	autoans_last_attempted_call = call;
+	websocket_send("FT8_check " + autoans_last_cq_text);
+	// pre_ft8_check() silently does nothing if this callsign is already
+	// in the logbook and this isn't a repeated identical check (its
+	// dupe-confirmation path, meant for a deliberate second manual
+	// click) -- there's no server round-trip that tells us that
+	// happened, so if TXACTIVE hasn't gone active shortly after, treat
+	// this pick as a dead end and move on rather than waiting forever
+	// for a QSO that was never actually queued.
+	if (autoans_start_timer)
+		clearTimeout(autoans_start_timer);
+	autoans_start_timer = setTimeout(function(){
+		autoans_start_timer = null;
+		if (autoans_running && !cq_active)
+			autoans_pick_and_answer();
+	}, 3000);
 }
 
 function logger_bind_key(fn_key, macro_line){
@@ -3477,8 +3652,15 @@ function response_handler(response){
 			// cq_active = false) learns the radio is still calling
 			// CQ or auto-continuing a QSO, instead of showing F1 as
 			// idle while it keeps transmitting unseen.
+			var was_cq_active = cq_active;
 			cq_active = (args == "1");
 			el("F1").classList.toggle("toggle-active", cq_active);
+			// Auto Answer: the attempt/QSO that was in progress just
+			// ended (worked, or gave up) -- advance to a new target.
+			// Only on a genuine 1->0 transition, not every push (a
+			// reconnect could re-deliver "0" while already idle).
+			if (autoans_running && was_cq_active && !cq_active)
+				autoans_pick_and_answer();
 			// Also the sole authority for the TX Enabled indicator now
 			// (switch_to_tx()/switch_to_rx() no longer touch it) --
 			// this already covers both "literally transmitting right
@@ -3502,8 +3684,17 @@ function response_handler(response){
 			el("tune_toggle").innerHTML = tune_on ? "Stop Tune" : "Tune";
 			el("tune_toggle").classList.toggle("toggle-active", tune_on);
 			break;
+		case 'FT8_AUTO':
+			// no el("FT8_AUTO") anymore -- replaced by the two checkboxes,
+			// this is their sync point for the server's own bulk field
+			// push on login (always "OFF", see the startup force-reset
+			// in sbitx_daemon.c) and for a future value pushed to every
+			// connected client, not just the one that changed it.
+			el("AUTOCQ_CHECK").checked = (args == "AUTOCQ");
+			el("AUTOANS_CHECK").checked = (args == "ON");
+			break;
 		case 'MODE':
-			mode_set(args); 
+			mode_set(args);
 			//There is no break statement here, MODE continues to default case
 		default:
 			e = el(cmd);
@@ -3609,6 +3800,7 @@ $("#wipe").on("click", logger_wipe);
 $("#esc").on("click", logger_abort);
 $("#tx_enabled_indicator").on("click", tx_enabled_indicator_clicked);
 $("#FT8_TX1ST").on("click", ft8_txslot_clicked);
+$("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
 $("#qrz").on("click", logger_qrz);
 $("#logger-log").on("click", logger_enter_qso);
 //$("#macros").on("click", logger_toggle_macros);

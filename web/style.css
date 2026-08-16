@@ -1076,6 +1076,30 @@ body {
 	width: 72px;
 }
 
+/* AUTO's old ON/OFF/CQ_ALT/xOTA <select> replaced with two stacked,
+   mutually-exclusive checkboxes (Auto CQ / A. Ans) -- needs real height
+   for two rows plus their own label text, not just the base
+   .sbitxv3-control's fixed single-line 36px. */
+.ft8auto-control {
+	height: auto;
+	min-height: 36px;
+	width: 62px;
+	padding-top: 3px;
+}
+
+.ft8auto-row {
+	display: block;
+	font-size: 10px;
+	color: white;
+	white-space: nowrap;
+	cursor: pointer;
+}
+
+.ft8auto-row input[type="checkbox"] {
+	vertical-align: middle;
+	margin: 0 2px 0 0;
+}
+
 /* TX TONE box hidden, not removed -- user verified the waterfall
    click-to-tune sets TX_PITCH correctly, making the manual entry box
    redundant, but #TX_PITCH/#slider_TX_PITCH are still read directly by

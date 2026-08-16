@@ -522,11 +522,6 @@ struct field main_controls[] = {
 		"", 1,3,1,0},
 	{"#passkey", NULL, 1000, -1000, 400, 149, "PASSKEY", 70, "123", FIELD_TEXT, 
 		"", 0,32,1,0},
-	{"#xota_loc", NULL, 1000, -1000, 400, 149, "LOCATION", 70, "PEAK/PARK/ISLE", FIELD_TEXT,
-		"", 0, 32, 1, 0},
-	{"#xota", NULL, 1000, -1000, 400, 149, "xOTA", 40, "", FIELD_SELECTION,
-		"NONE/IOTA/SOTA/POTA", 0, 0, 0, COMMON_CONTROL},
-
 	// Generic-rig backend (radio=generic in hw_settings.ini): which rig
 	// and audio devices to use, settable from the web UI instead of
 	// hand-editing config files, so different operators/radios can
@@ -638,13 +633,29 @@ struct field main_controls[] = {
 	// TODO rename FT8 to FTx; use cmd instead of label to identify them (labels should be able to have spaces)
 	{"#ft8_check", NULL, 1000, -1000, 50, 50, "CHECK", 50, "check", FIELD_TEXT, 
 		"nobody", 0,128,0,0},
-	{"#ft8_auto", NULL, 1000, -1000, 50, 50, "FT8_AUTO", 40, "ON", FIELD_SELECTION,
-		"OFF/ON/CQ_ALT/xOTA", 0, 0, 0, FT8_CONTROL},
+	// OFF = manual (default -- see the startup force-reset below), ON =
+	// Auto Answer (auto-continue an in-progress QSO exchange, unchanged
+	// from before), AUTOCQ = Auto CQ (see ft8_autocq_start()). CQ_ALT/
+	// xOTA (alternated CQ repeats with silence/a POTA-SOTA-formatted
+	// message) dropped -- user's own call: simpler to always just repeat
+	// whatever CQKIND already selects, every eligible slot.
+	{"#ft8_auto", NULL, 1000, -1000, 50, 50, "FT8_AUTO", 40, "OFF", FIELD_SELECTION,
+		"OFF/ON/AUTOCQ", 0, 0, 0, FT8_CONTROL},
 	// TODO change to "FTx CQ TX" FIELD_SELECTION "EVEN/ODD"; but this affects stored settings, web UI, and command processing
 	// a label is not just a label, actually (but it should be)
 	{"#ft8_tx1st", NULL, 1000, -1000, 50, 50, "FT8_TX1ST", 40, "ON", FIELD_TOGGLE, 
 		"ON/OFF", 0,0,0, FT8_CONTROL},
   { "#ft8_repeat", NULL, 1000, -1000, 50, 50, "FT8_REPEAT", 40, "5", FIELD_NUMBER,
+    "", 1, 10, 1, FT8_CONTROL},
+	// Separate from FT8_REPEAT above -- that governs retries for a
+	// message sent *during* an already-established QSO (they've replied
+	// at least once); this instead governs retries while just trying to
+	// get a CQ caller's attention in the first place (ft8_on_start_qso()'s
+	// "m1==CQ" branch specifically). User's own reasoning: these are two
+	// different real-world give-up decisions (abandon this one QSO vs.
+	// stop trying this CQ caller and go answer someone else), so sharing
+	// one count between them was wrong.
+  { "#ft8_repeat_answer", NULL, 1000, -1000, 50, 50, "FT8_REPEATANS", 40, "5", FIELD_NUMBER,
     "", 1, 10, 1, FT8_CONTROL},
 	// Replaces the old free-text TEXT box for CQ variants (user used to
 	// type e.g. "CQ DX AI5II EM72" by hand) -- picked here instead,
@@ -1755,6 +1766,13 @@ void abort_tx(){
 	set_field("#text_in", "");
 	modem_abort();
 	tx_off();
+	// The real "operator/system wants everything pending cancelled"
+	// boundary (explicit abort click, mode/band/frequency change) --
+	// terminates Auto CQ completely, unlike modem_abort()'s own
+	// ft8_abort() (called from here too, but also from two normal,
+	// non-terminating contexts that must NOT stop Auto CQ -- see
+	// ft8_autocq_stop()'s comment in modem_ft8.c).
+	ft8_autocq_stop();
 }
 
 int do_spectrum(struct field *f, int event, int a, int b, int c){
@@ -2188,6 +2206,33 @@ void qrz(const char *callsign){
 	open_url(url);
 }
 
+// Composes and queues a CQ transmission using the F1 macro's own
+// template ("CQ <mycall> <mygrid>") plus the CQKIND splice (POTA/SOTA/
+// etc, spliced in right after "CQ " -- same spot a user used to type
+// it by hand into the now-removed free-text TEXT box, e.g. "CQ POTA
+// AI5II EM72"). Factored out of do_macro()'s F1 branch so Auto CQ's
+// arm/resume paths (ft8_autocq_start(), the post-QSO resume in
+// ft8_poll()) send exactly the same message a manual F1 click would.
+void queue_cq_call(){
+	char buff[256];
+	buff[0] = 0;
+	macro_exec(1, buff); // F1's macro slot
+
+	if (!strncmp(buff, "CQ ", 3)) {
+		const char *kind = field_str("CQKIND");
+		if (strcmp(kind, "CQ") != 0) {
+			char tagged[256];
+			snprintf(tagged, sizeof(tagged), "CQ %s %s", kind, buff + 3);
+			strcpy(buff, tagged);
+		}
+	}
+
+	if (strlen(buff)){
+		ft8_tx(buff, atoi(get_field("#tx_pitch")->value));
+		set_field("#text_in", "");
+	}
+}
+
 int do_macro(struct field *f, int event, int a, int b, int c){
 	char buff[256], *mode;
 	char contact_callsign[100];
@@ -2197,22 +2242,13 @@ int do_macro(struct field *f, int event, int a, int b, int c){
 	if(event == FIELD_UPDATE){
 		int fn_key = atoi(f->cmd+3); // skip past the '#mf' and read the function key number
 
+		if (fn_key == 1){
+			queue_cq_call();
+			return 1;
+		}
+
 		buff[0] = 0;
 	 	macro_exec(fn_key, buff);
-
-		// F1/CQ only -- FT8.mc's template always composes "CQ <mycall>
-		// <mygrid>", so splice a POTA/SOTA/etc marker in right after
-		// "CQ " when picked, same spot a user used to type it by hand
-		// into the (now removed) free-text TEXT box, e.g. "CQ POTA
-		// AI5II EM72".
-		if (fn_key == 1 && !strncmp(buff, "CQ ", 3)) {
-			const char *kind = field_str("CQKIND");
-			if (strcmp(kind, "CQ") != 0) {
-				char tagged[256];
-				snprintf(tagged, sizeof(tagged), "CQ %s %s", kind, buff + 3);
-				strcpy(buff, tagged);
-			}
-		}
 
 		mode = get_field("r1:mode")->value;
 
@@ -3301,6 +3337,12 @@ void cmd_exec(char *cmd){
 	}
 	else if (!strcmp(exec, "abort"))
 		abort_tx();
+	// Auto CQ arm: clicking TX Enabled while idle and FT8_AUTO==AUTOCQ.
+	// Aborting/terminating it completely reuses the existing "abort"
+	// command above (abort_tx() calls ft8_autocq_stop() there) -- this
+	// only ever needs to handle starting it.
+	else if (!strcmp(exec, "AUTOCQSTART"))
+		ft8_autocq_start();
 	else if (!strcmp(exec, "txcal")){
 		char response[10];
 		sdr_request("txcal=", response);
@@ -3588,6 +3630,13 @@ int main( int argc, char* argv[] ) {
 		"Loading default.ini instead\n");
   	ini_parse(STATEDIR "/default_settings.ini", user_settings_handler, NULL);
   }
+
+	// Auto CQ/Auto Answer must never silently resume autonomous
+	// transmitting after a restart, whatever user_settings.ini happens to
+	// have persisted from the last session -- same safety reasoning as
+	// RIGCONNECT not auto-reconnecting on startup: the operator has to
+	// explicitly re-arm it every time.
+	set_field("#ft8_auto", "OFF");
 
 	// apply the persisted region's 80M/40M band edges now that settings
 	// (including #region itself) have actually loaded
