@@ -117,9 +117,6 @@
       		<input type="range" class="linear-slider"
         		id="slider_FT8_REPEAT" max="10" min="1" step="1" value="3" />
 			</div>
-		</div><div class="sbitxv3-control">
-			<div class="sbitxv3-label">GAIN</div>
-			<input type="checkbox" id="wf_gain_controls_toggle" checked />
 		</div><div class="sbitxv3-control tx-enabled-indicator" id="tx_enabled_indicator">
 			<div class="sbitxv3-label">TX Enabled</div>
 		</div><button class="sbitxv3-btn macro-btn" id="F1">F1</button>
@@ -427,16 +424,6 @@
 					<span id="REF_reading"/></span>
 				</div>
 			</div><!-- end of tx_meters -->
-			<div id="wf_gain_controls">
-				<div class="wfgain-item"><span class="wfgain-label">SPEC GAIN</span
-					><input type="range" class="wfgain-slider" id="spec_gain_slider" min="0" max="200" step="1" value="100" /></div>
-				<div class="wfgain-item"><span class="wfgain-label">SPEC ZERO</span
-					><input type="range" class="wfgain-slider" id="spec_zero_slider" min="-50" max="50" step="1" value="0" /></div>
-				<div class="wfgain-item"><span class="wfgain-label">WF GAIN</span
-					><input type="range" class="wfgain-slider" id="wf_gain_slider" min="0" max="200" step="1" value="100" /></div>
-				<div class="wfgain-item"><span class="wfgain-label">WF ZERO</span
-					><input type="range" class="wfgain-slider" id="wf_zero_slider" min="-50" max="50" step="1" value="0" /></div>
-			</div><!-- end of wf_gain_controls -->
 			<canvas id="waterfall_scale" width="600" height="16"></canvas>
 			<div id="waterfall_wrap" width="100%">
 				<canvas id="waterfall" width="600" height="80"></canvas>
@@ -609,18 +596,39 @@ var logbook_bottom_row_id = -1;
 var logbook_top_row_id= 0;
 var sound_mute = false;
 
-// Waterfall gain/zero controls (display-only, see waterfall_update()).
-// Persisted in localStorage since these are a personal visual-taste
-// calibration, not a radio setting -- no reason to lose it on reload
-// or send it to the server.
-function wf_gain_load(key, fallback){
-	var v = parseFloat(localStorage.getItem(key));
-	return isNaN(v) ? fallback : v;
+// Auto noise-floor tracking for the waterfall display (replaces the old
+// manual GAIN/ZERO sliders -- user's own reasoning: the display should
+// just show the receiver's real noise floor, not noise floor plus
+// whatever the current absolute RF noise level happens to be). Estimated
+// fresh from every new real row's own bin values (a low percentile --
+// low enough to sit under real signal tones, high enough to ignore a
+// handful of anomalously-quiet bins) and smoothed with a slow EMA so
+// genuine drift (band conditions changing through the day) tracks
+// through without a single noisy row jerking the display around. The
+// very first row snaps straight to its own estimate instead of easing
+// in from an arbitrary starting value -- there's no guarantee a fresh
+// page load lines up with the start of an FT8 cycle, so whatever the
+// first real row shows has to be treated as correct immediately.
+var auto_noise_floor = null;
+const AUTO_FLOOR_PERCENTILE = 0.10;
+const AUTO_FLOOR_SMOOTHING = 0.05;
+const AUTO_DISPLAY_SPAN = 50; // raw v-units above the floor mapped to full-scale color
+
+function update_noise_floor(update){
+	var n = update.length - 3;
+	if (n <= 0)
+		return;
+	var vals = new Array(n);
+	for (var k = 0; k < n; k++)
+		vals[k] = (update.charCodeAt(k + 3) - 32) * 2;
+	vals.sort(function(a, b){ return a - b; });
+	var raw_floor = vals[Math.floor(n * AUTO_FLOOR_PERCENTILE)];
+
+	if (auto_noise_floor === null)
+		auto_noise_floor = raw_floor;
+	else
+		auto_noise_floor += (raw_floor - auto_noise_floor) * AUTO_FLOOR_SMOOTHING;
 }
-var spec_gain = wf_gain_load("spec_gain", 100);
-var spec_zero = wf_gain_load("spec_zero", 0);
-var wf_gain = wf_gain_load("wf_gain", 100);
-var wf_zero = wf_gain_load("wf_zero", 0);
 
 // FT8/FT4 waterfall real-time scroll driver -- see waterfall_scroll_tick()
 // and the response_handler() TX/RX branch for why this exists instead of
@@ -1130,17 +1138,12 @@ function waterfall_build_row(update, ctx, width){
 		var v1 = (update.charCodeAt(bin1+3) - 32) * 2;
 		var v = v0 + (v1 - v0) * frac;
 
-		// Two-stage gain/zero remap, display-only -- mirrors WSJT-X's
-		// Wide Graph controls (separate Gain+Zero pairs for the spectrum
-		// trace and the waterfall). zbitxd has no spectrum trace anymore
-		// (removed earlier), but both stages still feed the one waterfall
-		// canvas here rather than collapsing to a single control, so the
-		// knobs behave the way WSJT-X users already expect. Neither stage
-		// touches the audio RX RF sees -- this only remaps how the same
-		// magnitude value picks a color. At defaults (gain=100 i.e. x1,
-		// zero=0) this is the identity transform.
-		v = (v - spec_zero) * (spec_gain / 100);
-		v = (v - wf_zero) * (wf_gain / 100);
+		// Auto noise-floor remap, display-only -- see update_noise_floor()
+		// above. Doesn't touch the audio RX RF sees, only which color a
+		// given magnitude picks. Before the first real row arrives,
+		// auto_noise_floor is still null -- treat that as "no floor
+		// subtracted yet" rather than crashing.
+		v = (v - (auto_noise_floor === null ? 0 : auto_noise_floor)) * (100 / AUTO_DISPLAY_SPAN);
 
 		if (v > 100)
 			v = 100;
@@ -3373,8 +3376,10 @@ function response_handler(response){
 		// display freezes on the last real receiver data during TX,
 		// same as a real radio muting its receiver while transmitting,
 		// rather than drawing whatever a "TX ..." row actually contains.
-		if (response.substring(0,2) == "RX")
+		if (response.substring(0,2) == "RX"){
 			last_wf_row = response;
+			update_noise_floor(response);
+		}
 
 		var mode = el("MODE").value;
 		if (mode !== "FT8" && mode !== "FT4" && in_tx == false)
@@ -3571,7 +3576,6 @@ $(".sbitx-panel-title").on("click", close_panel);
 $(".sbitx-text-field").on("change keydown paste input",sbitx_text_changed);
 $(".linear-slider").on("input", on_linear_moved);
 $(".linear").on("click",  linear_toggle);
-wf_gain_controls_init();
 $(".macro-btn").on("click", logger_trigger_macro);
 el("waterfall_overlay").addEventListener("mousedown", wf_overlay_click);
 el("waterfall_overlay").addEventListener("touchstart", wf_overlay_click);
@@ -3763,51 +3767,6 @@ function on_linear_moved(event){
 //we just duplicate it on the slider
 function update_linear(event){
 	event.parentNode.querySelector(".linear-slider").value = event.value;
-}
-
-// Waterfall/spectrum gain+zero sliders -- purely client-side display
-// controls (see waterfall_update()), not sent to the server via
-// websocket_send like the .linear-slider controls above. Persisted to
-// localStorage on every change so a calibrated setting survives reload.
-function wf_gain_controls_init(){
-	el("spec_gain_slider").value = spec_gain;
-	el("spec_zero_slider").value = spec_zero;
-	el("wf_gain_slider").value = wf_gain;
-	el("wf_zero_slider").value = wf_zero;
-
-	el("spec_gain_slider").addEventListener("input", function(e){
-		spec_gain = parseFloat(e.target.value);
-		localStorage.setItem("spec_gain", spec_gain);
-	});
-	el("spec_zero_slider").addEventListener("input", function(e){
-		spec_zero = parseFloat(e.target.value);
-		localStorage.setItem("spec_zero", spec_zero);
-	});
-	el("wf_gain_slider").addEventListener("input", function(e){
-		wf_gain = parseFloat(e.target.value);
-		localStorage.setItem("wf_gain", wf_gain);
-	});
-	el("wf_zero_slider").addEventListener("input", function(e){
-		wf_zero = parseFloat(e.target.value);
-		localStorage.setItem("wf_zero", wf_zero);
-	});
-
-	// hide/show the whole gain-controls row -- user's own reasoning:
-	// once calibrated these are rarely touched, only occasionally again
-	// if the waterfall starts looking odd, so they don't need to stay
-	// visible taking up space all the time. The checkbox itself lives
-	// outside #wf_gain_controls so it's still reachable to show them
-	// again after hiding. Persisted separately from the slider values
-	// themselves (those should never reset; whether the row is shown
-	// is purely a display preference).
-	var controls_visible = localStorage.getItem("wf_gain_controls_visible");
-	controls_visible = (controls_visible === null) ? true : (controls_visible === "true");
-	el("wf_gain_controls_toggle").checked = controls_visible;
-	el("wf_gain_controls").style.display = controls_visible ? "flex" : "none";
-	el("wf_gain_controls_toggle").addEventListener("change", function(e){
-		el("wf_gain_controls").style.display = e.target.checked ? "flex" : "none";
-		localStorage.setItem("wf_gain_controls_visible", e.target.checked);
-	});
 }
 
 /* close any open linear controls if clicked outside*/
