@@ -1061,14 +1061,19 @@ body {
 	background-color: #17435c;
 }
 
-/* CQKIND (F1's CQ-variant picker) -- now the only visible label for
-   this control (its own #TEXT-label div was dropped as redundant,
-   since the select's own default option already reads "CQ"), so it
-   needs to be wide enough on its own to show the longest option
-   (POTA/IOTA/SOTA, 4 chars) without clipping -- the base
-   .sbitxv3-selection width (48px) was sized for 2-3 char values. */
+/* CQKIND (F1's CQ-variant picker) needs to be wide enough on its own to
+   show the longest option (POTA/IOTA/SOTA, 4 chars) without clipping --
+   the base .sbitxv3-selection width (48px) was sized for 2-3 char
+   values. Widening just the <select> wasn't enough on its own: the
+   parent .sbitxv3-control box is a fixed 49px with a visible border,
+   so a wider select still overflowed it and the dropdown arrow ended
+   up rendered outside the bordered box -- widen the container to match. */
+.cqkind-control {
+	width: 80px;
+}
+
 #CQKIND {
-	width: 68px;
+	width: 72px;
 }
 
 /* TX TONE box hidden, not removed -- user verified the waterfall
