@@ -2331,6 +2331,9 @@ function FT8_message_chosen(event){
 		// empty fields, so it has to come off before this goes back to
 		// the server as a real protocol message.
 		websocket_send("FT8_check "+deco_strip(message_text));
+		// Manually starting a QSO -- user's own ask: hide Band Activity
+		// the same as arming Auto CQ/Auto Answer does.
+		set_band_activity_hidden(true);
 	}
 
 	/*
@@ -2561,6 +2564,7 @@ function tx_enabled_indicator_clicked(){
 		if (el("AUTOCQ_CHECK").checked){
 			autocq_client_running = true;
 			websocket_send("AUTOCQSTART");
+			set_band_activity_hidden(true);
 			return;
 		}
 		// Auto Answer arm: same deliberate manual-intervention
@@ -2570,6 +2574,7 @@ function tx_enabled_indicator_clicked(){
 			autoans_running = true;
 			autoans_last_attempted_call = null;
 			autoans_pick_and_answer();
+			set_band_activity_hidden(true);
 			return;
 		}
 		// No-op otherwise (manual mode selected): TX Enabled has
@@ -2581,6 +2586,10 @@ function tx_enabled_indicator_clicked(){
 	// optimistic local update for instant feedback -- the server's own
 	// TXACTIVE field push will confirm/correct this shortly after
 	el("tx_enabled_indicator").classList.remove("tx-active");
+	// Cancelled via TX Enabled -- user's own ask: unhide Band Activity
+	// again once whatever was happening (Auto CQ, Auto Answer, or a
+	// manual QSO) gets cancelled this way.
+	set_band_activity_hidden(false);
 }
 
 function show_in_qrz_window(callsign) {
@@ -2825,6 +2834,15 @@ web api:
 	any +ve number loads 50 qsos with earlier
 */
 
+// Delays logbook_update()'s "is this a genuinely new QSO" check (see
+// its own comment) until well after the bulk historical load on
+// login/reconnect -- otherwise every row of that initial 50-QSO fetch
+// would look "new" too (each has a higher id than the last one seen
+// so far within that same batch), unhiding Band Activity right after
+// every login for no real reason.
+var logbook_watch_armed = false;
+setTimeout(function(){ logbook_watch_armed = true; }, 5000);
+
 function logbook_update(args){
 	var token = args.split("|");
 	var insert_index = 0; //at the top
@@ -2832,6 +2850,14 @@ function logbook_update(args){
 		return;
 
 	var qso_id = token[0];
+
+	// A QSO just got logged -- user's own ask: unhide Band Activity
+	// again. logbook_watch_armed guards against the initial bulk load;
+	// comparing against the *old* logbook_top_row_id (before the update
+	// just below) is what actually distinguishes "new" from "already
+	// seen" here.
+	if (logbook_watch_armed && Number(qso_id) > logbook_top_row_id)
+		set_band_activity_hidden(false);
 
 	if (logbook_top_row_id < Number(qso_id))
 		logbook_top_row_id = Number(qso_id);
@@ -3687,6 +3713,20 @@ function response_handler(response){
 			// reconnect could re-deliver "0" while already idle).
 			if (autoans_running && was_cq_active && !cq_active)
 				autoans_pick_and_answer();
+			// Auto CQ gave up on its own (unanswered after FT8_REPEAT
+			// tries, no TX Enabled click involved) -- user's own ask:
+			// unhide Band Activity for this case too, not just an
+			// explicit abort. Safe to key off any genuine 1->0 here:
+			// ft8_autocq_resume_pending keeps TXACTIVE solidly "1"
+			// through every *resumed* cycle (a QSO completing, or
+			// abandoning a stalled one, both requeue a fresh CQ before
+			// TXACTIVE ever reaches the client as "0") -- so a real "0"
+			// push while Auto CQ is still armed can only mean it just
+			// disarmed itself, never a still-ongoing round.
+			if (autocq_client_running && was_cq_active && !cq_active){
+				autocq_client_running = false;
+				set_band_activity_hidden(false);
+			}
 			// Also the sole authority for the TX Enabled indicator now
 			// (switch_to_tx()/switch_to_rx() no longer touch it) --
 			// this already covers both "literally transmitting right
@@ -3843,20 +3883,21 @@ $("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
 // Band Activity is purely informational -- CQ Panel and RX Frequency
 // are the ones that actually matter (user's own call) -- lets it be
 // hidden to reclaim screen space, persisted across reloads the same
-// way panel drag geometry already is (localStorage).
-(function(){
-	var checkbox = el("HIDE_BAND_ACTIVITY_CHECK");
-	function apply(){
-		var hide = localStorage.getItem("hide_band_activity") === "1";
-		el("wsjtx-activity").style.display = hide ? "none" : "";
-		checkbox.checked = hide;
-	}
-	checkbox.addEventListener("change", function(){
-		localStorage.setItem("hide_band_activity", checkbox.checked ? "1" : "0");
-		apply();
-	});
-	apply();
-})();
+// way panel drag geometry already is (localStorage). Also driven
+// automatically (not just the checkbox): hidden the instant Auto CQ/
+// Auto Answer arms or a QSO is manually started (screen space matters
+// most exactly when something is actually happening), shown again once
+// that QSO is logged or cancelled via the TX Enabled indicator -- see
+// set_band_activity_hidden()'s call sites.
+function set_band_activity_hidden(hide){
+	localStorage.setItem("hide_band_activity", hide ? "1" : "0");
+	el("wsjtx-activity").style.display = hide ? "none" : "";
+	el("HIDE_BAND_ACTIVITY_CHECK").checked = hide;
+}
+$("#HIDE_BAND_ACTIVITY_CHECK").on("change", function(){
+	set_band_activity_hidden(this.checked);
+});
+set_band_activity_hidden(localStorage.getItem("hide_band_activity") === "1");
 $("#qrz").on("click", logger_qrz);
 $("#logger-log").on("click", logger_enter_qso);
 //$("#macros").on("click", logger_toggle_macros);
