@@ -691,7 +691,15 @@ select, select option, input {
 	flex-direction: column;
 	font-family: courier, monspace-ui, monospace;
 	font-size: 10pt;
-	height: 386px;
+	/* Was 386px -- on a quiet band each panel is mostly empty black
+	   space below its actual decoded lines, which reads as if whatever
+	   comes right after it (e.g. the CMD/SET/Reboot/Shutdown toolbar
+	   row) is still part of this panel instead of clearly being the
+	   next thing. Shrunk so the empty gap is far less pronounced;
+	   .sbitx-list-box below still scrolls internally for busier bands.
+	   200px turned out to scroll too readily on a moderately busy band
+	   -- 280px is the middle ground. */
+	height: 280px;
 	width: 320px;
 	border: none;
 }
@@ -701,7 +709,8 @@ select, select option, input {
 }
 
 .panel-toggle-label {
-	float: right;
+	display: inline-block;
+	margin-left: 8px;
 	font-size: 9pt;
 	font-weight: normal;
 	color: #aaa;
@@ -711,11 +720,52 @@ select, select option, input {
 	vertical-align: middle;
 }
 
+/* Reboot/Shutdown/CMD/SET + Hide Band Activity, relocated here (user's
+   own ask) -- a dedicated full-width row after all three list panels
+   (Band Activity/CQ Panel/RX Frequency), not between the first two:
+   that placement forced a line break right there too, so CQ Panel/RX
+   Frequency dropped onto their own row below Band Activity instead of
+   staying side by side with it -- confirmed live. Plain block (not
+   inline-flex like .sbitx-list-container), so it always breaks onto
+   its own line regardless of viewport width -- sharing the CQ Panel
+   title row instead kept wrapping onto a second line by itself on
+   narrow (phone) screens, since there wasn't room left after "CQ
+   Panel" + all four buttons on one line. */
+.panel-toolbar-row {
+	padding: 3px 0;
+	/* Without a visible boundary here this row can read as if it's
+	   still part of whatever panel happens to be above it (especially
+	   when that panel's fixed-height box is mostly empty black space
+	   on a quiet band) instead of clearly being the next thing.
+	   Confirmed live via screenshot. */
+	border-top: solid 1px #444;
+	background-color: #111;
+}
+.panel-toolbar-btn {
+	font-size: 8pt;
+	padding: 1px 5px;
+	height: auto;
+	background-color: #0c2333;
+	border: solid 1px black;
+	color: white;
+	cursor: pointer;
+}
+.panel-toolbar-btn.power-btn {
+	background-color: #bf0f0f;
+}
+
 /* styling the FT8 list */
 .ft8-label {
 	font-size: 9pt;
 	display: inline-block;
-	width: 22ch;
+	/* Was a fixed 22ch column -- fine for Band Activity/CQ Panel's
+	   typical RX-decode labels (already server-padded to ~20-21 chars,
+	   so the box is nearly full), but RX Frequency mostly shows short
+	   TX-echo labels like "185100 TX 350" (~14 chars), leaving a large
+	   dead-space gap inside that same fixed box before the message
+	   starts. Auto width + an explicit single space (see
+	   FT8_list_append()) keeps the gap consistent regardless of label
+	   length instead. */
 }
 
 .ft8-message {
@@ -1262,7 +1312,11 @@ body {
 /* https://coderwall.com/p/5m0srg/beware-of-inline-block */
 #main {
 	margin-left: 200px;
-	margin-top:90px;
+	/* Was 90px -- sized to clear #maincontrols back when it needed two
+	   rows. It's down to one 43px row now (F1/STEP hidden, Reboot/
+	   Shutdown/CMD/SET moved out into the FT8 panel toolbar), so that
+	   left ~47px of dead space above the waterfall. */
+	margin-top: 46px;
 	vertical-align: top;
 	z-index: -1; /* this is to allow the restore button to show through ?? */
 }

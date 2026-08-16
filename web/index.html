@@ -139,7 +139,7 @@
 			</select>
 		</div></div>
 	<br/>
-		<div class="sbitxv3-control">
+		<div class="sbitxv3-control" style="display:none">
 			<div class="sbitxv3-label">STEP</div>
 			<select id="STEP" class="sbitx-selection sbitxv3-selection">
 				<option value="10H">10H</option>
@@ -161,31 +161,13 @@
 				<option value="OFF">OFF</option>
 				<option value="ON">ON</option>
 			</select>
-		</div><div class="sbitxv3-control power-control">
-			<div class="sbitxv3-label">Reboot</div>
-			<!-- was two separate Reboot/Shutdown buttons -- one-shot
-			     action select instead, space-saving. Not .sbitx-selection
-			     (the generic handler sends a raw, unconfirmed
-			     websocket_send() on every change) -- has its own
-			     confirm()-gated handler, see do_power_action(). Red/
-			     white styling (.power-control) matches this app's
-			     existing convention for a control worth flagging as
-			     consequential (e.g. #linear_DRIVE/TX PWR). -->
-			<select class="sbitxv3-selection" id="power_action">
-				<option value="" selected>--</option>
-				<option value="reboot">Reboot</option>
-				<option value="shutdown">Shutdown</option>
-			</select>
-		</div>
-		<div class="Sbitxv3-control">
+		</div><div class="Sbitxv3-control">
 			<div class="sbitxv3-label">MACRO</div>
 			<select class="sbitxv3-selection sbitx-selection" id="MACRO">
 			</select>
 		</div>
 		<button class="sbitxv3-btn" id="esc">ESC</button>
-		<button class="sbitxv3-btn" id="console-open">CMD</button
-		><button class="sbitxv3-btn" id="connect-open">RADIO</button
-		><button class="sbitxv3-btn" id="settings-open">SET</button>
+		<button class="sbitxv3-btn" id="connect-open">RADIO</button>
 	</div><!-- end of maincontrols -->
 		<span id="restore-btn" onclick="toggle_fullscreen();"> &#X21F3; </span>
 	<div id="sidebar">
@@ -434,13 +416,16 @@
 <!-- end of panadapter -->
 <!- wsjtx specific controls -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
+			<div class="panel-toolbar-row">
+				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label>
+			</div>
 			<div id="wsjtx-activity" class="sbitx-list-container" >
 				<div class="sbitx-list-title">Band Activity</div>
 				<ol size="10" class="sbitx-list-box">
 				</ol>
 			</div>
 			<div id="wsjtx-cq" class="sbitx-list-container" >
-				<div class="sbitx-list-title">CQ Panel <label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label></div>
+				<div class="sbitx-list-title">CQ Panel</div>
 				<ol size="10" class="sbitx-list-box">
 				</ol>
 			</div>
@@ -1572,7 +1557,19 @@ function init_draggable_panels(){
 		// forever (confirmed live: the fix "didn't take" because a
 		// leftover localStorage geometry from an earlier test/drag was
 		// still being restored and taking precedence over the CSS).
-		if (panel.id == "keypad_panel"){
+		//
+		// .mode-panel (FT8_ui/CW_ui/Voice_ui) is the same story, caught
+		// live this time: these are inline content areas in the main
+		// layout, not floating dialogs -- they have no
+		// .sbitx-panel-title drag handle at all, so they were never
+		// meaningfully "draggable" here, but the ResizeObserver below
+		// still fires on ANY size change, including pure content
+		// reflow (e.g. adding a row inside FT8_ui), and persists
+		// whatever width that produced as if it were a deliberate
+		// resize. Once a bad width got captured this way it reapplied
+		// forever, surviving even a hard reload -- explains a report
+		// that looked exactly like a CSS bug but wasn't.
+		if (panel.id == "keypad_panel" || panel.classList.contains("mode-panel")){
 			["left", "top", "width", "height"].forEach(function(prop){
 				localStorage.removeItem(panel_geometry_key(panel, prop));
 			});
@@ -2056,7 +2053,11 @@ function FT8_stylize_message_item(item, text, style) {
 	// contact sender grid|R
 	htmMessage = deco_to_span(m1) + " " + deco_to_span(m2) + " " + deco_to_span(m3);
     }
-    item.innerHTML = htmLabel + '<span class="ft8-message">' + htmMessage + '</span>';
+    // explicit single space -- .ft8-label no longer pads out to a
+    // fixed column width (see its own CSS comment), so without this
+    // the label and message would run together with zero separation
+    // for shorter labels (e.g. RX Frequency's "TX" echo lines).
+    item.innerHTML = htmLabel + ' <span class="ft8-message">' + htmMessage + '</span>';
 }
 
 // Most recent FT8 decode-period time label (HHMMSS, the first token of
@@ -3109,33 +3110,29 @@ function toggle_tune(){
 // shutdown -h/-r now takes several real seconds (stopping services,
 // unmounting, etc.) with no feedback from the server in between --
 // clicking OK looked like it did nothing, tempting a second click.
-// Disabling the select immediately makes the choice's effect visible
+// Disabling the button immediately makes the choice's effect visible
 // right away and blocks a second action outright.
 //
-// Reboot/Shutdown used to be two separate .sbitxv3-btn buttons -- as a
-// side effect of the space-saving switch to a single select, this also
-// fixes a real pre-existing quirk: .sbitxv3-btn clicks were caught by
-// TWO handlers at once (this confirm()-gated one, and the generic
-// sbitx_button_clicked binding, which sent the raw action unconfirmed
-// the instant the button was clicked -- the confirm() dialog was real
-// but irrelevant, since the other handler had already done the deed).
-// A <select> isn't a .sbitxv3-btn, so there's no second, ungated
-// handler racing this one anymore.
-function do_power_action(){
-	var sel = el("power_action");
-	var action = sel.value;
-	sel.value = ""; // one-shot action, not a persistent state to display
-	if (action == "reboot"){
-		if (confirm("Reboot the Pi now? This will end your session and disconnect the radio until it comes back up.")){
-			websocket_send("WEB_REBOOT 1");
-			sel.disabled = true;
-		}
+// Back to two separate buttons (moved into the CQ Panel row -- user's
+// own ask), after an earlier pass had merged these into a single
+// select specifically to dodge a real bug: .sbitxv3-btn clicks are
+// caught by TWO handlers at once (a confirm()-gated one, and the
+// generic sbitx_button_clicked binding, which sends the raw button id
+// as an unconfirmed websocket command the instant it's clicked -- the
+// confirm() dialog would be real but irrelevant, since the other
+// handler already did the deed). Deliberately NOT .sbitxv3-btn this
+// time either, to avoid that same trap -- .panel-toolbar-btn instead,
+// bound only to the confirm()-gated handlers below.
+function reboot_clicked(){
+	if (confirm("Reboot the Pi now? This will end your session and disconnect the radio until it comes back up.")){
+		websocket_send("WEB_REBOOT 1");
+		el("reboot-open").disabled = true;
 	}
-	else if (action == "shutdown"){
-		if (confirm("Shut down the Pi now? You'll need physical/remote access to power it back on.")){
-			websocket_send("WEB_SHUTDOWN 1");
-			sel.disabled = true;
-		}
+}
+function shutdown_clicked(){
+	if (confirm("Shut down the Pi now? You'll need physical/remote access to power it back on.")){
+		websocket_send("WEB_SHUTDOWN 1");
+		el("shutdown-open").disabled = true;
 	}
 }
 
@@ -3916,7 +3913,8 @@ $("#logbook-search").on("input", logbook_search);
 $("#settings-open").on("click", open_settings);
 $("#settings_save").on("click", save_settings);
 $("#tune_toggle").on("click", toggle_tune);
-$("#power_action").on("change", do_power_action);
+$("#reboot-open").on("click", reboot_clicked);
+$("#shutdown-open").on("click", shutdown_clicked);
 
 //connect panel buttons
 $("#connect-open").on("click", open_connect);
