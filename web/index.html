@@ -2741,6 +2741,12 @@ function autoans_pick_and_answer(){
 	autoans_last_attempted_call = call;
 	// cq_text is already deco_strip()'d (see autoans_current_top_cq()).
 	websocket_send("FT8_check " + cq_text);
+	// Answering a CQ -- user's own ask, same as arming/manual QSO
+	// start. The initial TX-Enabled-click arm already does this once,
+	// but every *subsequent* auto-pick (moving to a new target after a
+	// QSO logs, or after giving up on one) only ever goes through this
+	// function, not that click handler -- needs its own call here too.
+	set_band_activity_hidden(true);
 	// pre_ft8_check() silently does nothing if this callsign is already
 	// in the logbook and this isn't a repeated identical check (its
 	// dupe-confirmation path, meant for a deliberate second manual
