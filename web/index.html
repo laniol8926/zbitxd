@@ -2670,17 +2670,6 @@ function logger_qrz(event){
 	show_in_qrz_window($("#CALL").val());
 }
 
-function logbook_open(event){
-//	var url = "https://www.qrz.com/db/" + $("#CALL").val();
-	var url = window.location.origin + "/logbook.html";
-
-	if (log_window == null)
-		log_window = window.open(url, "log");
-	else //if (log_window.closed)
-		log_window = window.open(url, "log");
-	//else
-		//log_window.location = url;
-}
 function logger_enter_qso(){
 	var contact_callsign = el("CALL").value.toUpperCase();
 	var rst_sent = el("SENT").value.toUpperCase();
@@ -4042,7 +4031,6 @@ $("#ptt_tx").on("click", ptt_tx);
 $("#ptt_rx").on("click", ptt_rx);
 
 //logbook buttons
-$("#logbook-open").on("click", logbook_open);
 $("#btn-logbook-close").on("click", close_logbook);
 $("#btn-logbook-search").on("click", logbook_request);
 $("#btn-logbook-load").on("click", logbook_more);
