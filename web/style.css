@@ -59,6 +59,22 @@ select, select option, input {
 	readonly: true;
 }
 
+/* RIGMODEL/RIGDEVICE/CAPTUREDEV/PLAYBACKDEV are the only inputs in the
+   app with a `list=` attribute (datalist-backed autocomplete) -- real
+   report + CDP-confirmed live: color-scheme: light above (meant only
+   for the popup suggestion list) also gives these specific inputs
+   native "combobox" chrome that overrides the black background: white
+   authored text lands on a light native box, unreadable. appearance:
+   none opts the input's own box out of that native rendering (the
+   dropdown popup itself is unaffected) so the background/color rule
+   above actually applies, same as every other input in the app. */
+#RIGMODEL, #RIGDEVICE, #CAPTUREDEV, #PLAYBACKDEV {
+	appearance: none;
+	-webkit-appearance: none;
+	background: black;
+	color: #fff;
+}
+
 /* topbar (actually to the left right now) */
 
 #sidebar{
