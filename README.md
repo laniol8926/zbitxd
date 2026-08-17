@@ -1,166 +1,201 @@
-# Introduction
+# zbitxd (generic-rig-backend fork)
 
-This is a daemon for controlling the zBitx transceiver. It is based on the official GTK client, from which all GTK GUI elements have been removed. This means that a graphical desktop environment is no longer required. The device is still controlled via the touchscreen of the zBitx frontend or via a browser. The daemon is started and stopped with the support of systemd.
+This is a fork of [dg0jde/zbitxd](https://github.com/dg0jde/zbitxd), a headless daemon for controlling the zBitx transceiver — same idea (browser/touchscreen control, no GTK desktop needed, systemd-managed), but extended to also drive **any rig supported by [Hamlib](https://hamlib.github.io/)** through `rigctld`, not just zBitx hardware. Development happens on the `generic-rig-backend` branch.
 
-At the moment, installation is only recommended for users who have experience with Linux and Raspberry Pi or are willing to learn. It is recommended to install it on an additional SD card with the latest Raspberry Pi OS. Only this is described below. One advantage is that if problems arise, you can always revert to the original software by simply changing the SD cards. However, installation and use on the original SD card is possible in principle.
+If you just want the original zBitx-hardware-only daemon, use the upstream repo instead. This fork is for running zbitxd's web UI, FT8 engine, and logging against a separate rig (tested against a QRP Labs QMX and an M0NKA mcHF) over CAT + a USB audio interface.
 
 
-# Installation
+## What this fork adds over upstream
 
-## Requirements
+- **Generic rig backend** (`radio=generic`): CAT control and audio I/O through `rigctld`/ALSA instead of the zBitx's own hardware, with a searchable rig-model picker, serial/audio device pickers, and a dedicated **Connect** panel for wiring it all up after login.
+- **Successive interference cancellation (SIC) and AP decoding** added to the FT8/FT4 decode pipeline.
+- **Auto CQ / Auto Answer**, with a proper on-the-fly repeat-counter reset and safety guards against changing frequency mid-transmit.
+- **QSO logging extras**: TX Power, Antenna, and Comments fields folded into every logged QSO; correctly-formatted **ADIF export** (button in the FT8 panel); **live QSO broadcast to a UDP-listening logger** (e.g. CQRLog) using WSJT-X's own UDP protocol, so QSOs appear in your regular logger the moment they're logged — no manual export/import step.
+- Extensive mobile/responsive UI cleanup (draggable/resizable panels, band-activity auto-hide, waterfall/CQ-panel fixes, RX Frequency panel fixes), a WSJT-X-style per-band/per-mode frequency table, and a long tail of decoder/keying/timing correctness fixes.
 
-- PC for creating the SD card and accessing the zBitx, preferably via SSH. In principle, this could also be done with just the zBitx and a connected monitor, keyboard, and mouse.
-- SD card with at least 8 GB
-- SD card reader (integrated in the PC or with USB connection)
-- WLAN
-- A copy of the configuration and log data from the currently used (old) SD card:
-  - /home/pi/sbitx/data/hw_settings.ini
-  - /home/pi/sbitx/data/sbitx.db
-  - /home/pi/sbitx/data/user_settings.ini
+See `git log generic-rig-backend` for the full history.
+
+
+## Quick install
+
+On a fresh Raspberry Pi OS Lite (64-bit) install, with the SD card already prepared and booted (see **Preparing the SD card** below if you haven't done that part yet):
+
+```
+curl -fsSL https://raw.githubusercontent.com/laniol8926/zbitxd/generic-rig-backend/install.sh | sh
+```
+
+or, if you'd rather review it first (recommended):
+
+```
+git clone --recurse-submodules -b generic-rig-backend https://github.com/laniol8926/zbitxd.git ~/zbitxd
+less ~/zbitxd/install.sh
+~/zbitxd/install.sh
+```
+
+`install.sh` is idempotent — re-run it any time to pick up dependency or code updates. It installs base packages, the ALSA aloop virtual soundcards, the zBitx boot-config overlay, a from-source Hamlib build (needed for `rigctld` — see below), then builds and installs zbitxd itself and starts the service.
+
+The rest of this document covers what the script does in more detail, plus everything specific to this fork (generic rig setup, new Settings fields, logging).
 
 
 ## Preparing the SD card
 
-- Install Raspberry Pi Imager on the PC
-- Insert the new SD card into the connected card reader
-- Start Raspberry Pi Imager and select the following settings:
-- Operating System: Raspberry Pi OS (other) > Raspberry Pi OS Lite (64-bit)
-- Storage: select the new SD card
-- Advanced Options (click on the gear icon):
-  - Set hostname: zbitx
-  - Activate “Enable SSH”, authentication with password or public key
-  - Activate “Set username and password” and enter these
-  - Activate “Configure wireless LAN” and set it up
-  - Activate “Set locale settings,” select “Time zone” and “Keyboard layout”
-  - Save
+- Install Raspberry Pi Imager on your PC.
+- Insert the new SD card into the connected card reader.
+- Start Raspberry Pi Imager and select:
+  - Operating System: Raspberry Pi OS (other) > Raspberry Pi OS Lite (64-bit)
+  - Storage: the new SD card
+  - Advanced Options (gear icon):
+    - Set hostname (e.g. `zbitx`)
+    - Enable SSH, with password or public-key auth
+    - Set username and password
+    - Configure wireless LAN
+    - Set locale/timezone/keyboard layout
+    - Save
 
-## WiFi problems
+### WiFi problems
 
-At the time this guide was created, it was not possible to connect to some WiFi networks. The cause is probably an incompatibility of the firmware for the WiFi chip used in the Raspberry Pi Zero 2 W: https://github.com/raspberrypi/bookworm-feedback/issues/279. In most cases, creating a file named “brcmfmac.conf” in the “/etc/modprobe.d” directory will help. Contents:
+Some WiFi networks fail to connect due to a firmware incompatibility on the Raspberry Pi Zero 2 W's WiFi chip ([raspberrypi/bookworm-feedback#279](https://github.com/raspberrypi/bookworm-feedback/issues/279)). Fix: create `/etc/modprobe.d/brcmfmac.conf` containing:
 ```
 options brcmfmac feature_disable=0x2000
 ```
-Without a working WiFi connection, there are only two ways to create this file:
-
-### On the PC
-
-To do this, the SD card must be mounted on the PC. Since the partition with the directory “/etc/modprobe.d” is formatted with ext4, this is only possible with a PC running Linux. After mounting, enter the following commands in a console:
-```
-sudo mkdir <mountpoint>/etc/modprobe.d
-echo “options brcmfmac feature_disable=0x2000” | sudo tee <mountpoint>/etc/modprobe.d/brcmfmac.conf
-```
-<mountpoint> has to be replaced with the directory where the SD card was mounted.
-
-
-### On the zBitx
-
-To do this, the prepared SD card must already be inserted into the zBitx and a monitor and keyboard must also be connected. After logging in to the console, enter the following commands:
+If you have no working WiFi yet to SSH in and do this, either mount the SD card's ext4 partition on a Linux PC and create the file there under `<mountpoint>/etc/modprobe.d/`, or connect a monitor/keyboard directly to the zBitx, log in at the console, and run:
 ```
 sudo mkdir /etc/modprobe.d
-echo “options brcmfmac feature_disable=0x2000” | sudo tee /etc/modprobe.d/brcmfmac.conf
+echo "options brcmfmac feature_disable=0x2000" | sudo tee /etc/modprobe.d/brcmfmac.conf
 sudo reboot
 ```
-After restarting, the zBitx should connect to the WiFi network.
 
-## Installing zbitxd
 
-First, an update of the Raspberry Pi OS is recommended:
-```
-sudo apt update
-sudo apt upgrade
-reboot
-```
+## Manual install
 
-Then install the packages that zbitxd requires as dependencies:
-```
-sudo apt install git libasound2-dev libfftw3-dev libsqlite3-dev libsystemd-dev sqlite3
-```
-Of course, any other packages can be added.
+If you'd rather not run `install.sh`, or want to understand each step, here's what it does:
 
-WiringPi is used to control the GPIO pins. This is not available as a ready-made package and must be installed as follows:
 ```
-cd
-git clone https://github.com/wiringpi/wiringpi
-cd wiringpi
-./build
+sudo apt update && sudo apt upgrade && sudo reboot
 ```
 
-zbitxd requires the ALSA aloop driver:
 ```
-echo “snd-aloop” | sudo tee /etc/modules
-echo “options snd-aloop enable=1,1,1 index=1,2,3” | sudo tee /etc/modprobe.d/snd-aloop.conf
-```
-
-The boot configuration needs to be modified:
-```
-echo “# zBitx related options” | sudo tee -a /boot/firmware/config.txt
-echo “gpio=4,5,9,10,11,17,22,27=ip,pu” | sudo tee -a /boot/firmware/config.txt
-echo “gpio=24,23=op,pu” | sudo tee -a /boot/firmware/config.txt
-echo “avoid_warnings=1” | sudo tee -a /boot/firmware/config.txt
-echo “dtoverlay=audioinjector-wm8731-audio” | sudo tee -a /boot/firmware/config.txt
-echo “dtoverlay=i2c-rtc-gpio,ds1307,bus=2,i2c_gpio_sda=13,i2c_gpio_scl=6” | sudo tee -a /boot/firmware/config.txt
-sudo sed -i “s/dtparam=audio=on/##dtparam=audio=on/” /boot/firmware/config.txt
-sudo sed -i “s/dtoverlay=vc4-kms-v3d/dtoverlay=vc4-kms-v3d,noaudio/” /boot/firmware/config.txt
+sudo apt install git libasound2-dev libfftw3-dev libsqlite3-dev libsystemd-dev sqlite3 \
+    build-essential autoconf automake libtool libusb-1.0-0-dev libltdl-dev
 ```
 
-Unlike the original zBitx software, zbitxd does not use its own routines for accurate time. Instead, it uses the Raspberry Pi's system time. Therefore, these must be very accurate, especially for FT8. To achieve this, the fake hardware clock is disabled:
+ALSA aloop, used to pass audio between zbitxd and other programs:
+```
+echo "snd-aloop" | sudo tee -a /etc/modules
+echo "options snd-aloop enable=1,1,1 index=1,2,3" | sudo tee /etc/modprobe.d/snd-aloop.conf
+```
+
+zBitx boot config:
+```
+echo "# zBitx related options" | sudo tee -a /boot/firmware/config.txt
+echo "gpio=4,5,9,10,11,17,22,27=ip,pu" | sudo tee -a /boot/firmware/config.txt
+echo "gpio=24,23=op,pu" | sudo tee -a /boot/firmware/config.txt
+echo "avoid_warnings=1" | sudo tee -a /boot/firmware/config.txt
+echo "dtoverlay=audioinjector-wm8731-audio" | sudo tee -a /boot/firmware/config.txt
+echo "dtoverlay=i2c-rtc-gpio,ds1307,bus=2,i2c_gpio_sda=13,i2c_gpio_scl=6" | sudo tee -a /boot/firmware/config.txt
+sudo sed -i "s/dtparam=audio=on/##dtparam=audio=on/" /boot/firmware/config.txt
+sudo sed -i "s/dtoverlay=vc4-kms-v3d/dtoverlay=vc4-kms-v3d,noaudio/" /boot/firmware/config.txt
+```
+(The GPIO lines only matter if you're running actual zBitx hardware — harmless to leave in for the generic-rig backend too.)
+
+zbitxd doesn't use its own time-sync routines; it relies on the Pi's system clock, which needs to be accurate for FT8. Disable the fake hardware clock so the real RTC (if fitted) or NTP take over:
 ```
 sudo systemctl disable fake-hwclock
 ```
 
-The system time is now set to the RTC (RealTime Clock) of the zBitx when booting. For this, it is important that the RTC battery is installed in the zBitx. This is not the case with all zBitx devices delivered.
-If the WiFi connection is active, the system time is additionally updated via NTP. For outdoor applications, furthersteps are recommended to ensure a more accurate system time, e.g., using GPS.
-
-Now the source code of zbitxd can be downloaded:
+**Hamlib, from source** — this fork's generic-rig backend needs this even if your distro already has `libhamlib` packaged. A system-packaged `libhamlib.so.4` and a from-source build can register under the identical SONAME; the dynamic linker silently picks whichever it indexed first, which can leave `rigctld` reporting "Unknown rig num" for a rig your distro's older Hamlib doesn't know about yet. `rig_generic.c` looks for a build at `/usr/local/bin/rigctld` specifically and forces its own lib dir, sidestepping this:
 ```
 cd
-git clone https://github.com/dg0jde/zbitxd.git
+git clone https://github.com/Hamlib/Hamlib.git
+cd Hamlib
+./bootstrap
+./configure
+make
+sudo make install
+sudo ldconfig
 ```
 
-The update script installs the latest release of zbitxd:
+Finally, zbitxd itself:
 ```
-~/zbitxd/update
-```
-This command is also used for future updates.
-
-
-If you want to install the current developer version instead, use the following commands:
-```
-cd ~/zbitxd
-git checkout main
-git pull
+cd
+git clone --recurse-submodules -b generic-rig-backend https://github.com/laniol8926/zbitxd.git
+cd zbitxd
 make
 sudo make install
 ```
 
-The copies of the previous configurations and log data (hw_settings.ini, sbitx.db, user_settings.ini) should now be copied to /var/lib/zbitxd. User and Group must be set to “zbitxd” with:
+If you have config/log data from a previous install to carry over (`hw_settings.ini`, `sbitx.db`, `user_settings.ini`), copy them into `/var/lib/zbitxd` now and fix ownership:
 ```
 sudo chown zbitxd:zbitxd /var/lib/zbitxd/*
 ```
 
-Now zbitxd can be started and should work as usual, only without the GTK GUI:
+Start it:
 ```
 sudo systemctl daemon-reload
 sudo systemctl start zbitxd
+sudo systemctl enable zbitxd   # start automatically on boot
 ```
 
-To start automatically when booting, use this command:
-```
-sudo systemctl enable zbitxd
-```
 
-# Additional extensions
-## Automated WiFi AccessPoint
+## Updating
 
-from:  
-https://www.raspberryconnect.com/projects/65-raspberrypi-hotspot-accesspoints/203-automated-switching-accesspoint-wifi-network
+```
+cd ~/zbitxd
+git pull
+git submodule update --init --recursive
+make
+sudo make install
+sudo systemctl restart zbitxd
+```
+or just re-run `install.sh`.
+
+
+## Using the generic rig backend
+
+1. Open the web UI (`http://<pi-address>:8080`) and log in.
+2. The **Connect** panel opens automatically after every login (so a renumbered serial port or changed audio device is always easy to fix, not buried in a menu). Pick your rig from the searchable model list, the serial device it's on, and its baud rate; pick the audio capture/playback devices for its USB audio interface.
+3. Click **Connect to Rig** (starts `rigctld`, from the `/usr/local/bin` build above, against your rig) and **Connect Audio** (wires up the audio path). The panel shows live connection status for each.
+4. Once connected, the panel closes and the normal web UI (waterfall, FT8 panels, logbook) behaves the same as on real zBitx hardware.
+
+Settings relevant to this: `RIGMODEL` / `RIGDEVICE` / `RIGBAUD` (under the hood; normally set through the Connect panel's pickers rather than typed by hand), `CAPTUREDEV` / `PLAYBACKDEV`.
+
+
+## Settings this fork adds
+
+In the Settings panel, alongside the existing My Call/My Grid fields:
+
+| Field | Purpose |
+|---|---|
+| TX Power | Logged with every QSO (own `power` column) |
+| Antenna | Folded into the logged Comments, alongside rig info |
+| Comments | Free-text, folded into the logged Comments |
+| UDP Log Host | Live-broadcast target (see below). Blank = disabled. |
+| UDP Log Port | Live-broadcast port. Defaults to `2237` (WSJT-X/CQRLog's own default). |
+
+
+## Logging
+
+Every logged QSO records TX Power and a Comments field (rig description if running the generic backend, plus your own Antenna/Comments text) alongside the usual call/grid/report/frequency/mode.
+
+**ADIF export**: the "Export ADIF" button in the FT8 panel's toolbar exports the whole logbook to a correctly-formatted ADIF 3.1.4 file and downloads it — useful for importing into QRZ Logbook or any logger that only takes file import.
+
+**Live logging to CQRLog (or any WSJT-X-UDP-compatible logger)**: set **UDP Log Host** to the IP of the machine your logger runs on (this is normally a *different* machine than the Pi, so unlike a same-machine WSJT-X setup this can't default to `127.0.0.1`) and **UDP Log Port** to match your logger's listener (CQRLog's default is `2237`). Every QSO is then broadcast live over WSJT-X's own UDP "QSO Logged" protocol the moment it's logged — no export/import needed for that logger.
+
+If using CQRLog specifically: make sure **Preferences → WSJT-X → Mode from** is set to **wsjtx** (the default on a fresh install). If it's set to "CQRLOG" or "default" instead, CQRLog's own parser skips reading the Mode field off the wire entirely, which misaligns every field after it (including both date/time fields) and can throw a spurious "date error" popup — a CQRLog-side setting, not something zbitxd can work around from the sending end.
+
+
+## Additional extensions
+
+### Automated WiFi Access Point
+
+From [raspberryconnect.com](https://www.raspberryconnect.com/projects/65-raspberrypi-hotspot-accesspoints/203-automated-switching-accesspoint-wifi-network):
 ```
 cd /tmp
-curl “https://www.raspberryconnect.com/images/scripts/AccessPopup.tar.gz” -o AccessPopup.tar.gz
+curl "https://www.raspberryconnect.com/images/scripts/AccessPopup.tar.gz" -o AccessPopup.tar.gz
 tar -xvf ./AccessPopup.tar.gz
 cd AccessPopup
 sudo ./installconfig.sh
 ```
 - Installation: press 1
-- Configuration SSID and pre-shared key: press 2 (e.g. zBitxAP/1234567890)
+- Configuration SSID and pre-shared key: press 2 (e.g. `zBitxAP`/`1234567890`)
 - End: enter 10
