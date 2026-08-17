@@ -2157,6 +2157,8 @@ function FT8_list_append(list_id, text, style){
 	// "stick to bottom only if already there" pattern.
 	var ol = el(list_id).querySelector("ol");
 	var was_at_bottom = (ol.scrollHeight - ol.scrollTop - ol.clientHeight) < 20;
+	// Reversed (CQ panel) mirror of was_at_bottom, for the fix below.
+	var was_at_top = ol.scrollTop < 20;
 
 	// CQ panel reads newest-first (prepended), everything else stays
 	// chronological (appended) -- see the reversed-divider comment
@@ -2283,14 +2285,24 @@ function FT8_list_append(list_id, text, style){
 				ol.removeChild(ol.firstElementChild);
 		}
 	}
-	// Reversed lists always insert the newest entry at scrollTop 0, so
-	// it's already visible with no scroll adjustment needed -- forcing
-	// scrollTop back to 0 here would yank focus away from older history
-	// the user deliberately scrolled down to read/click, the same
-	// footgun was_at_bottom already exists to avoid for the normal
-	// (appended) case below.
 	if (!reversed && was_at_bottom)
 		ol.scrollTop = ol.scrollHeight;
+	// Real report: "the displaying logic always pushes it to show what
+	// is at the bottom, so to get visibility to current CQs requires
+	// scrolling up" -- the assumption above (new entries insert at
+	// scrollTop 0, so they're already visible with no adjustment) turned
+	// out wrong in practice: insertBefore() adds content *above* the
+	// current scroll position, but scrollTop itself is just a fixed
+	// pixel offset that the browser doesn't reliably re-anchor for JS-
+	// driven DOM insertion. Net effect: the view keeps sinking further
+	// from the true top (relatively older) every time something new
+	// gets prepended above it, even though nothing ever explicitly
+	// scrolled it down. Same "stick to the edge only if already there"
+	// pattern as was_at_bottom above, just mirrored to the top edge --
+	// still won't yank focus from history the user deliberately scrolled
+	// down to read/click.
+	if (reversed && was_at_top)
+		ol.scrollTop = 0;
 }
 
 //you can choose messages that are:
@@ -2348,6 +2360,16 @@ function FT8_message_chosen(event){
 		// empty fields, so it has to come off before this goes back to
 		// the server as a real protocol message.
 		websocket_send("FT8_check "+deco_strip(message_text));
+		// Copy (not move -- stays in the CQ panel too) the clicked CQ
+		// into RX Frequency right away, user's own ask -- otherwise that
+		// panel stays empty until either our own reply transmits or the
+		// other station answers, leaving a confusing gap immediately
+		// after clicking. message_text is already deco_strip()'d (set at
+		// append time), and FT8_stylize_message_item() re-strips its own
+		// sub-pieces regardless, so plain text here is fine; "style" is
+		// an unused parameter in that function, any non-"Q" placeholder
+		// works.
+		FT8_list_append("wsjtx-rx", message_text, "RX");
 		// Manually starting a QSO -- user's own ask: hide Band Activity
 		// the same as arming Auto CQ/Auto Answer does.
 		set_band_activity_hidden(true);

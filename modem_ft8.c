@@ -1397,13 +1397,22 @@ void ft8_poll(int tx_is_on){
 		// report -- ftx_would_send() opened this window (so something
 		// really was queued -- we're past the early-return above) but
 		// slot_time already blew past the 200ms gate by the time we got
-		// here. Logs once per missed window (this narrow band only, not
-		// every poll for the rest of the still-open window) so we can
-		// see how late a real miss actually lands -- answers "how far
-		// in" with a real number instead of a guess.
-		else if (slot_time >= 200 && slot_time < 400) {
-			LOG(LOG_INFO, "%05d ft8_poll: MISSED window, slot_time %d ms (>= 200ms gate), queued '%s'\n",
-				wallclock_day_ms % 60000, slot_time, ft8_tx_text);
+		// here. A real occurrence (click queued right at 17:45:30, TX
+		// didn't fire until 17:46:00 -- a full 30s/one alternating-pair
+		// late) never landed in the original narrow 200-400ms catch band
+		// at all, meaning the click's own processing latency ate more of
+		// the window than that assumed -- widened to the whole rest of
+		// the window, rate-limited to once per distinct missed window
+		// (not every ~100ms poll for as long as it stays open) via
+		// last_logged_window.
+		else if (slot_time >= 200) {
+			static int last_logged_window = -1;
+			int window_id = wallclock_day_ms / (is_ft4 ? 7500 : 15000);
+			if (window_id != last_logged_window) {
+				last_logged_window = window_id;
+				LOG(LOG_INFO, "%05d ft8_poll: MISSED window, slot_time %d ms (>= 200ms gate), queued '%s'\n",
+					wallclock_day_ms % 60000, slot_time, ft8_tx_text);
+			}
 		}
 	}
 }
