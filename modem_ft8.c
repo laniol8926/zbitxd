@@ -1331,19 +1331,31 @@ void ft8_poll(int tx_is_on){
 		// boundary. User: "the radio started to transmit as soon as i
 		// clicked... it should have waited until the beginning of the
 		// next 15 second [slot]." Gate on slot_time so we only ever key
-		// up right at the true start of a window -- anything later just
-		// defers to the next poll, which keeps returning true for the
-		// rest of this window and then goes false until the next one
-		// opens, arriving here again with a small slot_time right at
-		// that real boundary. 200ms (2x the ~100ms poll interval, as
-		// jitter margin) rather than the 1000ms ftx_start_tx() itself
-		// uses to zero out a small offset -- other stations' decoders
-		// are synced to the true slot start, so this needs to stay
-		// tight, not just "close enough to not be considered a
-		// mid-burst start." Comfortably under that 1000ms threshold
-		// means a pass here always zeroes the buffer index too, i.e.
-		// starts from sample 0, never partway into the waveform.
-		if (slot_time < 200) {
+		// up right at (or acceptably close to) the true start of a
+		// window -- anything later than the cutoff just defers to the
+		// next poll, which keeps returning true for the rest of this
+		// window and then goes false until the next one opens, arriving
+		// here again with a small slot_time right at that real boundary.
+		//
+		// Cutoff widened from a strict 200ms after a real, measured
+		// miss: a genuine reply (already queued before its target window
+		// opened -- not a fresh mid-window click, the original bug this
+		// gate exists for) landed at slot_time 1746ms, past the old
+		// 200ms gate, and had to wait a full extra 30s/one alternating-
+		// pair cycle for the next same-parity window instead of
+		// transmitting a few seconds late. ftx_start_tx(slot_time)
+		// already seeds a real, correctly-synced offset into the
+		// waveform for any slot_time >= 1000ms (not the sample-0 restart
+		// the original 200ms threshold was guarding against) -- so a
+		// late-but-still-open window can transmit a slightly truncated
+		// but still correctly-timed message instead of being skipped
+		// outright. 2000ms trims at most the first ~2s off a ~12.64s
+		// FT8 message (comfortably past the 1746ms real miss, still
+		// leaves 2 of the message's 3 Costas sync blocks and the large
+		// majority of its payload intact) -- past that point a skip to
+		// the next window is judged better than transmitting too little
+		// of the message to realistically decode.
+		if (slot_time < 2000) {
 			LOG(LOG_DEBUG, "%05d ft8_poll: tx_is_on %d ft8_tx_nsamples %d start '%s'\n",
 				wallclock_day_ms % 60000, tx_is_on, ft8_tx_nsamples, ft8_tx_text);
 			ftx_start_tx(slot_time); // modulate audio at current frequency setting
@@ -1393,24 +1405,21 @@ void ft8_poll(int tx_is_on){
 			set_field_int("#ft8_repeat_count", ft8_repeat > 0 ? ft8_repeat : 0);
 			update_tx_active_field();
 		}
-		// TEMPORARY, investigating a real "transmit cycle gets missed"
-		// report -- ftx_would_send() opened this window (so something
-		// really was queued -- we're past the early-return above) but
-		// slot_time already blew past the 200ms gate by the time we got
-		// here. A real occurrence (click queued right at 17:45:30, TX
-		// didn't fire until 17:46:00 -- a full 30s/one alternating-pair
-		// late) never landed in the original narrow 200-400ms catch band
-		// at all, meaning the click's own processing latency ate more of
-		// the window than that assumed -- widened to the whole rest of
-		// the window, rate-limited to once per distinct missed window
-		// (not every ~100ms poll for as long as it stays open) via
-		// last_logged_window.
-		else if (slot_time >= 200) {
+		// Still investigating whether a *genuine* miss (now past the
+		// widened 2000ms gate above) ever recurs -- kept at LOG_INFO
+		// (cheap, rate-limited to once per distinct missed window via
+		// last_logged_window, not every ~100ms poll for as long as it
+		// stays open). The original real occurrence that justified
+		// widening the gate (click queued right at a slot boundary, TX
+		// delayed a full 30s/one alternating-pair cycle) is expected to
+		// no longer trigger this at all now, having landed at 1746ms --
+		// comfortably under the new 2000ms cutoff.
+		else {
 			static int last_logged_window = -1;
 			int window_id = wallclock_day_ms / (is_ft4 ? 7500 : 15000);
 			if (window_id != last_logged_window) {
 				last_logged_window = window_id;
-				LOG(LOG_INFO, "%05d ft8_poll: MISSED window, slot_time %d ms (>= 200ms gate), queued '%s'\n",
+				LOG(LOG_INFO, "%05d ft8_poll: MISSED window, slot_time %d ms (>= 2000ms gate), queued '%s'\n",
 					wallclock_day_ms % 60000, slot_time, ft8_tx_text);
 			}
 		}
@@ -1600,6 +1609,14 @@ void ft8_on_start_qso(char *message){
 		sprintf(reply_message, "%s %s %s", call, mycall, signal_strength);
 	}
 	field_set("NR", mygrid);
+	// Replies transmit at our *own* frequency (ft8_pitch, from
+	// TX_PITCH), not the other station's -- user's own confirmation:
+	// "has to be at my frequency". Standard FT8 convention: the station
+	// being answered retunes to reply back to us at our frequency for
+	// the rest of the exchange, not the other way around. (A different
+	// fix was tried here first, based on a wrong assumption that a real
+	// CQ decoded at 1391 Hz getting a reply at TX_PITCH's 2046 Hz was a
+	// bug -- it wasn't; reverted.)
 	ft8_tx(reply_message, ft8_pitch);
 	// ft8_tx() above already set ft8_repeat from FT8_REPEAT -- one
 	// shared counter/give-up signal for CQ calls, answering a CQ, and
