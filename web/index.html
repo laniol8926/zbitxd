@@ -217,6 +217,21 @@
 			<span class="settings-label">Comments:</span><input id="COMMENTS"
 					class="settings_input sbitx-text-input" type="text" size="30" />
 		</div>
+
+		<!-- Live QSO broadcast to a logger (cqrlog etc, WSJT-X UDP
+		     protocol) -- off/empty by default. zbitxd runs on the Pi
+		     while the logger normally runs elsewhere, so unlike a
+		     same-machine WSJT-X setup this can't default to
+		     127.0.0.1 -- it needs that machine's real LAN IP. -->
+		<div class="settings-element">
+			<span class="settings-label">UDP Log Host:</span><input id="UDPLOGHOST"
+					class="settings_input sbitx-text-input" type="text" size="20"
+					placeholder="e.g. 192.168.1.50 -- blank disables" />
+		</div>
+		<div class="settings-element">
+			<span class="settings-label">UDP Log Port:</span><input id="UDPLOGPORT"
+					class="settings_input sbitx-text-input" type="text" size="6" />
+		</div>
 		<div class="settings-element">
 			<span class="settings-label">ITU Region:</span>
 			<select class="sbitxv3-selection sbitx-selection" id="REGION">
@@ -3165,6 +3180,8 @@ function save_settings(){
 	websocket_send("TXPOWER " + el("TXPOWER").value);
 	websocket_send("ANTENNA " + el("ANTENNA").value);
 	websocket_send("COMMENTS " + el("COMMENTS").value);
+	websocket_send("UDPLOGHOST " + el("UDPLOGHOST").value);
+	websocket_send("UDPLOGPORT " + el("UDPLOGPORT").value);
 	websocket_send("PASSKEY " + el("PASSKEY").value);
 	websocket_send("SIDETONE " + el("SIDETONE").value);
 	websocket_send("TELNETURL " + el("TELNETURL").value);

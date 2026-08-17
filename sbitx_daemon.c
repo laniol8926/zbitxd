@@ -525,6 +525,16 @@ struct field main_controls[] = {
 	// auto rig-info string, not its own column -- user's own call.
 	{"#opcomments", NULL, 1000, -1000, 400, 149, "COMMENTS", 70, "", FIELD_TEXT,
 		"", 0,64,1,0},
+	// Live QSO broadcast to a logger (cqrlog etc, WSJT-X UDP protocol --
+	// see udp_broadcast_qso_logged() in logbook.c) -- off by default
+	// (empty host = disabled) since zbitxd runs on the Pi while the
+	// logger normally runs on a different machine, so there's no sane
+	// default to guess (unlike a same-machine WSJT-X install, which can
+	// default to 127.0.0.1). Port default matches cqrlog's own default.
+	{"#udp_log_host", NULL, 1000, -1000, 400, 149, "UDPLOGHOST", 70, "", FIELD_TEXT,
+		"", 0,64,1,0},
+	{"#udp_log_port", NULL, 1000, -1000, 400, 149, "UDPLOGPORT", 70, "2237", FIELD_TEXT,
+		"", 0,6,1,0},
 	// ITU region (1/2/3) -- amateur band edges genuinely differ by
 	// region for some bands (80M/40M; see apply_region_band_limits()).
 	// Default "2" preserves this fork's existing hardcoded behavior

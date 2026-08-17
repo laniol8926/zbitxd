@@ -20,6 +20,7 @@
 #include <netinet/in.h>
 #include <ctype.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include "sdr.h"
 #include "sdr_ui.h"
 #include "logbook.h"
@@ -298,11 +299,121 @@ void message_add(char *mode, unsigned int frequency, int outgoing, char *message
 	}
 }
 
+// Live QSO broadcast to a logger (cqrlog etc) using WSJT-X's UDP
+// NetworkMessage protocol, type 5 ("QSO Logged") -- a de-facto standard
+// cqrlog/JTDX/GridTracker/N1MM all speak. Field layout and wire encoding
+// below were pulled from WSJT-X's own NetworkMessage.hpp source, not
+// guessed. Purely additive/best-effort: never touches whether the real
+// SQLite insert in logbook_add() below succeeds, and silently does
+// nothing at all if #udp_log_host isn't configured.
+//
+// All multi-byte integers are big-endian (Qt QDataStream convention).
+// utf8 strings are a big-endian quint32 byte length followed by the raw
+// bytes (no null terminator) -- write_utf8() below.
+
+static void udp_write_u32(unsigned char *buf, size_t *pos, uint32_t v){
+	buf[(*pos)++] = (v >> 24) & 0xff;
+	buf[(*pos)++] = (v >> 16) & 0xff;
+	buf[(*pos)++] = (v >> 8) & 0xff;
+	buf[(*pos)++] = v & 0xff;
+}
+
+static void udp_write_u64(unsigned char *buf, size_t *pos, uint64_t v){
+	for (int shift = 56; shift >= 0; shift -= 8)
+		buf[(*pos)++] = (v >> shift) & 0xff;
+}
+
+static void udp_write_utf8(unsigned char *buf, size_t *pos, const char *s){
+	uint32_t len = s ? strlen(s) : 0;
+	udp_write_u32(buf, pos, len);
+	memcpy(buf + *pos, s, len);
+	*pos += len;
+}
+
+// QDateTime (schema 2): qint64 Julian day, quint32 ms-since-midnight,
+// quint8 timespec. timespec=1 (UTC) needs no further bytes -- the
+// simplest correct choice, and matches how this app already logs
+// (gmtime()), avoiding the offset/timezone-name fields entirely.
+static void udp_write_qdatetime_utc(unsigned char *buf, size_t *pos, struct tm *tmp){
+	// Standard Julian day number algorithm (proleptic Gregorian).
+	int y = tmp->tm_year + 1900, m = tmp->tm_mon + 1, d = tmp->tm_mday;
+	int a = (14 - m) / 12;
+	int yy = y + 4800 - a;
+	int mm = m + 12 * a - 3;
+	int64_t jdn = d + (153 * mm + 2) / 5 + 365LL * yy + yy / 4 - yy / 100 + yy / 400 - 32045;
+	udp_write_u64(buf, pos, (uint64_t)jdn); // qint64, but never negative here
+	uint32_t ms = (uint32_t)((tmp->tm_hour * 3600 + tmp->tm_min * 60 + tmp->tm_sec) * 1000);
+	udp_write_u32(buf, pos, ms);
+	buf[(*pos)++] = 1; // timespec = UTC
+}
+
+// Best-effort: any failure (bad host, socket error, cqrlog not
+// running) is silently ignored -- this must never be allowed to affect
+// the real logbook write in logbook_add().
+static void udp_broadcast_qso_logged(const char *dx_call, const char *dx_grid,
+	uint64_t freq_hz, const char *mode, const char *rst_sent, const char *rst_recv,
+	const char *tx_power, const char *comments, struct tm *tmp,
+	const char *mycall, const char *mygrid,
+	const char *exch_sent, const char *exch_recv){
+
+	char host[64], port_s[8];
+	get_field_value("#udp_log_host", host);
+	if (!host[0])
+		return; // disabled -- no host configured
+	get_field_value("#udp_log_port", port_s);
+	if (!port_s[0])
+		strcpy(port_s, "2237");
+
+	struct addrinfo hints, *res;
+	memset(&hints, 0, sizeof(hints));
+	hints.ai_family = AF_INET;
+	hints.ai_socktype = SOCK_DGRAM;
+	if (getaddrinfo(host, port_s, &hints, &res) != 0)
+		return;
+
+	int s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+	if (s < 0){
+		freeaddrinfo(res);
+		return;
+	}
+
+	unsigned char buf[512];
+	size_t pos = 0;
+	static const char *id = "zbitxd";
+
+	udp_write_u32(buf, &pos, 0xadbccbda); // magic
+	udp_write_u32(buf, &pos, 2);          // schema 2 (avoids schema 3's extra tz fields)
+	udp_write_u32(buf, &pos, 5);          // type 5 = QSO Logged
+	udp_write_utf8(buf, &pos, id);        // sender Id (every message has this)
+
+	udp_write_utf8(buf, &pos, id);        // "Id (unique key)" -- reused, unused by cqrlog
+	udp_write_qdatetime_utc(buf, &pos, tmp); // Date & Time Off
+	udp_write_utf8(buf, &pos, dx_call);
+	udp_write_utf8(buf, &pos, dx_grid);
+	udp_write_u64(buf, &pos, freq_hz);
+	udp_write_utf8(buf, &pos, mode);
+	udp_write_utf8(buf, &pos, rst_sent);
+	udp_write_utf8(buf, &pos, rst_recv);
+	udp_write_utf8(buf, &pos, tx_power);
+	udp_write_utf8(buf, &pos, comments);
+	udp_write_utf8(buf, &pos, "");        // Name -- not tracked
+	udp_write_qdatetime_utc(buf, &pos, tmp); // Date & Time On -- same value, see comment above logbook_add()
+	udp_write_utf8(buf, &pos, mycall);    // Operator call
+	udp_write_utf8(buf, &pos, mycall);    // My call
+	udp_write_utf8(buf, &pos, mygrid);
+	udp_write_utf8(buf, &pos, exch_sent);
+	udp_write_utf8(buf, &pos, exch_recv);
+
+	sendto(s, buf, pos, 0, res->ai_addr, res->ai_addrlen);
+	close(s);
+	freeaddrinfo(res);
+}
+
 void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 	char *rst_recv, char *exchange_recv){
 	char statement[1000], *err_msg, date_str[11], time_str[5];
 	char freq[12], log_freq[12], mode[10], mycallsign[12], comments[200];
-	char txpower[16], antenna[40], opcomments[80];
+	char txpower[16], antenna[40], opcomments[80], mygrid[12];
 
 	time_t log_time = time(NULL);
 	struct tm *tmp = gmtime(&log_time);
@@ -312,6 +423,7 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 	get_field_value("#txpower", txpower);
 	get_field_value("#antenna", antenna);
 	get_field_value("#opcomments", opcomments);
+	get_field_value("#mygrid", mygrid);
 
 	// r1:freq alone is just the dial/LO frequency -- audio (FT8/FT4
 	// tone, CW sidetone) is generated at TX_PITCH above it and the
@@ -370,6 +482,19 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 		printf("logbook_add db: %d err=%s", res, err_msg);
 		if (err_msg) sqlite3_free(err_msg);
 	}
+
+	// Live broadcast to a logger (cqrlog etc), after the real insert
+	// above -- best-effort, no-op if #udp_log_host isn't configured.
+	// log_freq is a kHz decimal string with 3 fractional digits (Hz
+	// precision, see the comment above); converting through an
+	// intermediate rounded-to-integer-kHz value first would throw that
+	// precision away (e.g. "10137.640" kHz -> round to 10138 kHz ->
+	// *1000 = 10,138,000 Hz, 360 Hz off from the real 10,137,640 Hz) --
+	// go straight to Hz instead.
+	udp_broadcast_qso_logged(contact_callsign, exchange_recv,
+		(uint64_t)(atof(log_freq) * 1000.0 + 0.5), mode, rst_sent, rst_recv,
+		txpower, comments, tmp, mycallsign, mygrid,
+		exchange_sent, exchange_recv);
 }
 
 // ADIF field headers, see note above -- must stay in the same order as
