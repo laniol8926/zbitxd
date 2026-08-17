@@ -301,11 +301,31 @@ void message_add(char *mode, unsigned int frequency, int outgoing, char *message
 
 // Live QSO broadcast to a logger (cqrlog etc) using WSJT-X's UDP
 // NetworkMessage protocol, type 5 ("QSO Logged") -- a de-facto standard
-// cqrlog/JTDX/GridTracker/N1MM all speak. Field layout and wire encoding
-// below were pulled from WSJT-X's own NetworkMessage.hpp source, not
-// guessed. Purely additive/best-effort: never touches whether the real
-// SQLite insert in logbook_add() below succeeds, and silently does
-// nothing at all if #udp_log_host isn't configured.
+// cqrlog/JTDX/GridTracker/N1MM all speak. Purely additive/best-effort:
+// never touches whether the real SQLite insert in logbook_add() below
+// succeeds, and silently does nothing at all if #udp_log_host isn't
+// configured.
+//
+// Two things tried and ruled out first, both confirmed by reading
+// cqrlog's own source (ok2cqr/cqrlog, src/fNewQSO.pas):
+// - type 12 ("Logged ADIF", a self-contained ADIF-text record --
+//   avoids binary date parsing entirely) isn't implemented by cqrlog
+//   at all -- confirmed no match for it anywhere in their MsgType
+//   dispatch, and confirmed live (packet verified byte-correct on
+//   arrival, cqrlog did nothing with it).
+// - type 5 byte-verified correct against WSJT-X's own spec, but a
+//   real cqrlog import threw the *exact* text of a known cqrlog quirk
+//   ("'' is not valid date error", their own comment: "usually at
+//   first logged qso") -- turned out to be a real field-alignment bug
+//   in *their* parser, not ours: cqrlog's Preferences has a "Mode
+//   from" radio group (CQRLOG/wsjtx/default) that gates whether the
+//   Mode string field even gets read off the wire at all; unless it's
+//   set to "wsjtx" (cqrini value 1, the fresh-install default),
+//   cqrlog silently skips over our Mode field's bytes, which
+//   permanently misaligns every field after it -- including the
+//   *second* QDateTime block -- for the rest of the message. Nothing
+//   we send can route around a receiver-side setting; this needs
+//   "Mode from" = wsjtx on the cqrlog side.
 //
 // All multi-byte integers are big-endian (Qt QDataStream convention).
 // utf8 strings are a big-endian quint32 byte length followed by the raw
@@ -334,6 +354,8 @@ static void udp_write_utf8(unsigned char *buf, size_t *pos, const char *s){
 // quint8 timespec. timespec=1 (UTC) needs no further bytes -- the
 // simplest correct choice, and matches how this app already logs
 // (gmtime()), avoiding the offset/timezone-name fields entirely.
+// Byte-verified against cqrlog's own int64Buf/ui32Buf/ui8Buf field
+// order for this exact block (fNewQSO.pas) -- structurally correct.
 static void udp_write_qdatetime_utc(unsigned char *buf, size_t *pos, struct tm *tmp){
 	// Standard Julian day number algorithm (proleptic Gregorian).
 	int y = tmp->tm_year + 1900, m = tmp->tm_mon + 1, d = tmp->tm_mday;
@@ -353,7 +375,7 @@ static void udp_write_qdatetime_utc(unsigned char *buf, size_t *pos, struct tm *
 static void udp_broadcast_qso_logged(const char *dx_call, const char *dx_grid,
 	uint64_t freq_hz, const char *mode, const char *rst_sent, const char *rst_recv,
 	const char *tx_power, const char *comments, struct tm *tmp,
-	const char *mycall, const char *mygrid,
+	const char *mycall, const char *my_grid_sent,
 	const char *exch_sent, const char *exch_recv){
 
 	char host[64], port_s[8];
@@ -379,14 +401,28 @@ static void udp_broadcast_qso_logged(const char *dx_call, const char *dx_grid,
 
 	unsigned char buf[512];
 	size_t pos = 0;
-	static const char *id = "zbitxd";
+	// Must contain "WSJT" (case-sensitive) -- cqrlog's own parser only
+	// reads the Operator call/My call/My grid/Exchange sent/Exchange
+	// received tail of this message `if Pos('WSJT',RemoteName)>0`
+	// (fNewQSO.pas, their comment: "no contest in JTDX"), gating on the
+	// sender Id string itself.
+	static const char *id = "zbitxd (WSJT-X protocol)";
 
 	udp_write_u32(buf, &pos, 0xadbccbda); // magic
 	udp_write_u32(buf, &pos, 2);          // schema 2 (avoids schema 3's extra tz fields)
 	udp_write_u32(buf, &pos, 5);          // type 5 = QSO Logged
-	udp_write_utf8(buf, &pos, id);        // sender Id (every message has this)
-
-	udp_write_utf8(buf, &pos, id);        // "Id (unique key)" -- reused, unused by cqrlog
+	udp_write_utf8(buf, &pos, id);        // sender Id -- the *only* Id field on the wire.
+	// WSJT-X's own doc text lists a type-5-specific "Id (unique key)"
+	// field right after this, which reads as a second wire field but
+	// isn't one -- it's the same header Id referenced a second time in
+	// their prose, with type-5-specific semantics attached, not an
+	// actual extra string on the wire. Confirmed against cqrlog's own
+	// parser (fNewQSO.pas): its type-5 handler does exactly one StrBuf()
+	// read before the Date&Time Off QDateTime. Sending a real second
+	// copy here (as an earlier version of this code did) shifts every
+	// field after it by 10 bytes -- including both QDateTime blocks --
+	// producing a garbage Julian day and the exact cqrlog "date error"
+	// seen on a real import.
 	udp_write_qdatetime_utc(buf, &pos, tmp); // Date & Time Off
 	udp_write_utf8(buf, &pos, dx_call);
 	udp_write_utf8(buf, &pos, dx_grid);
@@ -400,7 +436,7 @@ static void udp_broadcast_qso_logged(const char *dx_call, const char *dx_grid,
 	udp_write_qdatetime_utc(buf, &pos, tmp); // Date & Time On -- same value, see comment above logbook_add()
 	udp_write_utf8(buf, &pos, mycall);    // Operator call
 	udp_write_utf8(buf, &pos, mycall);    // My call
-	udp_write_utf8(buf, &pos, mygrid);
+	udp_write_utf8(buf, &pos, my_grid_sent);
 	udp_write_utf8(buf, &pos, exch_sent);
 	udp_write_utf8(buf, &pos, exch_recv);
 
