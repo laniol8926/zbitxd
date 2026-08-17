@@ -2,55 +2,58 @@ These are text commands that can be entered from the keyboard
 \callsign [callsign]
 	Sets your callsign to the following string.
 \grid [grid]
-	Sets your grid (six letters) that is used in FT8 and other modes to 
+	Sets your grid (six letters) that is used in FT8 and other modes to
 	indicate your approximate locationi.
 \freq [frequency in Hz or Kilohertz]
-	You can also type just 'f' instead 'freq' 
+	You can also type just 'f' instead 'freq'
 	if you the type '\f 7050' it will set be the same as '\freq 7050000'
+	Refused while transmitting.
 \cwdelay [100-2000] msec. How long radio remains in transmit in CW before
 	timing out to rx. ex: "\cwdelay 500"
-\cwinput [key\keyer\kbd]
-	Chooses the CW input method between straight key(key), Iambic keyer(keyer)
-	and the keyboard (kbd).
-\mode [USB\LSB\etc..]...
+\cwinput [IAMBIC/IAMBICB/STRAIGHT]
+	Chooses the CW input method between straight key(STRAIGHT) and
+	Iambic keyer, mode A or B (IAMBIC/IAMBICB).
+\mode [USB/FT8/FT4]
 	Chooses from the modes available in the mode selection control.
 	You can use 'm' instead of 'mode'
-\t 
+\t
 	Puts the radio into transmit. You can also use Ctrl-T
-\r 
+\r
 	Puts the radio into receive. You can also use Ctrl-R
 \topen [server]:[port]
 	Opens a telnet session with an RBN or a DX cluster telnet server.
 	It works with ip address as well as domain names
 	Ex: \topen dxc.g3lrs.org.ul:7300
-\tclose 
+\tclose
 	Closes the existing telnet session
 \w [telnet command string]
 	Writes the remaining text (skipping the space after '\w') to the
 	currently opened telnet server
 \txpitch [in Hz]
-	Sets the tone of transmit tone of the CW. 
+	Sets the tone of transmit tone of the CW.
 	Ex: \txpitch 700
-10M	
+	Refused while transmitting.
+10M
 12M
 15M
 17M
 20M
 30M
 40M
+60M
 80M
 REC ON/OFF
 WEB
 AGC OFF/SLOW/MED/FAST
-DRIVE 1-100
-FREQ/F/f 
+DRIVE 0-100
+FREQ/F/f
+	Refused while transmitting.
 AUDIO 0-100
-STEP 10K/1K/100H/10H
+STEP 10K/1K/500H/100H/10H
 SPAN 25K/10K/6K/2.5K
 RIT ON/OFF
-VFO A/B
 BW 50-5000 (Hz)
-MODE USB/LSB/CW/CWR/FT8/DIGITAL/2TONE
+MODE USB/FT8/FT4
 
 Logger Controls
 CALL [text]
@@ -58,7 +61,7 @@ SENT [text]
 RECV [text]
 EXCH [text]
 NR [text]
-LOG Enter the QSO into the Logbook
+SAVE Enter the QSO into the Logbook
 WIPE
 QRZ
 TEXT
@@ -79,21 +82,69 @@ RIT_DELTA -25000 to 25000 (Hz)
 CW_INPUT IAMBIC/IAMBICB/STRAIGHT
 CW_DELAY 50-1000 (msec)
 TX_PITCH 300-3000 (Hz)
-SIDTONE 0-100
+	Refused while transmitting.
+SIDETONE 0-100
 SENT_EXCHANGE (text)
 CONTEST_SERIAL 0-100000
-MACRO overloaded  
+MACRO overloaded
 POWER (watts)
 REF (in 1/10th of VSWR)
-ESC Abort
+abort
+	Immediately stop TX and, if Auto CQ is running, stop it too. Also
+	clears the logger's CALL field, so a fresh CQ reply auto-answers
+	correctly next time (an abandoned/aborted manual attempt used to
+	leave CALL stuck, permanently blocking auto-answer until something
+	else overwrote it).
 BW_CW (Hz)
 BW_VOICE (Hz)
 BW_DIGITAL (Hz)
 
-FT8_AUTO ON/OFF/CQ_ALT/xOTA
+FT8_AUTO OFF/ON/AUTOCQ
+	AUTOCQ transmits CQ on repeat and auto-answers whoever replies,
+	cycling back to CQ once each QSO closes out. Arm/disarm it by
+	clicking TX Enabled while idle (see AUTOCQSTART below), not by
+	setting this field directly.
 FT8_TX1ST ON/OFF
 FT8_REPEAT 1-10
+	How many times to repeat a CQ/reply before giving up. See
+	FT8_REPEAT_RESET below to reset the on-screen countdown mid-cycle
+	without waiting for it to run out on its own.
 TELNETURL [server:port]
 
 
+Added by the generic-rig-backend fork
+-------------------------------------
+These aren't in upstream zbitxd.
 
+RIGMODEL [hamlib model id]
+RIGDEVICE [serial device path]
+RIGBAUD [baud rate]
+	CAT connection for the generic rig backend (radio=generic). Set
+	through the Connect panel's pickers, not normally typed by hand.
+CAPTUREDEV [ALSA device]
+PLAYBACKDEV [ALSA device]
+	Audio devices for the generic rig backend. Also normally set
+	through the Connect panel.
+AUTOCQSTART
+	Arms Auto CQ (see FT8_AUTO above) -- equivalent to clicking TX
+	Enabled while idle with FT8_AUTO set to AUTOCQ.
+FT8_REPEAT_RESET
+	Resets the on-screen FT8 repeat countdown back to FT8_REPEAT's
+	value on demand, without waiting for it to run out.
+TXPOWER [text]
+ANTENNA [text]
+COMMENTS [text]
+	Logged with every QSO. TXPOWER gets its own logbook column;
+	ANTENNA and COMMENTS are folded into the logged Comments field
+	alongside any generic-rig description.
+UDPLOGHOST [host]
+UDPLOGPORT [port]
+	Live-broadcasts each logged QSO to a UDP-listening logger (e.g.
+	CQRLog) using WSJT-X's own UDP "QSO Logged" protocol. UDPLOGHOST
+	blank disables it (the default). See README.md's Logging section.
+LOGEXPORT
+	Exports the whole logbook to a correctly-formatted ADIF 3.1.4
+	file; the client then downloads /logbook_export.adi. Bound to the
+	"Export ADIF" button in the FT8 panel's toolbar.
+QSODEL [logbook id]
+	Deletes a single logbook row by id.
