@@ -88,7 +88,14 @@ echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo "*** zbitxd itself ($BRANCH)"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 if [ ! -d "$ZBITXD_DIR" ]; then
-	git clone --recurse-submodules "$REPO_URL" "$ZBITXD_DIR"
+	# --branch here matters, not just cosmetic: without it this clones
+	# the repo's *default* branch (main) first and resolves submodules
+	# against *that* commit, before the checkout below ever runs -- and
+	# main can lag generic-rig-backend (confirmed live: main was still
+	# on an older commit with a since-fixed SSH submodule URL, so a
+	# fresh clone failed here even after that fix had already landed on
+	# generic-rig-backend).
+	git clone --recurse-submodules --branch "$BRANCH" "$REPO_URL" "$ZBITXD_DIR"
 fi
 (
 	cd "$ZBITXD_DIR"
