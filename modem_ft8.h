@@ -15,6 +15,8 @@ void ft8_poll(int tx_is_on);
 float ft8_next_sample();
 void ft8_process(char *message, ftx_operation operation);
 int ft8_is_repeating();
+// On-demand mid-cycle reset of the countdown, see its own comment.
+void ft8_repeat_reset();
 // Arms Auto CQ mode (queues the first CQ call and marks it to keep
 // repeating indefinitely, resuming after each QSO, until aborted) --
 // see the ft8_autocq_running comment in modem_ft8.c for the full design.

@@ -1731,6 +1731,13 @@ int freq_in_any_band(int freq){
 // setting the frequency is complicated by having to take care of the
 // rit/split and power levels associated with each frequency
 void set_operating_freq(int dial_freq, char *response){
+	// Deliberately NOT guarded on in_tx here, unlike its two real
+	// operator-facing callers (change_band(), the "freq" cmd_exec
+	// handler) -- tx_on()/tx_off() call this internally to re-apply the
+	// *current*, unchanged frequency as part of literally keying up/
+	// down, by which point in_tx is already true/still true. Guarding
+	// here too would refuse that legitimate internal call and leave the
+	// rig never actually retuned for the burst about to go out.
 	struct field *rit = get_field("#rit");
 	struct field *split = get_field("#split");
 	struct field *vfo_a = get_field("#vfo_a_freq");
@@ -2776,6 +2783,18 @@ void change_band(char *request){
 	long new_freq, old_freq;
 	char buff[100];
 
+	// Refuse the whole band change outright while transmitting -- see
+	// set_operating_freq()'s own comment. Guarding here too (not just
+	// there) matters: below this point, a band change also mutates the
+	// FREQ/MODE display fields and calls abort_tx() unconditionally,
+	// regardless of whether the actual retune succeeded -- leaving that
+	// unguarded would show a frequency the radio never actually tuned
+	// to, while still killing the transmission via abort_tx().
+	if (in_tx){
+		fprintf(stderr, "change_band: refused, currently transmitting\n");
+		return;
+	}
+
 	//find the band that has just been selected, the first char is #, we skip it
 	for (new_band = 0; new_band < max_bands; new_band++)
 		if (!strcmp(request, band_stack[new_band].name))
@@ -3353,6 +3372,10 @@ void cmd_exec(char *cmd){
 	// only ever needs to handle starting it.
 	else if (!strcmp(exec, "AUTOCQSTART"))
 		ft8_autocq_start();
+	// On-demand mid-cycle repeat-counter reset -- clicking the countdown
+	// badge, user's own ask.
+	else if (!strcmp(exec, "FT8_REPEAT_RESET"))
+		ft8_repeat_reset();
 	else if (!strcmp(exec, "txcal")){
 		char response[10];
 		sdr_request("txcal=", response);
@@ -3397,6 +3420,17 @@ void cmd_exec(char *cmd){
 	}
 	else if(!strcmp(exec, "freq") || !strcmp(exec, "f") ||
 		!strcmp(exec, "FREQ")){
+		// Refuse outright while transmitting -- same reasoning as the
+		// out-of-band check right below (this handler sets r1:freq/
+		// #rit_delta directly, bypassing set_operating_freq() and its
+		// own in_tx guard entirely), and user's own call: "I should
+		// absolutely not be able to change my transmit frequency while
+		// I am transmitting."
+		if (in_tx){
+			write_console(STYLE_LOG, "Can't change frequency while transmitting\n");
+			return;
+		}
+
 		long freq = atol(args);
 		if (freq == 0){
 			write_console(STYLE_LOG, "Usage: \f xxxxx (in Hz or KHz)\n");
@@ -3438,6 +3472,21 @@ void cmd_exec(char *cmd){
 			set_field("r1:freq", freq_s);
 		}
 	}
+	// TX tone/offset (dial + this = actual TX frequency) -- clicking
+	// the waterfall is the normal way this gets set, but that's just a
+	// client-side UX guard; refusing it here too is the actual
+	// enforcement, same reasoning as "freq" above. User's own call:
+	// "I should not be able to change the transmit frequency by
+	// clicking on the waterfall while transmitting." No dedicated
+	// branch existed for this before -- it fell straight through to
+	// the generic get_field_by_label()/set_field() fallback below.
+	else if (!strcmp(exec, "TX_PITCH")){
+		if (in_tx){
+			write_console(STYLE_LOG, "Can't change TX tone while transmitting\n");
+			return;
+		}
+		set_field("#tx_pitch", args);
+	}
   else if (!strcmp(exec, "exit")){
     tx_off();
     set_field("#record", "OFF");
@@ -3474,8 +3523,12 @@ void cmd_exec(char *cmd){
 	else if (!strcmp(exec, "tel"))
 		telnet_write(args);
 	else if (!strcmp(exec, "txpitch")){
+		if (in_tx){
+			write_console(STYLE_LOG, "Can't change TX tone while transmitting\n");
+			return;
+		}
 		if (strlen(args)){
-			int t = atoi(args);	
+			int t = atoi(args);
 			if (t > 100 && t < 4000)
 				set_field("#tx_pitch", args);
 			else

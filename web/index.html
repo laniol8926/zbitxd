@@ -120,7 +120,7 @@
 			</div><div class="linear" id="linear_FT8_REPEAT" title="Set the Number Of Repeat Transmissions">
     			<div class="linear-label">RPT</div>
     			<input type="number" id="FT8_REPEAT" min="1" max="10" class="linear-value" />
-    			<span class="ft8-repeat-count" id="FT8_REPEATCNT_DISPLAY"></span>
+    			<span class="ft8-repeat-count" id="FT8_REPEATCNT_DISPLAY" title="Click to reset the repeat countdown"></span>
      		<div class="linear-dropdown">
       		<input type="range" class="linear-slider"
         		id="slider_FT8_REPEAT" max="10" min="1" step="1" value="3" />
@@ -1365,6 +1365,19 @@ function wf_overlay_click(event){
 		return;
 	}
 
+	// Refuse to retune the transmitter while literally transmitting --
+	// same reasoning/scope as the BAND/keypad frequency-change guards
+	// server-side (change_band()/the "freq" cmd_exec handler): in_tx
+	// here tracks literal "RF is on right now" (switch_to_tx()/
+	// switch_to_rx()), not the broader "armed, will transmit again
+	// shortly" state. User's own call: "I should not be able to change
+	// the transmit frequency by clicking on the waterfall while
+	// transmitting."
+	if (in_tx){
+		event.preventDefault();
+		return;
+	}
+
 	var ov = el("waterfall_overlay");
 	var rect = ov.getBoundingClientRect();
 	var clientX = event.touches ? event.touches[0].clientX : event.clientX;
@@ -2007,7 +2020,7 @@ function ft8_cq_message_callsign(text){
     return deco_strip(token_list[call_idx]);
 }
 
-function FT8_stylize_message_item(item, text, style) {
+function FT8_stylize_message_item(item, text, style, list_id) {
     //tokenize the message
     var token_list = text.match(/\S+/g);
     if (token_list.length < 6 || token_list.length > 9){
@@ -2027,6 +2040,16 @@ function FT8_stylize_message_item(item, text, style) {
 
     var label_position = text.search("~");
     var label = text.substring(0, label_position);
+    // RX Frequency -- user's own ask: drop the DT/SNR diagnostic
+    // numbers, keep just the timestamp and frequency. A focused view of
+    // one exchange doesn't need signal-quality metadata the way picking
+    // which CQ to answer does (Band Activity/CQ Panel keep the full
+    // label). token_list[tilde_pos - 1] is always the frequency field
+    // immediately before the tilde, in both the RX-decode label shape
+    // (time/DT/SNR/freq) and the shorter TX-echo shape (time/TX/freq,
+    // which never had DT/SNR to begin with).
+    if (list_id === "wsjtx-rx")
+	label = token_list[0] + " " + token_list[tilde_pos - 1] + " ";
 
     // fields from RX messages
     var confidence_score = token_list[1];
@@ -2117,7 +2140,7 @@ function FT8_list_append(list_id, text, style){
 		return;
 
 	var item = document.createElement("li");
-	FT8_stylize_message_item(item, text, style);
+	FT8_stylize_message_item(item, text, style, list_id);
 
 	item.id = deco_strip(text).replace(/[^\w\-\/\~]+/g, "_");
 	// item.id above squashes spaces to '_' -- fine for a DOM id, but
@@ -2374,7 +2397,15 @@ function FT8_lists_clear() {
 
 function FT8_new_message(text, style){
 	//log("ft8:" + text + ":" + style);
-	var words = text.split(' ');
+	// \S+ (collapses repeated whitespace), not split(' ') -- the server
+	// pads the frequency field to a fixed width (e.g. " 647" vs "1834"),
+	// so a naive split(' ') put it at a *different* array index
+	// depending on the frequency's digit count (sometimes 3, sometimes
+	// 4), silently breaking the "at my tuned frequency" RX Frequency
+	// match below for whichever case didn't happen to line up. Same
+	// tokenization FT8_stylize_message_item()/ft8_message_tokenize()
+	// already use, where the frequency field is reliably index 3.
+	var words = text.match(/\S+/g) || [];
 	FT8_list_append("wsjtx-activity", text, style) ;
 	// CQ Panel is for stations calling CQ, not the operator's own CQ --
 	// style is "RX" only for genuine incoming decodes ("TX"/"Q" are the
@@ -2396,7 +2427,7 @@ function FT8_new_message(text, style){
 			autoans_pick_and_answer();
 	}
 	var mycallsign = $("#MYCALLSIGN").val().toUpperCase();
-	if (words[4] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0)
+	if (words[3] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0)
 		FT8_list_append("wsjtx-rx", text, style);
 }
 
@@ -3990,6 +4021,12 @@ $("#settings_save").on("click", save_settings);
 $("#tune_toggle").on("click", toggle_tune);
 $("#reboot-open").on("click", reboot_clicked);
 $("#shutdown-open").on("click", shutdown_clicked);
+// On-demand mid-cycle repeat-counter reset -- user's own ask: "gets
+// down to one and i choose to keep going." No-op server-side while
+// idle (see ft8_repeat_reset()'s own comment), so safe to always bind.
+$("#FT8_REPEATCNT_DISPLAY").on("click", function(){
+	websocket_send("FT8_REPEAT_RESET");
+});
 
 //connect panel buttons
 $("#connect-open").on("click", open_connect);

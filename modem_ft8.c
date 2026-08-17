@@ -1762,6 +1762,18 @@ int ft8_is_repeating(){
 	return ft8_repeat > 0 || ft8_autocq_resume_pending;
 }
 
+// On-demand mid-cycle reset, clicking the countdown badge -- user's own
+// ask: "gets down to one and i choose to keep going" (rather than
+// letting it hit zero and give up on this CQ call/reply/Auto CQ round).
+// Deliberately a no-op while idle (ft8_repeat already 0, nothing being
+// repeated to extend) rather than resurrecting a finished round.
+void ft8_repeat_reset(){
+	if (ft8_repeat <= 0)
+		return;
+	ft8_repeat = field_int("FT8_REPEAT");
+	set_field_int("#ft8_repeat_count", ft8_repeat);
+}
+
 // Fully terminates Auto CQ mode -- deliberately NOT part of ft8_abort()
 // above, since that gets called directly (bypassing this) from two
 // normal, non-terminating contexts: the tx_is_on save/restore dance in

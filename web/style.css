@@ -1038,6 +1038,9 @@ body {
 	right: 3px;
 	font-size: 12px;
 	color: white;
+	/* Clickable -- resets the countdown mid-cycle, see its click
+	   handler's own comment. */
+	cursor: pointer;
 }
 
 .macro-btn {
