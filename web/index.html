@@ -428,7 +428,7 @@
 <!- wsjtx specific controls -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div class="panel-toolbar-row">
-				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label><label class="panel-toggle-label"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> Hide Waterfall</label>
+				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label><label class="panel-toggle-label"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> Hide Waterfall</label><label class="panel-toggle-label"><input type="checkbox" id="HIDE_WORKED_CHECK" /> Hide Worked</label>
 			</div>
 			<div id="wsjtx-activity" class="sbitx-list-container" >
 				<div class="sbitx-list-title">Band Activity</div>
@@ -574,6 +574,13 @@ var session_id = "nullsession";
 var macros_file = "";
 var logbook_bottom_row_id = -1;
 var logbook_top_row_id= 0;
+// "CALLSIGN|MODE|BAND" keys, built up from every logbook row synced via
+// logbook_update() (which already runs on a 500ms poll regardless of
+// whether the Logbook panel is open, and converges to the whole history
+// within seconds of login) -- lets the CQ Panel "Hide Worked" filter
+// answer "have I worked this station on this band/mode before" purely
+// client-side, no new server query needed.
+var worked_set = new Set();
 var sound_mute = false;
 
 // Auto noise-floor tracking for the waterfall display (replaces the old
@@ -1996,6 +2003,24 @@ function ft8_cq_message_callsign(text){
     return deco_strip(token_list[call_idx]);
 }
 
+// "Hide Worked" CQ Panel filter -- user's own ask, after clicking a
+// station he'd already logged earlier the same day: only suppresses a
+// match on the *current* band+mode (BAND/MODE stay authoritatively
+// synced to the radio's real state, see the FREQ/MODE response cases),
+// not "ever worked" -- working the same station again on a different
+// band or mode is a legitimate new contact. worked_set is populated in
+// logbook_update().
+function FT8_already_worked(text){
+    if (!hide_worked_enabled)
+	return false;
+    var call = ft8_cq_message_callsign(text);
+    var band = el("BAND") ? el("BAND").value : null;
+    var mode = el("MODE") ? el("MODE").value : null;
+    if (!call || !band || !mode)
+	return false;
+    return worked_set.has(call.toUpperCase() + "|" + mode.toUpperCase() + "|" + band);
+}
+
 function FT8_stylize_message_item(item, text, style, list_id) {
     //tokenize the message
     var token_list = text.match(/\S+/g);
@@ -2411,7 +2436,7 @@ function FT8_new_message(text, style){
 	// the operator's own CQ from a panel meant to show who's out there
 	// to answer, not echo what was just sent (still shows in Band
 	// Activity and RX Frequency, both unaffected by this check)
-	if (style == "RX" && FT8_message_is_cq(text)){
+	if (style == "RX" && FT8_message_is_cq(text) && !FT8_already_worked(text)){
 		FT8_list_append("wsjtx-cq", text, style);
 		// Auto Answer was waiting specifically for a CQ that isn't the
 		// one it just gave up on/finished with -- check whether this
@@ -2847,6 +2872,14 @@ function logbook_update(args){
 		return;
 
 	var qso_id = token[0];
+
+	// Feed the "Hide Worked" filter -- token[1]/[2]/[8] are mode/freq(kHz)/
+	// callsign_recv (see the power-field comment below for the full column
+	// order). freq_to_band() already exists for the BAND-dropdown sync
+	// above (FREQ case) and takes Hz, hence the *1000.
+	var wk_band = freq_to_band(parseFloat(token[2]) * 1000);
+	if (wk_band && token[8])
+		worked_set.add(token[8].toUpperCase() + "|" + token[1].toUpperCase() + "|" + wk_band);
 
 	// A QSO just got logged -- user's own ask: unhide Band Activity
 	// again. logbook_watch_armed guards against the initial bulk load;
@@ -3936,6 +3969,22 @@ $("#HIDE_WATERFALL_CHECK").on("change", function(){
 	set_waterfall_hidden(this.checked);
 });
 set_waterfall_hidden(localStorage.getItem("hide_waterfall") === "1");
+
+// Hide Worked -- same persisted-checkbox pattern as the two above.
+// Just a flag FT8_already_worked() reads; no retroactive re-filtering of
+// CQ lines already on screen, only affects what gets appended from here
+// on (matches how the checkbox reads on a fresh page load anyway, since
+// the panel is empty until FT8_lists_clear()/new decodes repopulate it).
+var hide_worked_enabled = (localStorage.getItem("hide_worked") === "1");
+function set_hide_worked(hide){
+	localStorage.setItem("hide_worked", hide ? "1" : "0");
+	el("HIDE_WORKED_CHECK").checked = hide;
+	hide_worked_enabled = hide;
+}
+$("#HIDE_WORKED_CHECK").on("change", function(){
+	set_hide_worked(this.checked);
+});
+set_hide_worked(hide_worked_enabled);
 $("#qrz").on("click", logger_qrz);
 $("#logger-log").on("click", logger_enter_qso);
 //$("#macros").on("click", logger_toggle_macros);
