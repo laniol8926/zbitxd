@@ -908,36 +908,16 @@ void sdr_request(char* request, char* response)
 		bridge_compensation = atoi(value);
 	} else if (!strcmp(cmd, "r1:gain")) {
 		rx_gain = atoi(value);
-		if (generic_rig_mode) {
-			// on real hardware this is RX RF gain, not the zBitx SDR's
-			// IF/ALSA-capture gain below -- there's no separate hardware
-			// IF stage to adjust on a rig that does its own
-			// downconversion. Was rig_generic_set_level("RF", ...)
-			// (hamlib's set_level abstraction), but rigctl --dump-caps
-			// confirmed neither the QMX nor the RS-978 expose ANY
-			// settable hamlib level at all, so that was a guaranteed
-			// no-op -- replaced with the QMX's own native "RG" CAT
-			// command (see rig_generic_set_rf_gain()). Skipping in_tx
-			// here deliberately (unlike the zBitx branch): RF gain only
-			// ever affects RX, and holding off a CAT round-trip during
-			// an active transmission avoids adding serial-port
-			// contention right when FT8's slot timing is precise.
-			//
-			// Also drives a software gain stage on the captured audio
-			// (sound_generic.c) unconditionally, not just for the QMX --
-			// most rigs on this backend (confirmed for the RS-978/mcHF
-			// by reading UHSDR's actual firmware source) have no CAT
-			// path to gain at all, so software gain on the captured
-			// samples is the only thing that actually does anything for
-			// them. This mirrors what WSJT-X itself does: its own "Rx"
-			// slider is a software gain on the audio it captures, not a
-			// CAT command to the radio. Sent regardless of in_tx since,
-			// unlike the CAT round-trip above, it's just a local
-			// variable write with no serial-port contention to avoid.
-			sound_generic_set_rx_gain(rx_gain / 100.0f);
-			if (!in_tx)
-				rig_generic_set_rf_gain(rx_gain);
-		} else if (!in_tx)
+		// generic_rig_mode: RX gain is now fully closed-loop, managed by
+		// autogain_update() in sound_generic.c's capture thread -- a
+		// nearby station overdriving its own amplifier and splattering
+		// across the band is a generic problem the operator shouldn't
+		// have to notice and react to by hand (user's own call). No
+		// longer takes manual input here; the UI's RF slider was removed
+		// to match. Left as a plain no-op rather than deleting this
+		// branch outright, so a stray "r1:gain"/"IF" command can't fight
+		// the auto-gain loop by writing a stale value out from under it.
+		if (!generic_rig_mode && !in_tx)
 			sound_mixer(audio_card, "Capture", rx_gain);
 	} else if (!strcmp(cmd, "r1:volume")) {
 		rx_vol = atoi(value);

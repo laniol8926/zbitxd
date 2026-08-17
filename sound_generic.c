@@ -18,6 +18,7 @@
 #include "sdr.h"
 #include "sdr_ui.h"
 #include "sound_generic.h"
+#include "rig_generic.h"
 
 // modem_next_sample()/ft8_next_sample() are tuned for 96ksps -- see the
 // comment on modem_next_sample() in modems.c ("the ft8 samples are
@@ -80,6 +81,76 @@ static volatile float generic_rx_gain = 1.0f;
 void sound_generic_set_rx_gain(float gain)
 {
 	generic_rx_gain = gain;
+}
+
+// Auto RX gain -- replaces the old manual RF slider entirely (user's own
+// call: a strong nearby station overdriving its own amplifier and
+// splattering across the band is a generic problem, not something the
+// operator should have to notice and react to by hand every time). Runs
+// entirely inside capture_thread_fn() below, evaluated on the *raw*
+// samples straight off snd_pcm_readi() -- before generic_rx_gain is
+// applied -- so it's judging the real front-end level, not its own past
+// adjustments.
+//
+// Ceiling is unity (1.0): software gain above that doesn't add real
+// information, just rescales already-quantized samples, so 1.0 already
+// is "maximum sensitivity, nothing held back". Floor is a sanity clamp,
+// not expected to be hit in normal operation.
+//
+// Stepped down fast on sustained overload (a couple of seconds, not one
+// isolated burst -- a single loud transmission shouldn't yank gain
+// around) and back up slowly once the band's clean again (tens of
+// seconds per step), so it can't oscillate and doesn't snap straight
+// back to full gain the instant an overloading station's transmission
+// ends. Same gain value also drives rig_generic_set_rf_gain() (real
+// hardware gain on a QMX, silent no-op on everything else that has no
+// CAT path to one) -- see the "r1:gain" handler in sbitx.c, which no
+// longer takes manual input for generic_rig_mode now that this owns it.
+#define AUTOGAIN_CLIP_THRESHOLD ((float)INT32_MAX * 0.9f)
+#define AUTOGAIN_CLIP_FRACTION 0.01f  // >1% of a read's samples near full-scale counts that read as overloaded
+#define AUTOGAIN_STEPDOWN_SECONDS 1.5f
+#define AUTOGAIN_STEPUP_SECONDS 15.0f
+#define AUTOGAIN_STEPDOWN_RATIO 0.708f  // -3dB
+#define AUTOGAIN_STEPUP_RATIO 1.122f    // +1dB
+#define AUTOGAIN_FLOOR 0.05f            // -26dB, a sanity clamp against runaway, not a normal operating point
+#define AUTOGAIN_CEILING 1.0f
+
+static float autogain_overload_seconds = 0.0f;
+static float autogain_clean_seconds = 0.0f;
+
+static void autogain_update(const int32_t *buf, int n_samples, float seconds_this_read)
+{
+	int clipped = 0;
+	for (int i = 0; i < n_samples; i++) {
+		int32_t s = buf[i];
+		if (s > AUTOGAIN_CLIP_THRESHOLD || s < -AUTOGAIN_CLIP_THRESHOLD)
+			clipped++;
+	}
+	int overloaded = clipped > (int)(n_samples * AUTOGAIN_CLIP_FRACTION);
+
+	if (overloaded) {
+		autogain_clean_seconds = 0.0f;
+		autogain_overload_seconds += seconds_this_read;
+		if (autogain_overload_seconds >= AUTOGAIN_STEPDOWN_SECONDS) {
+			autogain_overload_seconds = 0.0f;
+			float g = generic_rx_gain * AUTOGAIN_STEPDOWN_RATIO;
+			if (g < AUTOGAIN_FLOOR)
+				g = AUTOGAIN_FLOOR;
+			generic_rx_gain = g;
+			rig_generic_set_rf_gain((int)(g * 100.0f));
+		}
+	} else {
+		autogain_overload_seconds = 0.0f;
+		autogain_clean_seconds += seconds_this_read;
+		if (autogain_clean_seconds >= AUTOGAIN_STEPUP_SECONDS) {
+			autogain_clean_seconds = 0.0f;
+			float g = generic_rx_gain * AUTOGAIN_STEPUP_RATIO;
+			if (g > AUTOGAIN_CEILING)
+				g = AUTOGAIN_CEILING;
+			generic_rx_gain = g;
+			rig_generic_set_rf_gain((int)(g * 100.0f));
+		}
+	}
 }
 
 // Waterfall/spectrum for the generic-rig backend. The SDR's own spectrum
@@ -350,6 +421,9 @@ static void *capture_thread_fn(void *arg)
 				}
 				continue;
 			}
+			// Judge the real front-end level on the raw samples, before
+			// our own gain (if any) is applied below.
+			autogain_update(buf, (int)n, (float)n / GENERIC_SAMPLE_RATE);
 			if (generic_rx_gain != 1.0f) {
 				float gain = generic_rx_gain;
 				for (int i = 0; i < (int)n; i++) {
