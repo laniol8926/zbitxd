@@ -20,15 +20,6 @@ These are text commands that can be entered from the keyboard
 	Puts the radio into transmit. You can also use Ctrl-T
 \r
 	Puts the radio into receive. You can also use Ctrl-R
-\topen [server]:[port]
-	Opens a telnet session with an RBN or a DX cluster telnet server.
-	It works with ip address as well as domain names
-	Ex: \topen dxc.g3lrs.org.ul:7300
-\tclose
-	Closes the existing telnet session
-\w [telnet command string]
-	Writes the remaining text (skipping the space after '\w') to the
-	currently opened telnet server
 \txpitch [in Hz]
 	Sets the tone of transmit tone of the CW.
 	Ex: \txpitch 700
@@ -109,7 +100,6 @@ FT8_REPEAT 1-10
 	How many times to repeat a CQ/reply before giving up. See
 	FT8_REPEAT_RESET below to reset the on-screen countdown mid-cycle
 	without waiting for it to run out on its own.
-TELNETURL [server:port]
 
 
 Added by the generic-rig-backend fork

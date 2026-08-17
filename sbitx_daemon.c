@@ -691,9 +691,6 @@ struct field main_controls[] = {
 	{"#cq_kind", NULL, 1000, -1000, 50, 50, "CQKIND", 40, "CQ", FIELD_SELECTION,
 		"CQ/DX/POTA/IOTA/SOTA", 0, 0, 0, FT8_CONTROL},
 
-	{"#telneturl", NULL, 1000, -1000, 400, 149, "TELNETURL", 70, "dxc.nc7j.com:7373", FIELD_TEXT, 
-		"", 0,32,1, 0},
-
 	//soft keyboard
 	{"#kbd_q", do_kbd, 0, 300 ,50, 50, "", 1, "Q", FIELD_BUTTON,"", 0,0,0,0}, 
 	{"#kbd_w", do_kbd, 50, 300, 50, 50, "", 1, "W", FIELD_BUTTON,"", 0,0,0,0}, 
@@ -1075,9 +1072,6 @@ void  web_write(int style, char *data){
 			break;
 		case STYLE_CW_TX:
 			strcpy(tag, "CW-TX");
-			break;
-		case STYLE_TELNET:
-			strcpy(tag, "TELNET");
 			break;
 		default:
 			strcpy(tag, "LOG");
@@ -3544,16 +3538,6 @@ void cmd_exec(char *cmd){
                 tx_on(TX_SOFT);
                 sound_input(1);
             }
-	else if (!strcmp(exec, "telnet")){
-		if (strlen(args) > 5) 
-			telnet_open(args);
-		else
-			telnet_open(get_field("#telneturl")->value);
-	}
-	else if (!strcmp(exec, "tclose"))
-		telnet_close(args);
-	else if (!strcmp(exec, "tel"))
-		telnet_write(args);
 	else if (!strcmp(exec, "txpitch")){
 		if (in_tx){
 			write_console(STYLE_LOG, "Can't change TX tone while transmitting\n");

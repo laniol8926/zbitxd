@@ -285,13 +285,6 @@
 		</div>
 
 		<div class="settings-element">
-			<span class="settings-label">Telnet Server:</span>
-			<input type="text" class="settings_input sbitx-text-input" size="17"
-				id="TELNETURL" />
-			(Like : dxc.nc7j.com:7373)
-		</div>
-
-		<div class="settings-element">
 			<span class="settings-label"></span>
 			<button id="settings_save" class="logger-button">Update</button>
 		</div>
@@ -548,23 +541,7 @@
 			</div>
 		</div>
 
-<!-- telnet panel -->
-		<div id ="telnet_panel" class="sbitx-panel">
-			<span class="sbitx-panel-title">
-				<button class="sbitx-btn-back" data-for="panel_bar">&#x2716; Close</button>  
-			</span>
-			Telnet 
-				<button id="telnet" class="logger-button sbitx-btn">Start</button>	 
-				<button id="tclose" class="logger-button sbitx-btn">Stop</button> 
-			<div id="telnet_window">
-			</div>
-			<div id="telnet_command_bar">
-				<input type="text" class="sbitx-text-input"  id="telnet_in" />
-			</div>
-		</div>
-
-
-	</div><!-- end of main used to limit overlapping of sidebar -->   
+	</div><!-- end of main used to limit overlapping of sidebar -->
 <!-- the keyboard, comes at the bottom of them all -->
 </div> <!-- end of sdr_page (vs login page, etc)--> 
 	<div id="keybd-container">
@@ -610,7 +587,6 @@ var qrz_window = null;
 var log_window = null;
 var session_id = "nullsession";
 var macros_file = "";
-var spots = null;
 var logbook_bottom_row_id = -1;
 var logbook_top_row_id= 0;
 var sound_mute = false;
@@ -2532,51 +2508,6 @@ function show_console_panel(){
 	open_panel("console_panel");
 }
 
-/* telnet functionality */
-
-function telnet_update(text){
-	var window = el("telnet_window");
-	window.innerHTML = window.innerHTML + text;
-	window.scrollTop = window.scrollHeight;	
-	
-	let word = text.split(' ');
-	let i = 0;
-	if (word[i] != 'DX')
-		return;
-	i++;
-	while(word[i] == '') i++;
-
-	if (word[i] != 'de')
-		return;
-
-	i++;
-	while(word[i] == '') i++;
-
-	i++; //skip the spotter's callsign
-	while(word[i] == '') i++;
-
-	let freq = parseInt(word[i++]);
-
-	while(word[i] == '') i++;
-
-	let call = word[i++];	
-	while(word[i] == '') i++;
-	
-	let m = word[i];	
-	
-	let s = {
-		frequency: freq,
-		callsign: call,
-		mode: m,	
-	}
-	spots.unshift(s);
-}
-
-function show_telnet_panel(){
-	return; // temporarily disabled
-	open_panel("telnet_panel");
-}
-
 /* voice functionality */
 function voice_open(){
 //	el("spectrum").height =  150;
@@ -3173,7 +3104,6 @@ function save_settings(){
 	websocket_send("UDPLOGPORT " + el("UDPLOGPORT").value);
 	websocket_send("PASSKEY " + el("PASSKEY").value);
 	websocket_send("SIDETONE " + el("SIDETONE").value);
-	websocket_send("TELNETURL " + el("TELNETURL").value);
 	save_bandfreq_table();
 	// Rig/audio device fields live in connect_panel now (see connect_rig()/
 	// connect_audio()), which each already force their own immediate save --
@@ -3275,11 +3205,6 @@ function update_data(text){
 			for (var i = 0; i < wsjtx.length; i++)
 				if (wsjtx[i].innerHTML.length > 30)
 					FT8_new_message(wsjtx[i].innerHTML, "Q");
-
-		var data = xml.getElementsByTagName("TELNET");
-		if (data && in_tx == false)
-			for (var i = 0; i < data.length; i++)
-				telnet_update(data[i].innerHTML, "telnet");
 
 		var data = xml.getElementsByTagName("FLDIGI-RX");
 		if (data && in_tx == false)
@@ -3957,7 +3882,6 @@ $("#MYGRID").on("input", update_region_grid_hint);
 $("#console-open").on("click", function(){
 	window.open("http://" + location.hostname + ":7681/", "_blank");
 });
-$("#telnet-open").on("click", show_telnet_panel);
 $("#keyboard-open").on("click", show_keyboard);
 $("#MACRO").on("change", logger_get_macro_file);
 
@@ -4008,10 +3932,6 @@ document.addEventListener('keydown', function(e){
 	}
 	else if (e.key == "Enter" && text_focus != null && text_focus.id == "text_in"){
 		websocket_send(text_focus.value);
-		text_focus.value = "";
-	}
-	else if (e.key == "Enter" && text_focus != null && text_focus.id == "telnet_in"){
-		websocket_send("tel " + text_focus.value);
 		text_focus.value = "";
 	}
 	else if (text_focus.id == "data_window"){

@@ -256,9 +256,6 @@ int get_cw_tx_pitch();
 int get_modem_pitch();
 int	get_wpm();
 
-void telnet_open(char *server);
-int telnet_write(char *text);
-void telnet_close();
 FILE *wav_start_writing(const char* path);
 
 // Standalone replacements for wiringPi's millis()/delay() (now removed

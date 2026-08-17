@@ -33,7 +33,6 @@ typedef enum {
     STYLE_CW_TX,
     STYLE_FLDIGI_RX,
     STYLE_FLDIGI_TX,
-    STYLE_TELNET,
     // non-semantic styles, for other fields and UI elements
     STYLE_FIELD_LABEL,
     STYLE_FIELD_VALUE,

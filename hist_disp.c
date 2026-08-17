@@ -173,8 +173,6 @@ char ff_char(int style) {
 	    return 'A' + 11;
 	case STYLE_FLDIGI_TX:
 	    return 'A' + 12;
-	case STYLE_TELNET:
-	    return 'A' + 13;
 
 	// field styles
 	case STYLE_FIELD_LABEL:
@@ -223,8 +221,6 @@ int old_style_font(int style) {
 	return 11; // FONT_FLDIGI_RX
     case STYLE_FLDIGI_TX:
 	return 12; // FONT_FLDIGI_TX
-    case STYLE_TELNET:
-	return 13; // FONT_TELNET
     // The rest of the FONT_ defines are not meant for the console, so we don't need them
     default: // or STYLE_LOG
 	return 5; // FONT_LOG
