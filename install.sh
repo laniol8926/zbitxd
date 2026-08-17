@@ -2,19 +2,25 @@
 #
 # Installer for the laniol8926/zbitxd fork (generic-rig-backend branch).
 #
+# Runs on any Debian/Ubuntu-based Linux system -- nothing here is tied
+# to Raspberry Pi hardware. The generic-rig backend drives a
+# real transceiver over CAT (USB serial) + its own USB audio interface,
+# so there's no SBC-specific GPIO/boot-config setup needed at all --
+# just standard USB devices Linux already handles natively.
+#
 # Covers everything in README.md's manual install section: base OS
-# dependencies, the ALSA aloop virtual soundcards, boot config for the
-# zBitx hardware, disabling fake-hwclock, a from-source
-# Hamlib build (needed for rigctld to support rigs newer than whatever
-# your distro's packaged libhamlib knows about -- see rig_generic.c's
-# own comment on this), and finally zbitxd itself.
+# dependencies, disabling fake-hwclock (only if present -- matters on
+# any headless box with no battery-backed RTC, not Pi-specific), a
+# from-source Hamlib build (needed for rigctld to support rigs newer
+# than whatever your distro's packaged libhamlib knows about -- see
+# rig_generic.c's own comment on this), and finally zbitxd itself.
 #
 # Safe to re-run: every step here either checks before it acts, or is
 # naturally idempotent (git pull, make, apt install of an
 # already-installed package).
 #
-# Run as the normal user (e.g. "pi"), NOT as root -- this calls sudo
-# itself wherever root is actually needed.
+# Run as your normal user, NOT as root -- this calls sudo itself
+# wherever root is actually needed.
 
 REPO_URL="https://github.com/laniol8926/zbitxd.git"
 BRANCH="generic-rig-backend"
@@ -45,25 +51,13 @@ if [ ! -f /etc/modprobe.d/snd-aloop.conf ]; then
 fi
 
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-echo "*** boot config (zBitx GPIO/audio overlay)"
+echo "*** system time (FT8 needs it accurate)"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-BOOT_CFG=/boot/firmware/config.txt
-add_boot_line() {
-	grep -qxF "$1" "$BOOT_CFG" 2>/dev/null || echo "$1" | sudo tee -a "$BOOT_CFG" >/dev/null
-}
-add_boot_line "# zBitx related options"
-add_boot_line "gpio=4,5,9,10,11,17,22,27=ip,pu"
-add_boot_line "gpio=24,23=op,pu"
-add_boot_line "avoid_warnings=1"
-add_boot_line "dtoverlay=audioinjector-wm8731-audio"
-add_boot_line "dtoverlay=i2c-rtc-gpio,ds1307,bus=2,i2c_gpio_sda=13,i2c_gpio_scl=6"
-sudo sed -i "s/^dtparam=audio=on/##dtparam=audio=on/" "$BOOT_CFG"
-sudo sed -i "s/^dtoverlay=vc4-kms-v3d$/dtoverlay=vc4-kms-v3d,noaudio/" "$BOOT_CFG"
-
-echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-echo "*** system time (FT8 needs it accurate -- disable fake-hwclock)"
-echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-sudo systemctl disable fake-hwclock || true
+# fake-hwclock only exists on systems with no battery-backed RTC (common
+# on SBCs, not exclusive to any one board) -- harmless no-op elsewhere.
+if systemctl list-unit-files fake-hwclock.service >/dev/null 2>&1; then
+	sudo systemctl disable fake-hwclock
+fi
 
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo "*** Hamlib (from source -- see rig_generic.c for why the packaged"
@@ -112,6 +106,3 @@ echo "If this box has an existing hw_settings.ini/sbitx.db/user_settings.ini"
 echo "to carry over, copy them into /var/lib/zbitxd now and run:"
 echo "  sudo chown zbitxd:zbitxd /var/lib/zbitxd/*"
 echo "  sudo systemctl restart zbitxd"
-echo ""
-echo "A reboot is recommended for the boot config / WiFi driver changes"
-echo "above to take effect, if this is a first-time install."

@@ -15,9 +15,11 @@
 	The modem_poll is called about 10 to 20 times a second from 
 	the 'user interface' thread.
 
-	The key is physically read from the GPIO by calling key_poll()
-	the key_poll stores the values read from the ISR of the PTT(DOT) and DASH
-	gpio lines
+	key_poll() used to read a physical CW paddle from the GPIO pins
+	(ISR-driven PTT/DOT and DASH lines) on the original zBitx hardware.
+	This backend is headless with no front-panel GPIO at all -- key_poll()
+	(sbitx_daemon.c) is now a stub that always reports no key down, kept
+	only because this file still calls it directly.
 
 	the cw_read_key() routine returns the next dash/dot/space/, etc to be sent
 	the word 'symbol' is used to denote a dot, dash, a gaps that are dot, dash or

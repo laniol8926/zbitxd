@@ -18,7 +18,7 @@ See `git log generic-rig-backend` for the full history.
 
 ## Quick install
 
-On a fresh Raspberry Pi OS Lite (64-bit) install, with the SD card already prepared and booted (see **Preparing the SD card** below if you haven't done that part yet):
+Runs on any Debian/Ubuntu-based Linux system with network access and a way to plug in your rig's USB CAT/audio cables — nothing here is tied to any particular board or SBC.
 
 ```
 curl -fsSL https://raw.githubusercontent.com/laniol8926/zbitxd/generic-rig-backend/install.sh | sh
@@ -32,38 +32,9 @@ less ~/zbitxd/install.sh
 ~/zbitxd/install.sh
 ```
 
-`install.sh` is idempotent — re-run it any time to pick up dependency or code updates. It installs base packages, the ALSA aloop virtual soundcards, the zBitx boot-config overlay, a from-source Hamlib build (needed for `rigctld` — see below), then builds and installs zbitxd itself and starts the service.
+`install.sh` is idempotent — re-run it any time to pick up dependency or code updates. It installs base packages, the ALSA aloop virtual soundcards, a from-source Hamlib build (needed for `rigctld` — see below), then builds and installs zbitxd itself and starts the service.
 
 The rest of this document covers what the script does in more detail, plus everything specific to this fork (generic rig setup, new Settings fields, logging).
-
-
-## Preparing the SD card
-
-- Install Raspberry Pi Imager on your PC.
-- Insert the new SD card into the connected card reader.
-- Start Raspberry Pi Imager and select:
-  - Operating System: Raspberry Pi OS (other) > Raspberry Pi OS Lite (64-bit)
-  - Storage: the new SD card
-  - Advanced Options (gear icon):
-    - Set hostname (e.g. `zbitx`)
-    - Enable SSH, with password or public-key auth
-    - Set username and password
-    - Configure wireless LAN
-    - Set locale/timezone/keyboard layout
-    - Save
-
-### WiFi problems
-
-Some WiFi networks fail to connect due to a firmware incompatibility on the Raspberry Pi Zero 2 W's WiFi chip ([raspberrypi/bookworm-feedback#279](https://github.com/raspberrypi/bookworm-feedback/issues/279)). Fix: create `/etc/modprobe.d/brcmfmac.conf` containing:
-```
-options brcmfmac feature_disable=0x2000
-```
-If you have no working WiFi yet to SSH in and do this, either mount the SD card's ext4 partition on a Linux PC and create the file there under `<mountpoint>/etc/modprobe.d/`, or connect a monitor/keyboard directly to the zBitx, log in at the console, and run:
-```
-sudo mkdir /etc/modprobe.d
-echo "options brcmfmac feature_disable=0x2000" | sudo tee /etc/modprobe.d/brcmfmac.conf
-sudo reboot
-```
 
 
 ## Manual install
@@ -85,20 +56,7 @@ echo "snd-aloop" | sudo tee -a /etc/modules
 echo "options snd-aloop enable=1,1,1 index=1,2,3" | sudo tee /etc/modprobe.d/snd-aloop.conf
 ```
 
-zBitx boot config:
-```
-echo "# zBitx related options" | sudo tee -a /boot/firmware/config.txt
-echo "gpio=4,5,9,10,11,17,22,27=ip,pu" | sudo tee -a /boot/firmware/config.txt
-echo "gpio=24,23=op,pu" | sudo tee -a /boot/firmware/config.txt
-echo "avoid_warnings=1" | sudo tee -a /boot/firmware/config.txt
-echo "dtoverlay=audioinjector-wm8731-audio" | sudo tee -a /boot/firmware/config.txt
-echo "dtoverlay=i2c-rtc-gpio,ds1307,bus=2,i2c_gpio_sda=13,i2c_gpio_scl=6" | sudo tee -a /boot/firmware/config.txt
-sudo sed -i "s/dtparam=audio=on/##dtparam=audio=on/" /boot/firmware/config.txt
-sudo sed -i "s/dtoverlay=vc4-kms-v3d/dtoverlay=vc4-kms-v3d,noaudio/" /boot/firmware/config.txt
-```
-(The GPIO lines only matter if you're running actual zBitx hardware — harmless to leave in for the generic-rig backend too.)
-
-zbitxd doesn't use its own time-sync routines; it relies on the Pi's system clock, which needs to be accurate for FT8. Disable the fake hardware clock so the real RTC (if fitted) or NTP take over:
+zbitxd doesn't use its own time-sync routines; it relies on the system clock, which needs to be accurate for FT8. If this box has no battery-backed RTC (common on SBCs), disable the fake hardware clock so NTP takes over instead — skip this if `fake-hwclock` isn't installed at all:
 ```
 sudo systemctl disable fake-hwclock
 ```
@@ -152,7 +110,7 @@ or just re-run `install.sh`.
 
 ## Using the generic rig backend
 
-1. Open the web UI (`http://<pi-address>:8080`) and log in.
+1. Open the web UI (`http://<host-address>:8080`) and log in.
 2. The **Connect** panel opens automatically after every login (so a renumbered serial port or changed audio device is always easy to fix, not buried in a menu). Pick your rig from the searchable model list, the serial device it's on, and its baud rate; pick the audio capture/playback devices for its USB audio interface.
 3. Click **Connect to Rig** (starts `rigctld`, from the `/usr/local/bin` build above, against your rig) and **Connect Audio** (wires up the audio path). The panel shows live connection status for each.
 4. Once connected, the panel closes and the normal web UI (waterfall, FT8 panels, logbook) behaves the same as on real zBitx hardware.
@@ -179,16 +137,16 @@ Every logged QSO records TX Power and a Comments field (rig description if runni
 
 **ADIF export**: the "Export ADIF" button in the FT8 panel's toolbar exports the whole logbook to a correctly-formatted ADIF 3.1.4 file and downloads it — useful for importing into QRZ Logbook or any logger that only takes file import.
 
-**Live logging to CQRLog (or any WSJT-X-UDP-compatible logger)**: set **UDP Log Host** to the IP of the machine your logger runs on (this is normally a *different* machine than the Pi, so unlike a same-machine WSJT-X setup this can't default to `127.0.0.1`) and **UDP Log Port** to match your logger's listener (CQRLog's default is `2237`). Every QSO is then broadcast live over WSJT-X's own UDP "QSO Logged" protocol the moment it's logged — no export/import needed for that logger.
+**Live logging to CQRLog (or any WSJT-X-UDP-compatible logger)**: set **UDP Log Host** to the IP of the machine your logger runs on (this is normally a *different* machine than wherever zbitxd itself is running, so unlike a same-machine WSJT-X setup this can't default to `127.0.0.1`) and **UDP Log Port** to match your logger's listener (CQRLog's default is `2237`). Every QSO is then broadcast live over WSJT-X's own UDP "QSO Logged" protocol the moment it's logged — no export/import needed for that logger.
 
 If using CQRLog specifically: make sure **Preferences → WSJT-X → Mode from** is set to **wsjtx** (the default on a fresh install). If it's set to "CQRLOG" or "default" instead, CQRLog's own parser skips reading the Mode field off the wire entirely, which misaligns every field after it (including both date/time fields) and can throw a spurious "date error" popup — a CQRLog-side setting, not something zbitxd can work around from the sending end.
 
 
 ## Additional extensions
 
-### Automated WiFi Access Point
+### Automated WiFi Access Point (Raspberry Pi only)
 
-From [raspberryconnect.com](https://www.raspberryconnect.com/projects/65-raspberrypi-hotspot-accesspoints/203-automated-switching-accesspoint-wifi-network):
+Unlike the rest of this document, this specific extra genuinely is Raspberry Pi-specific — skip it on any other board/PC. Useful for field/portable use if you do happen to be running zbitxd on a Pi. From [raspberryconnect.com](https://www.raspberryconnect.com/projects/65-raspberrypi-hotspot-accesspoints/203-automated-switching-accesspoint-wifi-network):
 ```
 cd /tmp
 curl "https://www.raspberryconnect.com/images/scripts/AccessPopup.tar.gz" -o AccessPopup.tar.gz
