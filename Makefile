@@ -78,6 +78,12 @@ install: adduser
 	install -d $(DESTDIR)/$(PREFIX)/lib/systemd/system/
 	install -m 644 systemd/zbitxd.service $(DESTDIR)/$(PREFIX)/lib/systemd/system
 	ln -sf /var/lib/zbitxd/grids.txt /usr/local/share/zbitxd/web/grids.txt
+	# Same pattern as grids.txt above -- export_adif() writes here
+	# (STATEDIR, daemon-writable), symlinked into the served web root so
+	# the client can just download it directly, no dedicated HTTP route
+	# needed (see the "any other URI serves static files" comment in
+	# webserver.c).
+	ln -sf /var/lib/zbitxd/logbook_export.adi /usr/local/share/zbitxd/web/logbook_export.adi
 ifeq ("$(wildcard $(DESTDIR)/$(STATEDIR)/sbitx.db)","")
 	$(shell sqlite3 $(DESTDIR)/$(STATEDIR)/sbitx.db < data/create_db.sql)
 endif

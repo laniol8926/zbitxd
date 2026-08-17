@@ -392,8 +392,8 @@
 	<div id="logbook_panel" class="sbitx-panel">
 			<input class="logger-input sbitx-text-input sbitx-text-field"
 				id="logbook-search" type="text" size="6" placeholder="Search"/>
-			<button class="sbitxv3-btn longer-control" id="btn-logbook-load">More</button> 
-			<button class="sbitxv3-btn longer-control" id="btn-logbook-close">Close</button> 
+			<button class="sbitxv3-btn longer-control" id="btn-logbook-load">More</button>
+			<button class="sbitxv3-btn longer-control" id="btn-logbook-close">Close</button>
 		<table id="logbook_table">
 			<thead><tr>
 				<th class="logbook-serial">#</th>
@@ -435,7 +435,7 @@
 <!- wsjtx specific controls -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div class="panel-toolbar-row">
-				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label>
+				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label>
 			</div>
 			<div id="wsjtx-activity" class="sbitx-list-container" >
 				<div class="sbitx-list-title">Band Activity</div>
@@ -2996,6 +2996,22 @@ function logbook_more(){
 	logbook_request(logbook_bottom_row_id);
 }
 
+// Export the whole logbook to ADIF -- always the full log, no partial/
+// incremental export (user's own call: most logging software already
+// rejects duplicate QSOs on import, so there's nothing to gain from
+// tracking what's already been exported). export_adif() runs entirely
+// synchronously server-side within this one command, so by the time
+// this client's own next round-trip completes the file is guaranteed
+// done -- a short fixed delay before opening it is simpler than adding
+// a dedicated "export finished" signal for what's normally a
+// sub-second operation even for a large log.
+function logbook_export(){
+	websocket_send("LOGEXPORT");
+	setTimeout(function(){
+		window.open("/logbook_export.adi", "_blank");
+	}, 1000);
+}
+
 function logbook_search(){
 	logbook_reset();
 }
@@ -4013,6 +4029,7 @@ $("#logbook-open").on("click", logbook_open);
 $("#btn-logbook-close").on("click", close_logbook);
 $("#btn-logbook-search").on("click", logbook_request);
 $("#btn-logbook-load").on("click", logbook_more);
+$("#btn-logbook-export").on("click", logbook_export);
 $("#logbook-search").on("input", logbook_search);
 
 //settings buttons

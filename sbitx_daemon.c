@@ -3405,6 +3405,19 @@ void cmd_exec(char *cmd){
 	}
 	else if (!strcmp(exec, "qso"))
 		enter_qso(args);
+	// Export the whole logbook to ADIF -- always fresh, no "already
+	// exported" bookkeeping (user's own call: most logging software
+	// already rejects duplicate QSOs on import, so there's nothing
+	// meaningful to gain from tracking export state here). Written to
+	// STATEDIR, symlinked into the served web root at install time
+	// (see the Makefile) -- the client just downloads
+	// "logbook_export.adi" directly once this responds.
+	else if (!strcmp(exec, "LOGEXPORT")){
+		int n = export_adif(STATEDIR "/logbook_export.adi", "0000-01-01", "9999-12-31");
+		char buff[64];
+		snprintf(buff, sizeof(buff), "LOGEXPORT %d\n", n);
+		write_console(STYLE_LOG, buff);
+	}
 	else if (!strcmp(exec, "exchange")){
 		set_field("#contest_serial", "0");
 		set_field("#sent_exchange", "");

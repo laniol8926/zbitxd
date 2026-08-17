@@ -372,8 +372,11 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 	}
 }
 
-// ADIF field headers, see note above
-const static char *adif_names[]={"ID","MODE","FREQ","QSO_DATE","TIME_ON","OPERATOR","RST_SENT","STX_String","CALL","RST_RCVD","SRX_String","STX","COMMENTS"};
+// ADIF field headers, see note above -- must stay in the same order as
+// the logbook table's own columns (SELECT * in export_adif() below), and
+// grow whenever a column does (TX_PWR added alongside the "power" column,
+// see logbook_ensure_columns()).
+const static char *adif_names[]={"ID","MODE","FREQ","QSO_DATE","TIME_ON","OPERATOR","RST_SENT","STX_String","CALL","RST_RCVD","SRX_String","STX","COMMENTS","TX_PWR"};
 
 struct band_name {
 	char *name;
@@ -405,21 +408,37 @@ static void strip_chr(char *str, const char to_remove){
     }
 }
 
+// Exports the whole logbook (or a qso_date range) to a correctly
+// formatted ADIF 3.1.4 file. Deliberately no "already exported" flag/
+// bookkeeping -- always exports fresh from scratch every time, relying
+// on the importing logbook's own duplicate-QSO rejection (every real
+// logger does this) rather than tracking export state here. Returns
+// the number of QSOs written, or -1 on failure (bad path, or the query
+// itself failing to prepare).
 int export_adif(char *path, char *start_date, char *end_date){
 	sqlite3_stmt *stmt;
-	char statement[200], param[2000], qso_band[20];
-	
+	char statement[200], param[2000];
 
-	//add to the bottom of the logbook
+	if (db == NULL)
+		logbook_open();
+
 	sprintf(statement, "select * from logbook where (qso_date >= '%s' AND  qso_date <= '%s')  ORDER BY id DESC;",
 		start_date, end_date);
 
 	FILE *pf = fopen(path, "w");
-	sqlite3_prepare_v2(db, statement, -1, &stmt, NULL);
-	fprintf(pf, "/ADIF file\n");
-	fprintf(pf, "generated from sBITX log db by Log2ADIF program\n");	
-	fprintf(pf, "<adif version:5>3.1.4\n");	
-	fprintf(pf, "<EOH>\n");	
+	if (!pf)
+		return -1;
+	if (sqlite3_prepare_v2(db, statement, -1, &stmt, NULL) != SQLITE_OK){
+		fclose(pf);
+		return -1;
+	}
+	fprintf(pf, "ADIF export from zbitxd\n");
+	// ADIF_VER, not "adif version" -- ADIF tag names can't contain
+	// spaces; a strict/correct parser would never have recognized the
+	// old malformed tag here as the version header at all.
+	fprintf(pf, "<ADIF_VER:5>3.1.4\n");
+	fprintf(pf, "<PROGRAMID:6>zbitxd\n");
+	fprintf(pf, "<EOH>\n");
 
 	int rec = 0;
 
@@ -427,10 +446,11 @@ int export_adif(char *path, char *start_date, char *end_date){
 		int i;
 		int num_cols = sqlite3_column_count(stmt);
 		for (i = 0; i < num_cols; i++){
+			param[0] = 0; // SQLITE_NULL (or an unhandled type) leaves this field blank, not stale data from the previous column
 			switch (sqlite3_column_type(stmt, i))
 			{
 			case (SQLITE3_TEXT):
-				strcpy(param, sqlite3_column_text(stmt, i));
+				strcpy(param, (const char *)sqlite3_column_text(stmt, i));
 				break;
 			case (SQLITE_INTEGER):
 				sprintf(param, "%d", sqlite3_column_int(stmt, i));
@@ -438,30 +458,35 @@ int export_adif(char *path, char *start_date, char *end_date){
 			case (SQLITE_FLOAT):
 				sprintf(param, "%g", sqlite3_column_double(stmt, i));
 				break;
-			case (SQLITE_NULL):
-				break;
 			default:
-				sprintf(param, "%d", sqlite3_column_type(stmt, i));
 				break;
 			}
 			if (i == 2){
-				long f = atoi(param);
-				float ffreq=atof(param)/1000.0;  // convert kHz to MHz
-				sprintf(param, "%.3f",ffreq); // write out with 3 decimal digits
+				// logbook.freq is stored in kHz as a decimal string
+				// (e.g. "14074.000", see logbook_add()'s dial+TX_PITCH
+				// sum /1000.0) -- confirmed against the real deployed
+				// database, not assumed. bands[]'s own ranges are kHz
+				// too, so that comparison needs the raw value; ADIF's
+				// <FREQ> tag wants MHz, hence the /1000 here.
+				long freq_khz = atol(param);
+				float freq_mhz = atof(param) / 1000.0;
+				sprintf(param, "%.6f", freq_mhz);
 				for (int j = 0 ; j < sizeof(bands)/sizeof(struct band_name); j++)
-					if (bands[j].from <= f && f <= bands[j].to){
-						fprintf(pf, "<BAND:%d>%s", strlen(bands[j].name), bands[j].name); 
+					if (bands[j].from <= freq_khz && freq_khz <= bands[j].to){
+						fprintf(pf, "<BAND:%d>%s ", (int)strlen(bands[j].name), bands[j].name);
+						break;
 					}
 			}
 			else if (i == 3) //it is the date
 				strip_chr(param, '-');
-	   	fprintf(pf, "<%s:%d>%s", adif_names[i], strlen(param), param);
+			fprintf(pf, "<%s:%d>%s ", adif_names[i], (int)strlen(param), param);
 		}
 		fprintf(pf, "<EOR>\n");
-		//printf("\n");
+		++rec;
 	}
 	sqlite3_finalize(stmt);
 	fclose(pf);
+	return rec;
 }
 
 int logbook_fill(int from_id, int count, char *query){
