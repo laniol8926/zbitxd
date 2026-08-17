@@ -22,6 +22,19 @@
 # Run as your normal user, NOT as root -- this calls sudo itself
 # wherever root is actually needed.
 
+# The `-e` on the shebang above only takes effect when this file is
+# executed directly (./install.sh) -- README's own documented one-liner
+# (`curl ... | sh`) and a plain `sh install.sh` both invoke `sh` on the
+# script's *content*, which never looks at the shebang line at all, so
+# -e was silently not in effect for the exact flow most people actually
+# use. Confirmed live: a fresh box with no GitHub SSH key hit a real
+# submodule-clone failure, the build failed after it, `make install`
+# failed after that, and this script still ran to the end and printed
+# the "installed and started" banner below -- every failure silently
+# swallowed. set -e here makes it explicit regardless of how sh got
+# invoked.
+set -e
+
 REPO_URL="https://github.com/laniol8926/zbitxd.git"
 BRANCH="generic-rig-backend"
 ZBITXD_DIR="$HOME/zbitxd"
