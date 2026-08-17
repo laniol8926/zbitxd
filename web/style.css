@@ -704,6 +704,24 @@ select, select option, input {
 	border: none;
 }
 
+/* Applied to #wsjtx-cq/#wsjtx-rx (not #wsjtx-activity -- it's the least
+   important of the three, user's own call) by set_band_activity_hidden()
+   whenever Band Activity is actually hidden: those two are the ones you
+   read/click during a live QSO, so they take the freed-up width and a
+   bigger, easier-to-click row size instead of just leaving blank space
+   where Band Activity used to be. */
+.sbitx-list-container.wsjtx-panel-expanded {
+	width: 460px;
+}
+.wsjtx-panel-expanded .ft8-label,
+.wsjtx-panel-expanded .ft8-message,
+.wsjtx-panel-expanded .sbitx-list-box {
+	font-size: 13pt;
+}
+.wsjtx-panel-expanded .sbitx-list-box li {
+	height: 18pt;
+}
+
 .sbitx-list-title {
 	flex: none;
 }

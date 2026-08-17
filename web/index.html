@@ -3896,6 +3896,12 @@ function set_band_activity_hidden(hide){
 	localStorage.setItem("hide_band_activity", hide ? "1" : "0");
 	el("wsjtx-activity").style.display = hide ? "none" : "";
 	el("HIDE_BAND_ACTIVITY_CHECK").checked = hide;
+	// CQ Panel/RX Frequency: the ones actually read/clicked mid-QSO --
+	// widen them and bump the font/row size into the space Band
+	// Activity just vacated, instead of leaving it blank (user's own
+	// ask: "dynamically change to a 50-50% display").
+	el("wsjtx-cq").classList.toggle("wsjtx-panel-expanded", hide);
+	el("wsjtx-rx").classList.toggle("wsjtx-panel-expanded", hide);
 }
 $("#HIDE_BAND_ACTIVITY_CHECK").on("change", function(){
 	set_band_activity_hidden(this.checked);
