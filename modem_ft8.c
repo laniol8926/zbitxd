@@ -1694,6 +1694,18 @@ void ft8_process(char *message, ftx_operation operation){
 	if (!strcmp(m3, "73")){
 		ft8_abort();
 		enter_qso(); // W9JES
+		// enter_qso() deliberately skips call_wipe() for FT8/FT4 (it only
+		// resets PITCH back to TX_PITCH there -- see its own comment).
+		// The RR73/RRR-received branch below covers itself with its own
+		// explicit call_wipe() right after enter_qso(); this is the other
+		// half of the same exchange (the side that sent RR73 first and is
+		// now receiving the closing "73"), which never gets one. Left
+		// stale, CALL keeps holding the just-finished station's callsign,
+		// which permanently blocks auto-answer's "!strlen(call)" gate the
+		// next time someone answers a fresh CQ -- confirmed live: neither
+		// of two real over-the-air replies auto-answered after this exact
+		// gap, both needed a manual click.
+		call_wipe();
 		ft8_repeat = 0;
 		// Auto CQ: this QSO is done and we have nothing further to send
 		// -- schedule ft8_poll() to re-queue CQ on its next idle cycle

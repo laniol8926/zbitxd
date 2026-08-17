@@ -1800,6 +1800,15 @@ void abort_tx(){
 	// non-terminating contexts that must NOT stop Auto CQ -- see
 	// ft8_autocq_stop()'s comment in modem_ft8.c).
 	ft8_autocq_stop();
+	// Also clear the logger's CALL field -- a manually-aborted QSO
+	// attempt (e.g. clicked the wrong station, gave up) otherwise
+	// leaves it holding that station's callsign, which permanently
+	// blocks auto-answer's "!strlen(call)" gate in ft8_process() for
+	// every CQ reply afterward until something else happens to
+	// overwrite CALL. Confirmed live: an aborted manual attempt at one
+	// station immediately preceded a real caller's reply going
+	// unanswered by Auto CQ.
+	call_wipe();
 }
 
 int do_spectrum(struct field *f, int event, int a, int b, int c){
