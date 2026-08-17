@@ -1215,8 +1215,21 @@ void *ft8_thread_function(void *ptr){
 
 		ft8_do_decode = 0;
 		sbitx_ft8_decode(ft8_rx_buffer, ft8_rx_buff_index);
-		//let the next batch begin
-		ft8_rx_buff_index = 0;
+		// Real "missing every other decode cycle" bug, root-caused live:
+		// this used to also reset ft8_rx_buff_index = 0 here. ft8_rx()
+		// (capture thread) already resets it correctly at the true start
+		// of each new slot (slot_time < 500, wallclock-synced) -- real
+		// audio for the *next* slot starts accumulating there right on
+		// schedule. But decode itself now routinely takes 1.6-3s (SIC/AP
+		// passes), so this decode-completion-triggered reset fired well
+		// after that -- clobbering 1.6-3s of audio the next slot had
+		// already legitimately started accumulating. Losing that much of
+		// a 15s slot (only 2s of margin over the 13s needed to trigger)
+		// reliably pushed the buffer's 13s threshold past the slot's own
+		// window, so decode kept slipping to the *following* slot instead
+		// -- a clean, deterministic "every 30s instead of 15s" pattern,
+		// confirmed via real wall-clock log timestamps (decode finishing
+		// fast, then a ~27s idle gap before the next one even started).
 	}
 }
 
@@ -1380,6 +1393,18 @@ void ft8_poll(int tx_is_on){
 			set_field_int("#ft8_repeat_count", ft8_repeat > 0 ? ft8_repeat : 0);
 			update_tx_active_field();
 		}
+		// TEMPORARY, investigating a real "transmit cycle gets missed"
+		// report -- ftx_would_send() opened this window (so something
+		// really was queued -- we're past the early-return above) but
+		// slot_time already blew past the 200ms gate by the time we got
+		// here. Logs once per missed window (this narrow band only, not
+		// every poll for the rest of the still-open window) so we can
+		// see how late a real miss actually lands -- answers "how far
+		// in" with a real number instead of a guess.
+		else if (slot_time >= 200 && slot_time < 400) {
+			LOG(LOG_INFO, "%05d ft8_poll: MISSED window, slot_time %d ms (>= 200ms gate), queued '%s'\n",
+				wallclock_day_ms % 60000, slot_time, ft8_tx_text);
+		}
 	}
 }
 
@@ -1504,6 +1529,12 @@ static void set_reply_tx1st(int msg_second)
 	// FT8 15 secs is slot 1: that's odd, set ft8_tx1st = 1 to reply in even slot;
 	// FT8 22.5 secs is slot 3: that's odd, set ft8_tx1st = 1 to reply in even slot (e.g. 30 or 45 secs)
 	ft8_tx1st = slot_in_minute % 2;
+	// Keep the EVEN/ODD box in sync -- this is the one place ft8_tx1st
+	// changes automatically (every time a QSO actually starts, auto-
+	// answer or a manual click alike) without going through set_field(),
+	// so the display used to only ever reflect the last manual click,
+	// never a real automatic slot switch.
+	set_field("#ft8_tx1st", ft8_tx1st ? "ON" : "OFF");
 	LOG(LOG_DEBUG, "msg_second %d slot_in_minute %d odd? %d reply tx1st? %d\n", msg_second, slot_in_minute, slot_in_minute % 2, ft8_tx1st);
 }
 
