@@ -376,7 +376,18 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 // the logbook table's own columns (SELECT * in export_adif() below), and
 // grow whenever a column does (TX_PWR added alongside the "power" column,
 // see logbook_ensure_columns()).
-const static char *adif_names[]={"ID","MODE","FREQ","QSO_DATE","TIME_ON","OPERATOR","RST_SENT","STX_String","CALL","RST_RCVD","SRX_String","STX","COMMENTS","TX_PWR"};
+//
+// exch_sent/exch_recv hold grid squares for a normal (non-contest) QSO
+// -- FT8's whole exchange *is* the grid -- so these need the standard
+// ADIF grid fields (MY_GRIDSQUARE/GRIDSQUARE), not the contest-exchange
+// ones (STX_String/SRX_String) used here before. Confirmed live: a real
+// cqrlog import came in with the contact's locator missing, because
+// cqrlog (correctly) doesn't treat SRX_String as a grid square at all.
+// COMMENT (singular) -- not the plain-English "COMMENTS" used here
+// before, which isn't a real ADIF field name at all. Same class of bug
+// as the grid squares above: confirmed live, comments also came in
+// missing on a real cqrlog import.
+const static char *adif_names[]={"ID","MODE","FREQ","QSO_DATE","TIME_ON","OPERATOR","RST_SENT","MY_GRIDSQUARE","CALL","RST_RCVD","GRIDSQUARE","STX","COMMENT","TX_PWR"};
 
 struct band_name {
 	char *name;
