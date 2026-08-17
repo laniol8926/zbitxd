@@ -435,7 +435,7 @@
 <!- wsjtx specific controls -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div class="panel-toolbar-row">
-				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label>
+				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label><label class="panel-toggle-label"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> Hide Waterfall</label>
 			</div>
 			<div id="wsjtx-activity" class="sbitx-list-container" >
 				<div class="sbitx-list-title">Band Activity</div>
@@ -3907,6 +3907,20 @@ $("#HIDE_BAND_ACTIVITY_CHECK").on("change", function(){
 	set_band_activity_hidden(this.checked);
 });
 set_band_activity_hidden(localStorage.getItem("hide_band_activity") === "1");
+
+// Waterfall visibility toggle -- same pattern as Band Activity above,
+// persisted the same way. Default visible (unset localStorage key ->
+// getItem returns null -> not hidden).
+function set_waterfall_hidden(hide){
+	localStorage.setItem("hide_waterfall", hide ? "1" : "0");
+	el("waterfall_scale").style.display = hide ? "none" : "";
+	el("waterfall_wrap").style.display = hide ? "none" : "";
+	el("HIDE_WATERFALL_CHECK").checked = hide;
+}
+$("#HIDE_WATERFALL_CHECK").on("change", function(){
+	set_waterfall_hidden(this.checked);
+});
+set_waterfall_hidden(localStorage.getItem("hide_waterfall") === "1");
 $("#qrz").on("click", logger_qrz);
 $("#logger-log").on("click", logger_enter_qso);
 //$("#macros").on("click", logger_toggle_macros);
