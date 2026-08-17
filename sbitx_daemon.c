@@ -513,6 +513,18 @@ struct field main_controls[] = {
 		"", 3,10,1,0},
 	{"#mygrid", NULL, 1000, -1000, 400, 149, "MYGRID", 70, "NOWHERE", FIELD_TEXT,
 		"", 4,6,1,0},
+	// Logged with every QSO -- see logbook_add() in logbook.c. Not
+	// "#power": that cmd/label is already the forward-power meter
+	// reading (#fwdpower/"POWER"), a different thing entirely -- this
+	// is the operating power the user wants recorded in the log.
+	{"#txpower", NULL, 1000, -1000, 400, 149, "TXPOWER", 70, "", FIELD_TEXT,
+		"", 0,10,1,0},
+	{"#antenna", NULL, 1000, -1000, 400, 149, "ANTENNA", 70, "", FIELD_TEXT,
+		"", 0,32,1,0},
+	// Folded into the logbook's comments column alongside the existing
+	// auto rig-info string, not its own column -- user's own call.
+	{"#opcomments", NULL, 1000, -1000, 400, 149, "COMMENTS", 70, "", FIELD_TEXT,
+		"", 0,64,1,0},
 	// ITU region (1/2/3) -- amateur band edges genuinely differ by
 	// region for some bands (80M/40M; see apply_region_band_limits()).
 	// Default "2" preserves this fork's existing hardcoded behavior
@@ -3645,6 +3657,11 @@ int main( int argc, char* argv[] ) {
 	// IGNORE) -- see band_freq_ensure_table()'s own comment for why this
 	// can't just rely on data/create_db.sql alone
 	band_freq_ensure_table();
+
+	// self-healing: adds the logbook table's "power" column if an
+	// already-deployed database predates it, a no-op otherwise -- see
+	// logbook_ensure_columns()'s own comment.
+	logbook_ensure_columns();
 
 	//the logger fields may have an unfinished qso details
 	call_wipe();

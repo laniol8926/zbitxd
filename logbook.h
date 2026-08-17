@@ -13,6 +13,7 @@ void logbook_delete(int id);
 int export_adif(char *path, char *start_date, char *end_date);
 void message_add(char *mode, unsigned int frequency, int outgoing, char *message);
 void band_freq_ensure_table(void);
+void logbook_ensure_columns(void);
 long band_freq_get(const char *band, const char *mode);
 void band_freq_set(const char *band, const char *mode, long freq);
 void band_freq_list(char *out, size_t out_size);

@@ -200,6 +200,23 @@
 			<span class="settings-label">My Grid:</span><input id="MYGRID"
 					class="settings_input sbitx-text-input" type="text" size="6" />
 		</div>
+
+		<!-- Logged with every QSO -- TX Power directly into the logbook's
+		     own Power column, Antenna and Comments folded into the
+		     comments column alongside the existing auto rig-info string
+		     (see logbook_add() in logbook.c). User's own ask. -->
+		<div class="settings-element">
+			<span class="settings-label">TX Power:</span><input id="TXPOWER"
+					class="settings_input sbitx-text-input" type="text" size="10" />
+		</div>
+		<div class="settings-element">
+			<span class="settings-label">Antenna:</span><input id="ANTENNA"
+					class="settings_input sbitx-text-input" type="text" size="20" />
+		</div>
+		<div class="settings-element">
+			<span class="settings-label">Comments:</span><input id="COMMENTS"
+					class="settings_input sbitx-text-input" type="text" size="30" />
+		</div>
 		<div class="settings-element">
 			<span class="settings-label">ITU Region:</span>
 			<select class="sbitxv3-selection sbitx-selection" id="REGION">
@@ -386,6 +403,7 @@
 				<th class="logbook-call">Call</th>
 				<th class="logbook-sent">Sent</th>
 				<th class="logbook-recv">Recv</th>
+				<th class="logbook-power">Power</th>
 			</tr></thead>
 			<tbody>
 			</tbody>
@@ -2910,8 +2928,15 @@ function logbook_update(args){
 	item.className = "logbook-field logbook-sent";
 	//received
 	item = row.insertCell(-1);
-	item.innerHTML = token[9] + '  ' + token[10];		
+	item.innerHTML = token[9] + '  ' + token[10];
 	item.className = "logbook-field logbook-recv";
+	//power -- token[13]: logbook's column order is id/mode/freq/qso_date/
+	//qso_time/callsign_sent/rst_sent/exch_sent/callsign_recv/rst_recv/
+	//exch_recv/tx_id/comments/power (power appended last via ALTER TABLE,
+	//see logbook_ensure_columns() in logbook.c)
+	item = row.insertCell(-1);
+	item.innerHTML = token[13] || "";
+	item.className = "logbook-field logbook-power";
 }
 
 function logbook_reset(){
@@ -3090,6 +3115,9 @@ function open_connect(){
 function save_settings(){
 	websocket_send("MYCALLSIGN " + el("MYCALLSIGN").value);
 	websocket_send("MYGRID " + el("MYGRID").value);
+	websocket_send("TXPOWER " + el("TXPOWER").value);
+	websocket_send("ANTENNA " + el("ANTENNA").value);
+	websocket_send("COMMENTS " + el("COMMENTS").value);
 	websocket_send("PASSKEY " + el("PASSKEY").value);
 	websocket_send("SIDETONE " + el("SIDETONE").value);
 	websocket_send("TELNETURL " + el("TELNETURL").value);

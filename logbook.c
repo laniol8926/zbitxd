@@ -301,13 +301,17 @@ void message_add(char *mode, unsigned int frequency, int outgoing, char *message
 void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 	char *rst_recv, char *exchange_recv){
 	char statement[1000], *err_msg, date_str[11], time_str[5];
-	char freq[12], log_freq[12], mode[10], mycallsign[12], comments[64];
+	char freq[12], log_freq[12], mode[10], mycallsign[12], comments[200];
+	char txpower[16], antenna[40], opcomments[80];
 
 	time_t log_time = time(NULL);
 	struct tm *tmp = gmtime(&log_time);
 	get_field_value("r1:freq", freq);
 	get_field_value("r1:mode", mode);
 	get_field_value("#mycallsign", mycallsign);
+	get_field_value("#txpower", txpower);
+	get_field_value("#antenna", antenna);
+	get_field_value("#opcomments", opcomments);
 
 	// r1:freq alone is just the dial/LO frequency -- audio (FT8/FT4
 	// tone, CW sidetone) is generated at TX_PITCH above it and the
@@ -338,13 +342,25 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 		const char *desc = strchr(rigmodel, ' ');
 		snprintf(comments, sizeof(comments), "rig %s", desc ? desc + 1 : rigmodel);
 	}
+	// Antenna and Comments settings fold into this same column alongside
+	// the rig info above, rather than getting their own columns --
+	// user's own call. TX Power gets its own real column instead (see
+	// the INSERT below).
+	if (antenna[0]){
+		if (comments[0]) strncat(comments, "; ", sizeof(comments) - strlen(comments) - 1);
+		strncat(comments, antenna, sizeof(comments) - strlen(comments) - 1);
+	}
+	if (opcomments[0]){
+		if (comments[0]) strncat(comments, "; ", sizeof(comments) - strlen(comments) - 1);
+		strncat(comments, opcomments, sizeof(comments) - strlen(comments) - 1);
+	}
 
 	sprintf(statement,
 		"INSERT INTO logbook (freq, mode, qso_date, qso_time, callsign_sent,"
-		"rst_sent, exch_sent, callsign_recv, rst_recv, exch_recv, comments) "
-		"VALUES('%s', '%s', '%s', '%s',  '%s','%s','%s',  '%s','%s','%s', '%s');",
+		"rst_sent, exch_sent, callsign_recv, rst_recv, exch_recv, comments, power) "
+		"VALUES('%s', '%s', '%s', '%s',  '%s','%s','%s',  '%s','%s','%s', '%s', '%s');",
 			log_freq, mode, date_str, time_str, mycallsign,
-			 rst_sent, exchange_sent, contact_callsign, rst_recv, exchange_recv, comments);
+			 rst_sent, exchange_sent, contact_callsign, rst_recv, exchange_recv, comments, txpower);
 
 	if (db == NULL)
 		logbook_open();
@@ -554,6 +570,35 @@ static struct band_freq_default band_freq_defaults[] = {
 	{"12M", "FT8", 24915000}, {"12M", "FT4", 24919000},
 	{"10M", "FT8", 28074000}, {"10M", "FT4", 28180000},
 };
+
+// Same idea as band_freq_ensure_table() below, but for adding a column
+// to an already-existing table rather than the whole table -- an
+// already-deployed sbitx.db (real logged QSOs, never recreated
+// wholesale) needs this too, not just data/create_db.sql's fresh-install
+// schema. Checks PRAGMA table_info() first rather than just running
+// "ALTER TABLE ... ADD COLUMN" unconditionally: this deployment's
+// sqlite3 (3.27, Debian-vintage) predates "ADD COLUMN IF NOT EXISTS"
+// (added in 3.35), and ALTER TABLE ADD COLUMN on a column that already
+// exists is a hard error, unlike CREATE TABLE IF NOT EXISTS.
+void logbook_ensure_columns(void){
+	sqlite3_stmt *stmt;
+	int has_power = 0;
+	char *err_msg;
+
+	if (db == NULL)
+		logbook_open();
+
+	sqlite3_prepare_v2(db, "PRAGMA table_info(logbook);", -1, &stmt, NULL);
+	while (sqlite3_step(stmt) == SQLITE_ROW) {
+		const char *col_name = (const char *)sqlite3_column_text(stmt, 1);
+		if (col_name && !strcmp(col_name, "power"))
+			has_power = 1;
+	}
+	sqlite3_finalize(stmt);
+
+	if (!has_power)
+		sqlite3_exec(db, "ALTER TABLE logbook ADD COLUMN power TEXT DEFAULT '';", 0, 0, &err_msg);
+}
 
 // CREATE TABLE IF NOT EXISTS here (not just in data/create_db.sql) so an
 // already-deployed sbitx.db -- which already has real logged QSOs in it,

@@ -30,7 +30,8 @@ create table logbook (
 	rst_recv TEXT,
 	exch_recv TEXT DEFAULT "",
 	tx_id	TEXT DEFAULT "",
-	comments TEXT DEFAULT ""
+	comments TEXT DEFAULT "",
+	power TEXT DEFAULT ""
 );
 CREATE INDEX gridIx ON logbook (exch_recv);
 CREATE INDEX callIx ON logbook (callsign_recv);
