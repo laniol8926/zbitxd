@@ -32,7 +32,7 @@ less ~/zbitxd/install.sh
 ~/zbitxd/install.sh
 ```
 
-`install.sh` is idempotent — re-run it any time to pick up dependency or code updates. It installs base packages, the ALSA aloop virtual soundcards, a from-source Hamlib build (needed for `rigctld` — see below), then builds and installs zbitxd itself and starts the service.
+`install.sh` is idempotent — re-run it any time to pick up dependency or code updates. It installs base packages, a from-source Hamlib build (needed for `rigctld` — see below), then builds and installs zbitxd itself and starts the service.
 
 The rest of this document covers what the script does in more detail, plus everything specific to this fork (generic rig setup, new Settings fields, logging).
 
@@ -48,12 +48,6 @@ sudo apt update && sudo apt upgrade && sudo reboot
 ```
 sudo apt install git libasound2-dev libfftw3-dev libsqlite3-dev libsystemd-dev sqlite3 \
     build-essential autoconf automake libtool libusb-1.0-0-dev libltdl-dev
-```
-
-ALSA aloop, used to pass audio between zbitxd and other programs:
-```
-echo "snd-aloop" | sudo tee -a /etc/modules
-echo "options snd-aloop enable=1,1,1 index=1,2,3" | sudo tee /etc/modprobe.d/snd-aloop.conf
 ```
 
 zbitxd doesn't use its own time-sync routines; it relies on the system clock, which needs to be accurate for FT8. If this box has no battery-backed RTC (common on SBCs), disable the fake hardware clock so NTP takes over instead — skip this if `fake-hwclock` isn't installed at all:

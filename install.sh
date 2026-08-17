@@ -41,16 +41,6 @@ sudo apt install -y \
 	build-essential autoconf automake libtool libusb-1.0-0-dev libltdl-dev
 
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-echo "*** ALSA aloop virtual soundcards"
-echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
-if ! grep -qxF "snd-aloop" /etc/modules 2>/dev/null; then
-	echo "snd-aloop" | sudo tee -a /etc/modules
-fi
-if [ ! -f /etc/modprobe.d/snd-aloop.conf ]; then
-	echo "options snd-aloop enable=1,1,1 index=1,2,3" | sudo tee /etc/modprobe.d/snd-aloop.conf
-fi
-
-echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo "*** system time (FT8 needs it accurate)"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 # fake-hwclock only exists on systems with no battery-backed RTC (common
