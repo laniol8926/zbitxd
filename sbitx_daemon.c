@@ -391,8 +391,16 @@ struct field main_controls[] = {
 	{"#set", NULL, 460, 5, 40, 40, "SET", 1, "", FIELD_BUTTON,"", 0,0,0,COMMON_CONTROL}, 
 	{ "r1:gain", NULL, 375, 5, 40, 40, "IF", 40, "60", FIELD_NUMBER, 
 		"", 0, 100, 1,COMMON_CONTROL},
-	{ "r1:agc", NULL, 415, 5, 40, 40, "AGC", 40, "SLOW", FIELD_SELECTION, 
-		"OFF/SLOW/MED/FAST", 0, 1024, 1,COMMON_CONTROL},
+	// Locked to OFF, no UI control -- user's own call: digital modes
+	// don't benefit from AGC, and agc_speed (set via this field) hasn't
+	// actually been read by any real gain-control code since the
+	// zBitx-hardware SDR demod chain that consumed it was removed (see
+	// the "removed all zBitx-hardware GPIO/I2C code" history) -- SLOW/
+	// MED/FAST were already fully inert regardless of selection.
+	// FIELD_SELECTION with a single choice so even a raw console
+	// command can't move it off OFF.
+	{ "r1:agc", NULL, 415, 5, 40, 40, "AGC", 40, "OFF", FIELD_SELECTION,
+		"OFF", 0, 1024, 1,COMMON_CONTROL},
 	{ "tx_power", NULL, 455, 5, 40, 40, "DRIVE", 40, "40", FIELD_NUMBER, 
 		"", 0, 100, 5,COMMON_CONTROL},
 
