@@ -2507,6 +2507,7 @@ function FT8_message_chosen(event){
 		FT8_list_append("wsjtx-rx", message_text, "RX");
 		// Manually starting a QSO -- user's own ask: hide Band Activity
 		// the same as arming Auto CQ/Auto Answer does.
+		qso_in_progress = true;
 		set_band_activity_hidden(true);
 	}
 
@@ -2707,6 +2708,7 @@ function tx_enabled_indicator_clicked(){
 		if (el("AUTOCQ_CHECK").checked){
 			autocq_client_running = true;
 			websocket_send("AUTOCQSTART");
+			qso_in_progress = true;
 			set_band_activity_hidden(true);
 			return;
 		}
@@ -2717,6 +2719,7 @@ function tx_enabled_indicator_clicked(){
 			autoans_running = true;
 			autoans_last_attempted_call = null;
 			autoans_pick_and_answer();
+			qso_in_progress = true;
 			set_band_activity_hidden(true);
 			return;
 		}
@@ -2734,6 +2737,7 @@ function tx_enabled_indicator_clicked(){
 	// manual QSO) gets cancelled this way. Restores the real standing
 	// preference, not unconditionally visible -- see the comment on
 	// band_activity_manual_pref.
+	qso_in_progress = false;
 	set_band_activity_hidden(band_activity_manual_pref);
 }
 
@@ -2895,6 +2899,7 @@ function autoans_pick_and_answer(){
 	// but every *subsequent* auto-pick (moving to a new target after a
 	// QSO logs, or after giving up on one) only ever goes through this
 	// function, not that click handler -- needs its own call here too.
+	qso_in_progress = true;
 	set_band_activity_hidden(true);
 	// pre_ft8_check() silently does nothing if this callsign is already
 	// in the logbook and this isn't a repeated identical check (its
@@ -3019,8 +3024,10 @@ function logbook_update(args){
 	// comparing against the *old* logbook_top_row_id (before the update
 	// just below) is what actually distinguishes "new" from "already
 	// seen" here.
-	if (logbook_watch_armed && Number(qso_id) > logbook_top_row_id)
+	if (logbook_watch_armed && Number(qso_id) > logbook_top_row_id){
+		qso_in_progress = false;
 		set_band_activity_hidden(band_activity_manual_pref);
+	}
 
 	if (logbook_top_row_id < Number(qso_id))
 		logbook_top_row_id = Number(qso_id);
@@ -3981,8 +3988,10 @@ function response_handler(response){
 			// state was reached -- a manual (non-Auto-CQ) CQ-answer
 			// whose repeat count just exhausted with no reply needs the
 			// exact same restore, and had no path to it at all before.
-			if (was_cq_active && !cq_active)
+			if (was_cq_active && !cq_active){
+				qso_in_progress = false;
 				set_band_activity_hidden(band_activity_manual_pref);
+			}
 			// Also the sole authority for the TX Enabled indicator now
 			// (switch_to_tx()/switch_to_rx() no longer touch it) --
 			// this already covers both "literally transmitting right
@@ -4138,24 +4147,34 @@ $("#FT8_TX1ST").on("click", ft8_txslot_clicked);
 $("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
 // Simplify During QSO -- user's own reasoning: once actually in a
 // QSO, whether anyone's calling CQ is irrelevant, same logic that
-// already hides Band Activity below. Only takes effect together with
-// Band Activity's own automatic hide/show (same trigger points -- QSO
-// start, Auto CQ/Auto Answer arm, QSO end/abort), not as an
-// independent toggle, since "in a QSO" is exactly what those trigger
-// points already mean. Declared before set_band_activity_hidden()
-// since that function reads it starting from its very first call a
-// few lines down.
+// already hides Band Activity below.
+//
+// qso_in_progress is deliberately its OWN separate signal, not just
+// "is Band Activity currently hidden" -- real bug caught live: Band
+// Activity can be hidden purely from the *manual* checkbox/standing
+// preference, with no QSO happening at all. Checking Simplify While
+// that manual preference happened to already be on immediately hid CQ
+// Panel too, with no QSO in progress -- conflating "hidden" with "in a
+// QSO" was the actual bug, not the checkbox's own redraw-on-change
+// (that part's correct and needed). qso_in_progress is set true only
+// at the 4 genuine QSO-start triggers (manually starting a QSO, Auto
+// CQ/Auto Answer arming, Auto Answer picking a new target) and false
+// only at the 3 genuine QSO-end triggers (abort, QSO logged, TXACTIVE
+// 1->0) -- see set_band_activity_hidden()'s own call sites for both.
+// Declared before that function since it reads both this and
+// simplify_during_qso_enabled starting from its very first call a few
+// lines down.
+var qso_in_progress = false;
 var simplify_during_qso_enabled = (localStorage.getItem("simplify_during_qso") === "1");
 $("#SIMPLIFY_QSO_CHECK").on("change", function(){
 	simplify_during_qso_enabled = this.checked;
 	localStorage.setItem("simplify_during_qso", this.checked ? "1" : "0");
-	// Real report: checking/unchecking this had no visible effect at
-	// all until some unrelated QSO-start/end trigger happened to fire
-	// next -- this only ever updated the variable, never actually
-	// redrew anything. Re-apply immediately against whatever Band
-	// Activity's real current state already is (kept in sync on its
-	// own checkbox by set_band_activity_hidden() every time it runs),
-	// so toggling this mid-QSO takes effect right away.
+	// Re-apply immediately against whatever Band Activity's real
+	// current state already is, so toggling this mid-QSO takes effect
+	// right away instead of waiting for some unrelated trigger --
+	// solo itself now correctly depends on qso_in_progress, not on
+	// whatever gets passed in here, so this is safe regardless of
+	// *why* Band Activity happens to be hidden right now.
 	set_band_activity_hidden(el("HIDE_BAND_ACTIVITY_CHECK").checked);
 });
 el("SIMPLIFY_QSO_CHECK").checked = simplify_during_qso_enabled;
@@ -4195,10 +4214,11 @@ function set_band_activity_hidden(hide){
 
 	// Simplify During QSO: go one step further and hide CQ Panel too,
 	// giving RX Frequency the full row instead of a 50/50 split with a
-	// panel that's now irrelevant. Restored the instant Band Activity
-	// itself comes back (QSO ends/cancels), same as everything else
-	// this function already drives.
-	var solo = hide && simplify_during_qso_enabled;
+	// panel that's now irrelevant. Gated on qso_in_progress, not hide
+	// -- real bug: hide alone can be true purely from the manual Band
+	// Activity checkbox/preference, with no QSO happening at all (see
+	// qso_in_progress's own comment above for the full story).
+	var solo = qso_in_progress && simplify_during_qso_enabled;
 	el("wsjtx-cq").style.display = solo ? "none" : "";
 	el("wsjtx-rx").classList.toggle("wsjtx-panel-solo", solo);
 }
