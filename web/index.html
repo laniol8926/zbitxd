@@ -437,7 +437,7 @@
 <!- wsjtx specific controls -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div class="panel-toolbar-row">
-				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label><label class="panel-toggle-label"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> Hide Waterfall</label><label class="panel-toggle-label"><input type="checkbox" id="HIDE_WORKED_CHECK" /> Hide Worked</label>
+				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Hide Band Activity</label><label class="panel-toggle-label"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> Hide Waterfall</label><label class="panel-toggle-label"><input type="checkbox" id="HIDE_WORKED_CHECK" /> Hide Worked</label><label class="panel-toggle-label" title="During an active QSO, hide CQ Panel too (not just Band Activity) -- whether anyone's calling CQ is irrelevant while you're already in one. Both come back once the QSO ends."><input type="checkbox" id="SIMPLIFY_QSO_CHECK" /> Simplify During QSO</label>
 			</div>
 			<div id="wsjtx-activity" class="sbitx-list-container" >
 				<div class="sbitx-list-title">Band Activity</div>
@@ -2731,8 +2731,10 @@ function tx_enabled_indicator_clicked(){
 	el("tx_enabled_indicator").classList.remove("tx-active");
 	// Cancelled via TX Enabled -- user's own ask: unhide Band Activity
 	// again once whatever was happening (Auto CQ, Auto Answer, or a
-	// manual QSO) gets cancelled this way.
-	set_band_activity_hidden(false);
+	// manual QSO) gets cancelled this way. Restores the real standing
+	// preference, not unconditionally visible -- see the comment on
+	// band_activity_manual_pref.
+	set_band_activity_hidden(band_activity_manual_pref);
 }
 
 // Suspend/resume -- deliberately separate from tx_enabled_indicator_
@@ -3018,7 +3020,7 @@ function logbook_update(args){
 	// just below) is what actually distinguishes "new" from "already
 	// seen" here.
 	if (logbook_watch_armed && Number(qso_id) > logbook_top_row_id)
-		set_band_activity_hidden(false);
+		set_band_activity_hidden(band_activity_manual_pref);
 
 	if (logbook_top_row_id < Number(qso_id))
 		logbook_top_row_id = Number(qso_id);
@@ -3962,7 +3964,7 @@ function response_handler(response){
 			// disarmed itself, never a still-ongoing round.
 			if (autocq_client_running && was_cq_active && !cq_active){
 				autocq_client_running = false;
-				set_band_activity_hidden(false);
+				set_band_activity_hidden(band_activity_manual_pref);
 			}
 			// Also the sole authority for the TX Enabled indicator now
 			// (switch_to_tx()/switch_to_rx() no longer touch it) --
@@ -4117,6 +4119,22 @@ $("#tx_enabled_indicator").on("click", tx_enabled_indicator_clicked);
 $("#tx_suspend_indicator").on("click", tx_suspend_indicator_clicked);
 $("#FT8_TX1ST").on("click", ft8_txslot_clicked);
 $("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
+// Simplify During QSO -- user's own reasoning: once actually in a
+// QSO, whether anyone's calling CQ is irrelevant, same logic that
+// already hides Band Activity below. Only takes effect together with
+// Band Activity's own automatic hide/show (same trigger points -- QSO
+// start, Auto CQ/Auto Answer arm, QSO end/abort), not as an
+// independent toggle, since "in a QSO" is exactly what those trigger
+// points already mean. Declared before set_band_activity_hidden()
+// since that function reads it starting from its very first call a
+// few lines down.
+var simplify_during_qso_enabled = (localStorage.getItem("simplify_during_qso") === "1");
+$("#SIMPLIFY_QSO_CHECK").on("change", function(){
+	simplify_during_qso_enabled = this.checked;
+	localStorage.setItem("simplify_during_qso", this.checked ? "1" : "0");
+});
+el("SIMPLIFY_QSO_CHECK").checked = simplify_during_qso_enabled;
+
 // Band Activity is purely informational -- CQ Panel and RX Frequency
 // are the ones that actually matter (user's own call) -- lets it be
 // hidden to reclaim screen space, persisted across reloads the same
@@ -4126,8 +4144,21 @@ $("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
 // most exactly when something is actually happening), shown again once
 // that QSO is logged or cancelled via the TX Enabled indicator -- see
 // set_band_activity_hidden()'s call sites.
+//
+// band_activity_manual_pref tracks the checkbox's own real preference
+// -- separate from the current on-screen state, which set_band_
+// activity_hidden() below changes constantly and automatically as
+// QSOs start/end. Real bug caught before it shipped: with only one
+// piece of state, a QSO ending always force-showed Band Activity via
+// set_band_activity_hidden(false), even if the user had it manually
+// checked "hidden" as their actual standing preference -- the
+// automatic show-on-QSO-end was silently overwriting/discarding that
+// preference every single time. The 3 "QSO ended" call sites now pass
+// band_activity_manual_pref instead of a hardcoded false, restoring
+// whatever was actually true before the QSO started rather than
+// always forcing visible.
+var band_activity_manual_pref = (localStorage.getItem("hide_band_activity") === "1");
 function set_band_activity_hidden(hide){
-	localStorage.setItem("hide_band_activity", hide ? "1" : "0");
 	el("wsjtx-activity").style.display = hide ? "none" : "";
 	el("HIDE_BAND_ACTIVITY_CHECK").checked = hide;
 	// CQ Panel/RX Frequency: the ones actually read/clicked mid-QSO --
@@ -4136,11 +4167,22 @@ function set_band_activity_hidden(hide){
 	// ask: "dynamically change to a 50-50% display").
 	el("wsjtx-cq").classList.toggle("wsjtx-panel-expanded", hide);
 	el("wsjtx-rx").classList.toggle("wsjtx-panel-expanded", hide);
+
+	// Simplify During QSO: go one step further and hide CQ Panel too,
+	// giving RX Frequency the full row instead of a 50/50 split with a
+	// panel that's now irrelevant. Restored the instant Band Activity
+	// itself comes back (QSO ends/cancels), same as everything else
+	// this function already drives.
+	var solo = hide && simplify_during_qso_enabled;
+	el("wsjtx-cq").style.display = solo ? "none" : "";
+	el("wsjtx-rx").classList.toggle("wsjtx-panel-solo", solo);
 }
 $("#HIDE_BAND_ACTIVITY_CHECK").on("change", function(){
+	band_activity_manual_pref = this.checked;
+	localStorage.setItem("hide_band_activity", this.checked ? "1" : "0");
 	set_band_activity_hidden(this.checked);
 });
-set_band_activity_hidden(localStorage.getItem("hide_band_activity") === "1");
+set_band_activity_hidden(band_activity_manual_pref);
 
 // Waterfall visibility toggle -- same pattern as Band Activity above,
 // persisted the same way. Default visible (unset localStorage key ->

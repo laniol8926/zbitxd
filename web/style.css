@@ -783,6 +783,16 @@ select, select option, input {
 	height: 18pt;
 }
 
+/* Simplify During QSO: RX Frequency alone, full width, when CQ Panel
+   is also hidden (see set_band_activity_hidden()) -- user's own
+   reasoning, mid-QSO whether anyone's calling CQ is irrelevant, same
+   as Band Activity. Defined after .wsjtx-panel-expanded above so its
+   width wins on the same element when both classes happen to be
+   present at once (equal specificity, later rule wins). */
+.wsjtx-panel-solo {
+	width: calc(100% - 8px);
+}
+
 .sbitx-list-title {
 	flex: none;
 }
