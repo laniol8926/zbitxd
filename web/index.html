@@ -115,6 +115,8 @@
 			</div>
 		</div><div class="tx-calling-group"><div class="sbitxv3-control tx-enabled-indicator" id="tx_enabled_indicator">
 			<div class="sbitxv3-label">TX Enabled</div>
+		</div><div class="sbitxv3-control tx-suspend-indicator" id="tx_suspend_indicator" title="Pause transmission without cancelling the QSO -- click again to resume">
+			<div class="sbitxv3-label">Suspend</div>
 		</div><button class="sbitxv3-btn macro-btn" id="F1" style="display:none">F1</button>
 		<div class="sbitxv3-control cqkind-control">
 			<div class="sbitxv3-label">Calling</div>
@@ -2733,6 +2735,21 @@ function tx_enabled_indicator_clicked(){
 	set_band_activity_hidden(false);
 }
 
+// Suspend/resume -- deliberately separate from tx_enabled_indicator_
+// clicked() above, not a change to it: that one is for abandoning an
+// attempt entirely (wipes CALL/exchange fields via abort_tx() server-
+// side, on purpose). This pauses transmission mid-QSO and resumes the
+// *same* exchange -- e.g. to glance at what's actually sitting on your
+// own TX frequency (invisible while transmitting) and reposition
+// without losing where you were. Server-side: ft8_suspend()/
+// ft8_resume() in modem_ft8.c.
+var tx_suspended = false;
+function tx_suspend_indicator_clicked(){
+	tx_suspended = !tx_suspended;
+	websocket_send(tx_suspended ? "suspend" : "resume");
+	el("tx_suspend_indicator").classList.toggle("tx-suspended", tx_suspended);
+}
+
 function show_in_qrz_window(callsign) {
 	var url = "https://www.qrz.com/db/" + callsign;
 	if (qrz_window == null || qrz_window.closed)
@@ -4097,6 +4114,7 @@ $("#MACRO").on("change", logger_get_macro_file);
 $("#wipe").on("click", logger_wipe);
 $("#esc").on("click", logger_abort);
 $("#tx_enabled_indicator").on("click", tx_enabled_indicator_clicked);
+$("#tx_suspend_indicator").on("click", tx_suspend_indicator_clicked);
 $("#FT8_TX1ST").on("click", ft8_txslot_clicked);
 $("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
 // Band Activity is purely informational -- CQ Panel and RX Frequency

@@ -24,5 +24,17 @@ void ft8_autocq_start();
 // Fully terminates Auto CQ mode -- called from abort_tx() only, not
 // ft8_abort() (see ft8_autocq_stop()'s own comment for why).
 void ft8_autocq_stop();
+// Pause/resume transmission without touching QSO state -- user's own
+// distinction: the existing "abort" (TX Enabled click, sbitx_daemon.c's
+// abort_tx()) is for abandoning an attempt entirely and deliberately
+// wipes the logger's CALL/exchange fields (see its own comment). This
+// is for briefly suspending TX mid-QSO (e.g. to check what's actually
+// sitting on your own TX frequency, invisible while transmitting) and
+// resuming the *same* exchange after -- CALL/exchange fields are left
+// alone. ft8_suspend() stops transmission immediately (tx_off()) and
+// blocks ft8_poll() from starting anything new; ft8_resume() lets it
+// resume normally on its own next opportunity.
+void ft8_suspend();
+void ft8_resume();
 // TEMPORARY, task #25 SIC validation only -- remove once done.
 int ft8_decode_file(const char *path);

@@ -59,6 +59,8 @@ static int ft8_do_tx = 0;
 static int ft8_pitch = 0;
 // number of repetitions left for the current message, counting down from the user setting
 static int ft8_repeat = 5;
+// see ft8_suspend()/ft8_resume() further down
+static int ft8_tx_suspended = 0;
 static pthread_t ft8_thread;
 static bool is_cq = false; // is ft8_tx_text a CQ?
 static bool ft8_tx1st = true;
@@ -1259,6 +1261,12 @@ void ft8_rx(int32_t *samples, int count) {
 }
 
 void ft8_poll(int tx_is_on){
+	// ft8_suspend() already forced tx_off() synchronously, so this is
+	// really only guarding the "start something new" branch further
+	// down -- but checked first regardless, unconditionally, so nothing
+	// below it can ever run while suspended.
+	if (ft8_tx_suspended)
+		return;
 	//if we are already transmitting, we continue
 	//until we run out of ft8 sampels
 	if (tx_is_on){
@@ -1801,6 +1809,31 @@ void ft8_abort(){
 	// kept showing a stale non-zero count from before the abort.
 	set_field_int("#ft8_repeat_count", 0);
 	update_tx_active_field();
+}
+
+// See the comment on these two in modem_ft8.h -- deliberately doesn't
+// touch anything ft8_abort()/abort_tx() touch (CALL/exchange fields,
+// Auto CQ armed state), only whether a transmission is allowed to
+// happen at all right now. Declared with the other file-scope statics
+// near the top (not here) since ft8_poll()'s own guard, earlier in the
+// file, needs it in scope first.
+void ft8_suspend(){
+	// tx_off() -> modem_abort() -> ft8_abort() zeroes ft8_repeat and
+	// #ft8_repeat_count -- real bug caught before it shipped: a
+	// suspend/resume must not cost the in-progress repeat count, same
+	// reasoning (and same save/restore pattern) as ft8_poll()'s own
+	// tx_is_on branch a few dozen lines up, which hits this exact
+	// problem for the same underlying reason.
+	int ft8_repeat_save = ft8_repeat;
+	tx_off();
+	ft8_repeat = ft8_repeat_save;
+	set_field_int("#ft8_repeat_count", ft8_repeat_save > 0 ? ft8_repeat_save : 0);
+	update_tx_active_field();
+	ft8_tx_suspended = 1;
+}
+
+void ft8_resume(){
+	ft8_tx_suspended = 0;
 }
 
 int ft8_is_repeating(){

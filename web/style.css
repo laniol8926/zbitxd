@@ -1278,6 +1278,21 @@ body {
 	cursor: pointer;
 }
 
+/* Suspend -- always clickable (unlike TX Enabled, which only does
+   anything while red): pauses transmission without cancelling the
+   QSO, click again to resume. Orange while suspended, not red, so
+   it's never visually confused with TX Enabled's "armed/transmitting"
+   red at a glance. */
+.tx-suspend-indicator {
+	cursor: pointer;
+}
+.tx-suspend-indicator .sbitxv3-label {
+	color: white;
+}
+.tx-suspend-indicator.tx-suspended {
+	background-color: orange;
+}
+
 /* FT8_TX1ST's click-to-toggle box (replaced the old ON/OFF <select>,
    see ft8_txslot_clicked()) -- styled to actually look clickable
    instead of like a plain readout. */

@@ -3387,6 +3387,14 @@ void cmd_exec(char *cmd){
 	}
 	else if (!strcmp(exec, "abort"))
 		abort_tx();
+	// Suspend/resume TX mid-QSO without abort_tx()'s CALL/exchange-field
+	// wipe -- see the comment on ft8_suspend()/ft8_resume() in
+	// modem_ft8.h. Deliberately a separate command/button from "abort"
+	// above, not a change to it.
+	else if (!strcmp(exec, "suspend"))
+		ft8_suspend();
+	else if (!strcmp(exec, "resume"))
+		ft8_resume();
 	// Auto CQ arm: clicking TX Enabled while idle and FT8_AUTO==AUTOCQ.
 	// Aborting/terminating it completely reuses the existing "abort"
 	// command above (abort_tx() calls ft8_autocq_stop() there) -- this
