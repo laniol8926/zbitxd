@@ -285,9 +285,20 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
       // A single-page field-radio-control app has no benefit from
       // browser caching that outweighs always serving what's actually
       // installed.
+      //
+      // logbook_export.adi specifically: real report -- clicking Export
+      // ADIF opened the file inline in the browser instead of
+      // downloading it. .adi isn't a MIME type mongoose knows, so it
+      // fell back to a generic text type, and every browser displays
+      // plain text inline rather than downloading it absent an explicit
+      // instruction otherwise. Content-Disposition: attachment forces a
+      // real download regardless of what MIME type gets guessed.
       struct mg_http_serve_opts opts = {
           .root_dir = s_web_root,
-          .extra_headers = "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+          .extra_headers = mg_http_match_uri(hm, "/logbook_export.adi")
+              ? "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                "Content-Disposition: attachment; filename=\"logbook_export.adi\"\r\n"
+              : "Cache-Control: no-cache, no-store, must-revalidate\r\n"
       };
       mg_http_serve_dir(c, ev_data, &opts);
     }
