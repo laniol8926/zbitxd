@@ -572,6 +572,42 @@ select, select option, input {
 
 .settings-element {
 	margin: 8px;
+	position: relative;
+}
+
+/* Custom dropdown replacing the native <datalist> popup on RIGMODEL/
+   RIGDEVICE/CAPTUREDEV/PLAYBACKDEV -- real report, confirmed live: the
+   native popup is OS-native chrome (GTK-themed on Linux) that
+   color-scheme can't reliably control, coming out low-contrast
+   gray-on-gray regardless of what this stylesheet says. This is fully
+   app-styled instead, so it can't drift with browser/OS/theme. */
+.app-dropdown {
+	display: none;
+	position: absolute;
+	top: 100%;
+	left: 0;
+	background: black;
+	border: 1px solid #444;
+	max-height: 220px;
+	overflow-y: auto;
+	z-index: 1000;
+	min-width: 220px;
+}
+
+.app-dropdown.open {
+	display: block;
+}
+
+.app-dropdown-item {
+	padding: 5px 10px;
+	color: #fff;
+	cursor: pointer;
+	white-space: nowrap;
+}
+
+.app-dropdown-item:hover,
+.app-dropdown-item.highlighted {
+	background: #444;
 }
 
 .settings-label {

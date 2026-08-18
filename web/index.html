@@ -288,16 +288,18 @@
 		<div class="settings-element">
 			<span class="settings-label">Rig Model (hamlib -m):</span><input id="RIGMODEL"
 					class="settings_input sbitx-text-input" type="text" size="30"
-					style="text-transform:none;" list="rig_model_options" autocomplete="off" />
+					style="text-transform:none;" autocomplete="off" />
 			<datalist id="rig_model_options"></datalist>
+			<div class="app-dropdown" id="rig_model_dropdown"></div>
 			<button id="rig_model_refresh" class="logger-button" title="Re-scan hamlib's rig list">&#x27f3;</button>
 			<div class="settings-hint">type to search hamlib's rig list, or enter a bare model number</div>
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Rig Device:</span><input id="RIGDEVICE"
 					class="settings_input sbitx-text-input" type="text" size="30" style="text-transform:none;"
-					list="rig_device_options" autocomplete="off" />
+					autocomplete="off" />
 			<datalist id="rig_device_options"></datalist>
+			<div class="app-dropdown" id="rig_device_dropdown"></div>
 			<button id="rig_device_refresh" class="logger-button" title="Re-scan serial devices">&#x27f3;</button>
 			<div class="settings-hint">prefer a /dev/serial/by-id/... entry -- stable across reboots/replugging</div>
 		</div>
@@ -315,14 +317,16 @@
 		<div class="settings-element">
 			<span class="settings-label">Capture Device:</span><input id="CAPTUREDEV"
 					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;"
-					list="audio_device_options" autocomplete="off" />
+					autocomplete="off" />
 			<datalist id="audio_device_options"></datalist>
+			<div class="app-dropdown" id="capturedev_dropdown"></div>
 			<button id="audio_device_refresh" class="logger-button" title="Re-scan audio devices">&#x27f3;</button>
 		</div>
 		<div class="settings-element">
 			<span class="settings-label">Playback Device:</span><input id="PLAYBACKDEV"
 					class="settings_input sbitx-text-input" type="text" size="17" style="text-transform:none;"
-					list="audio_device_options" autocomplete="off" />
+					autocomplete="off" />
+			<div class="app-dropdown" id="playbackdev_dropdown"></div>
 		</div>
 		<div class="settings-element">
 			<span class="settings-label"></span>
@@ -3039,6 +3043,59 @@ function populate_rig_list(text){
 		}
 	}
 }
+
+// App-styled replacement for the native <datalist> popup on RIGMODEL/
+// RIGDEVICE/CAPTUREDEV/PLAYBACKDEV -- real report, confirmed live: the
+// native popup is OS-native chrome (GTK-themed on Linux Chromium) that
+// color-scheme can't reliably control, rendering low-contrast
+// gray-on-gray regardless of this stylesheet. The <datalist> elements
+// stay in the DOM purely as the data store (still filled by
+// populate_datalist()/populate_rig_list() exactly as before); this
+// just reads their <option> values and renders its own dropdown
+// instead of relying on the input's native list= popup (removed from
+// the HTML). Substring match, case-insensitive, same as how browsers'
+// own datalist filtering behaves.
+function setup_app_dropdown(input_id, datalist_id, dropdown_id){
+	var input = el(input_id);
+	var datalist = el(datalist_id);
+	var dropdown = el(dropdown_id);
+
+	function render(){
+		var q = input.value.trim().toLowerCase();
+		var opts = datalist.querySelectorAll("option");
+		dropdown.innerHTML = "";
+		var shown = 0;
+		for (var i = 0; i < opts.length; i++){
+			var v = opts[i].value;
+			if (q && v.toLowerCase().indexOf(q) < 0)
+				continue;
+			var item = document.createElement("div");
+			item.className = "app-dropdown-item";
+			item.textContent = v;
+			// mousedown (not click) + preventDefault so the input never
+			// loses focus/fires blur before the selection is read --
+			// standard pattern for custom autocomplete widgets.
+			item.addEventListener("mousedown", function(ev){
+				ev.preventDefault();
+				input.value = this.textContent;
+				dropdown.classList.remove("open");
+			});
+			dropdown.appendChild(item);
+			shown++;
+		}
+		dropdown.classList.toggle("open", shown > 0);
+	}
+
+	input.addEventListener("focus", render);
+	input.addEventListener("input", render);
+	input.addEventListener("blur", function(){
+		dropdown.classList.remove("open");
+	});
+}
+setup_app_dropdown("RIGMODEL", "rig_model_options", "rig_model_dropdown");
+setup_app_dropdown("RIGDEVICE", "rig_device_options", "rig_device_dropdown");
+setup_app_dropdown("CAPTUREDEV", "audio_device_options", "capturedev_dropdown");
+setup_app_dropdown("PLAYBACKDEV", "audio_device_options", "playbackdev_dropdown");
 
 // Rough longitude-band approximation of ITU region from a Maidenhead
 // grid square's first letter (the longitude field, 20 deg per letter,
