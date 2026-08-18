@@ -1863,11 +1863,19 @@ void ft8_repeat_reset(){
 // completing in ft8_process() (where Auto CQ should keep going, not
 // stop). Only abort_tx() in sbitx_daemon.c -- the real "operator/system
 // wants everything pending cancelled" boundary (explicit abort click,
-// mode/band/frequency change) -- calls this. Deliberately does NOT
-// touch #ft8_auto: abort_tx() fires on routine band/mode changes too,
-// and the Auto CQ *selection* is meant to survive those (only the
-// armed/running state should drop) -- see ft8_poll()'s own is_cq
-// give-up branch for the one place the checkbox itself should reset.
+// mode/band/frequency change) -- calls this.
+//
+// Doesn't touch #ft8_auto itself (the checkbox selection) -- that used
+// to be deliberate, on the reasoning that a band change shouldn't cost
+// re-selecting Auto CQ/Auto Answer, only re-arming via TX Enabled.
+// Superseded, user's own explicit reversal: change_band() now resets
+// #ft8_auto to OFF itself, right after each of its own abort_tx()
+// calls, same as a fresh login already does (webserver.c's
+// do_login()). Left un-touched here since abort_tx() is also the
+// explicit-abort-click path, which is a different situation and keeps
+// its own original behavior (only the armed/running state drops,
+// selection survives) -- ft8_poll()'s own is_cq give-up branch is
+// still the one place *that* checkbox reset happens.
 void ft8_autocq_stop(){
 	ft8_autocq_running = false;
 	ft8_autocq_resume_pending = false;

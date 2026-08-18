@@ -1795,6 +1795,16 @@ void abort_tx(){
 	set_field("#text_in", "");
 	modem_abort();
 	tx_off();
+	// Real bug, caught live: change_band() calls abort_tx()
+	// unconditionally but never touched the suspend flag on its own,
+	// so a band change while suspended left TX silently blocked on the
+	// *new* band too -- ft8_suspend()/ft8_resume() are the only two
+	// places that ever touch it otherwise. abort_tx() is already
+	// documented as the real "everything pending cancelled" boundary
+	// (explicit abort, mode/band/frequency change), so clearing it
+	// here covers all of those uniformly, not just band changes.
+	// Harmless no-op if not currently suspended.
+	ft8_resume();
 	// The real "operator/system wants everything pending cancelled"
 	// boundary (explicit abort click, mode/band/frequency change) --
 	// terminates Auto CQ completely, unlike modem_abort()'s own
@@ -2885,6 +2895,14 @@ void change_band(char *request){
 		q_empty(&q_web);
 		console_init();
 		abort_tx();
+		// Superseded, user's own explicit reversal: Auto CQ/Auto Answer's
+		// *selection* used to deliberately survive a band change (only
+		// the armed/running state dropped, via abort_tx()'s own
+		// ft8_autocq_stop() -- see its comment), so re-arming on the new
+		// band was a single TX Enabled click instead of reselecting the
+		// mode too. Now explicitly unchecked here instead, same as a
+		// fresh login already does (webserver.c's do_login()).
+		set_field("#ft8_auto", "OFF");
 		return;
 	}
 
@@ -2922,6 +2940,9 @@ void change_band(char *request){
   // this fixes bug with filter settings not being applied after a band change, not sure why it's a bug - k3ng 2022-09-03
 
 	abort_tx();
+	// See the comment on the other abort_tx() call above in this same
+	// function -- both band-change paths need this.
+	set_field("#ft8_auto", "OFF");
 }
 
 void meter_calibrate(){

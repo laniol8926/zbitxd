@@ -3933,6 +3933,16 @@ function response_handler(response){
 			break;
 		case 'SELBAND':
 		    FT8_lists_clear();
+			// Server-side abort_tx() (called unconditionally by
+			// change_band()) now clears the suspend flag too -- real bug,
+			// confirmed live: the checkbox stayed checked across a band
+			// change, and TX was actually silently blocked on the new
+			// band as a result, not just a stale-looking checkbox. Keep
+			// this in sync with that.
+			if (tx_suspended){
+				tx_suspended = false;
+				el("tx_suspend_indicator").classList.remove("tx-suspended");
+			}
 			break;
 		case 'TXACTIVE':
 			// server-side "will transmit again on its own" state
