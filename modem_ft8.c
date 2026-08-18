@@ -1142,12 +1142,14 @@ void ft8_tx(char *message, int freq){
 	get_field_value_by_label("FT8_REPEAT", str_repeat);
 	int slot_second = time(NULL) % 15;
 
-	//no repeat for '73'
-	int msg_length = strlen(message);
-	if (msg_length > 3 && !strcmp(message + msg_length - 3, " 73"))
-		ft8_repeat = 1;
-	else
-		ft8_repeat = field_int("FT8_REPEAT");
+	// Real report: "73" used to be single-shot, no retry -- but the QSO
+	// is already logged by the time it's sent (see the RR73/RRR branch
+	// in ft8_process()), decoupled from how many times "73" itself
+	// gets (re)transmitted, so there's no re-logging risk in letting it
+	// use the same repeat count as everything else. If it never
+	// reaches the other station, they're left waiting on a "73" that
+	// never arrives -- exactly what retrying this avoids.
+	ft8_repeat = field_int("FT8_REPEAT");
 	update_tx_active_field();
 
 	LOG(LOG_DEBUG, "%05d ft8_tx '%s' even? %d autocq %d\n",
@@ -1179,11 +1181,10 @@ void ft8_tx_3f(const char* call_to, const char* call_de, const char* extra) {
 	LOG(LOG_INFO, "<- %d.%c '%s' '%s' '%s'",
 		message_type, message_type ? ' ' : '0' + ftx_message_get_n3(&ftx_tx_msg), call_to, call_de, extra);
 
-	// no repeat for '73'
-	if (!strcmp(extra, " 73"))
-		ft8_repeat = 1;
-	else
-		ft8_repeat = field_int("FT8_REPEAT");
+	// See the identical fix (and full reasoning) in ft8_tx() above --
+	// "73" now gets the same repeat count as everything else, not a
+	// hardcoded single shot.
+	ft8_repeat = field_int("FT8_REPEAT");
 	update_tx_active_field();
 }
 
@@ -1768,10 +1769,19 @@ void ft8_process(char *message, ftx_operation operation){
 		ft8_tx_3f(m2, mycall, "73");
 		enter_qso();
 		call_wipe();
-		ft8_repeat = 1;
+		// Real report: courtesy "73" used to be single-shot only (no
+		// repeat), so if it never reached the other station, they were
+		// left waiting on a "73" that would never arrive -- with the
+		// QSO already logged on our end regardless, since enter_qso()
+		// above already ran and isn't tied to how many times "73"
+		// itself gets (re)sent. Safe to let it retry like everything
+		// else: ft8_tx_3f() itself now applies the same FT8_REPEAT
+		// count here too (see its own comment), so nothing needs
+		// setting explicitly -- this used to override that back down
+		// to 1 right after, which is exactly the bug.
 		// Auto CQ: our courtesy "73" above still needs to actually go
-		// out first -- resume gets picked up once that single-shot send
-		// finishes and ft8_repeat naturally reaches 0 (see ft8_poll()).
+		// out first -- resume gets picked up once all of its repeats
+		// finish and ft8_repeat naturally reaches 0 (see ft8_poll()).
 		if (ft8_autocq_running)
 			ft8_autocq_resume_pending = true;
 		update_tx_active_field();

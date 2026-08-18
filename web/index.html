@@ -3972,10 +3972,17 @@ function response_handler(response){
 			// TXACTIVE ever reaches the client as "0") -- so a real "0"
 			// push while Auto CQ is still armed can only mean it just
 			// disarmed itself, never a still-ongoing round.
-			if (autocq_client_running && was_cq_active && !cq_active){
+			if (autocq_client_running && was_cq_active && !cq_active)
 				autocq_client_running = false;
+			// Real bug: the display restore used to live inside the
+			// autocq_client_running branch above, so it only ever ran
+			// for Auto CQ. A genuine TXACTIVE 1->0 means nothing is
+			// queued or happening anymore regardless of *how* that
+			// state was reached -- a manual (non-Auto-CQ) CQ-answer
+			// whose repeat count just exhausted with no reply needs the
+			// exact same restore, and had no path to it at all before.
+			if (was_cq_active && !cq_active)
 				set_band_activity_hidden(band_activity_manual_pref);
-			}
 			// Also the sole authority for the TX Enabled indicator now
 			// (switch_to_tx()/switch_to_rx() no longer touch it) --
 			// this already covers both "literally transmitting right
@@ -4142,6 +4149,14 @@ var simplify_during_qso_enabled = (localStorage.getItem("simplify_during_qso") =
 $("#SIMPLIFY_QSO_CHECK").on("change", function(){
 	simplify_during_qso_enabled = this.checked;
 	localStorage.setItem("simplify_during_qso", this.checked ? "1" : "0");
+	// Real report: checking/unchecking this had no visible effect at
+	// all until some unrelated QSO-start/end trigger happened to fire
+	// next -- this only ever updated the variable, never actually
+	// redrew anything. Re-apply immediately against whatever Band
+	// Activity's real current state already is (kept in sync on its
+	// own checkbox by set_band_activity_hidden() every time it runs),
+	// so toggling this mid-QSO takes effect right away.
+	set_band_activity_hidden(el("HIDE_BAND_ACTIVITY_CHECK").checked);
 });
 el("SIMPLIFY_QSO_CHECK").checked = simplify_during_qso_enabled;
 
@@ -4209,15 +4224,32 @@ $("#HIDE_WATERFALL_CHECK").on("change", function(){
 set_waterfall_hidden(localStorage.getItem("hide_waterfall") === "1");
 
 // Hide Worked -- same persisted-checkbox pattern as the two above.
-// Just a flag FT8_already_worked() reads; no retroactive re-filtering of
-// CQ lines already on screen, only affects what gets appended from here
-// on (matches how the checkbox reads on a fresh page load anyway, since
-// the panel is empty until FT8_lists_clear()/new decodes repopulate it).
+// hide_worked_enabled is a live variable FT8_already_worked() reads
+// fresh every time, so toggling this mid-stream already took effect
+// immediately for anything decoded from that point on -- no bug there.
+// But checking it mid-stream used to leave already-displayed entries
+// alone (only affected what got appended from here on), so a station
+// worked earlier could still be sitting on screen to accidentally
+// click right after checking this. Now also retroactively removes any
+// already-worked entries already in the CQ panel the moment this gets
+// checked, reusing the exact same FT8_already_worked() check new
+// decodes go through (it reads hide_worked_enabled itself, so this
+// must run after that's set, not before).
 var hide_worked_enabled = (localStorage.getItem("hide_worked") === "1");
 function set_hide_worked(hide){
 	localStorage.setItem("hide_worked", hide ? "1" : "0");
 	el("HIDE_WORKED_CHECK").checked = hide;
 	hide_worked_enabled = hide;
+
+	if (hide){
+		var ol = el("wsjtx-cq").querySelector("ol");
+		var items = ol.querySelectorAll("li:not(.sbitx-list-divider)");
+		for (var i = 0; i < items.length; i++){
+			var msg = items[i].dataset.message;
+			if (msg && FT8_already_worked(msg))
+				items[i].remove();
+		}
+	}
 }
 $("#HIDE_WORKED_CHECK").on("change", function(){
 	set_hide_worked(this.checked);
