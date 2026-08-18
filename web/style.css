@@ -762,8 +762,17 @@ select, select option, input {
    read/click during a live QSO, so they take the freed-up width and a
    bigger, easier-to-click row size instead of just leaving blank space
    where Band Activity used to be. */
+/* Fluid, not the fixed 460px this used to be -- real report: on a
+   phone in landscape, two fixed-460px panels (920px total) still
+   didn't fit side by side even with Band Activity's 320px hidden and
+   freed up, since landscape phone width is typically well under
+   920px. 460px only ever worked by coincidence on a wide-enough
+   desktop window. calc(50%...) means CQ Panel/RX Frequency -- the
+   only two panels ever visible at once with this class applied, since
+   Band Activity is display:none whenever it's active -- always split
+   the row evenly and sit side by side regardless of viewport width. */
 .sbitx-list-container.wsjtx-panel-expanded {
-	width: 460px;
+	width: calc(50% - 8px);
 }
 .wsjtx-panel-expanded .ft8-label,
 .wsjtx-panel-expanded .ft8-message,
@@ -810,6 +819,48 @@ select, select option, input {
 	   Confirmed live via screenshot. */
 	border-top: solid 1px #444;
 	background-color: #111;
+	/* #FT8_ui below is now a flex container (for the narrow-viewport
+	   panel reorder) -- flex items size to their content by default,
+	   not to the parent's full width the way a plain block element
+	   does, so this needs to say so explicitly to keep sitting on its
+	   own full-width row like it always has. order: 0 (the default)
+	   keeps it pinned above all three list panels regardless of how
+	   they get reordered below. */
+	flex-basis: 100%;
+}
+
+/* #FT8_ui: real flex container so the three list panels below (Band
+   Activity/CQ Panel/RX Frequency) can be visually reordered on narrow
+   (phone-portrait) viewports without touching DOM order -- real
+   report: stacked one-per-row there, Band Activity (DOM-first, but
+   "the least important of the three" per this app's own existing
+   design -- see wsjtx-panel-expanded above) pushed CQ Panel/RX
+   Frequency below the fold, needing a lot of scrolling to reach the
+   two panels actually read/clicked during a live QSO. flex-wrap: wrap
+   matches the pre-existing wrap-like-text behavior exactly (each
+   .sbitx-list-container is still a fixed 320px), just makes the order
+   controllable instead of purely DOM-position-dependent.
+   700px: comfortably below where two 320px panels can sit side by
+   side (real hardware wraps to strictly one-per-row well above phone
+   portrait widths), so this only kicks in once panels are genuinely
+   stacked, not for a merely-narrow desktop window. */
+#FT8_ui {
+	display: flex;
+	flex-wrap: wrap;
+}
+@media (max-width: 700px) {
+	#wsjtx-cq { order: 1; }
+	#wsjtx-rx { order: 2; }
+	#wsjtx-activity { order: 3; }
+	/* Below this width even a single 320px panel is most of the
+	   screen -- a 50/50 split (the calc() above, meant for landscape
+	   phone/desktop widths where two panels genuinely fit side by
+	   side) would squeeze each one to a near-unreadable sliver here.
+	   Full width keeps the one-per-row stacking this breakpoint
+	   already does for the non-expanded case. */
+	.sbitx-list-container.wsjtx-panel-expanded {
+		width: 100%;
+	}
 }
 .panel-toolbar-btn {
 	font-size: 8pt;

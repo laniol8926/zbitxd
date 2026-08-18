@@ -2458,9 +2458,15 @@ function FT8_new_message(text, style){
 		FT8_list_append("wsjtx-rx", text, style);
 }
 
-// setup the html for wsjtx 
+// setup the html for wsjtx
 function FT8_open(){
-	el("FT8_ui").style.display = "block";
+	// "flex", not "block" -- #FT8_ui is a flex container now (see
+	// style.css) so the CQ Panel/RX Frequency/Band Activity panels can
+	// be reordered on narrow viewports; an inline "block" here silently
+	// overrode that CSS rule every time FT8 mode opened, regardless of
+	// the stylesheet -- confirmed live as the actual reason a real
+	// portrait-layout fix appeared to do nothing at all.
+	el("FT8_ui").style.display = "flex";
 }
 
 /* cw functionality */
