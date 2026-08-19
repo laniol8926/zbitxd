@@ -798,15 +798,17 @@ function websocket_send(str){
 	// instead of invisible.
 	if (socket == null || socket.readyState !== WebSocket.OPEN){
 		log("websocket_send: dropped, socket not open (\"" + str + "\")");
-		return;
+		return false;
 	}
 
 	var request = session_id + "\n" + str;
 //	log("ws tx:[" + request + "]");
 	try {
 		socket.send(request);
+		return true;
 	} catch (e) {
 		log("websocket_send: send() threw (\"" + str + "\"): " + e);
+		return false;
 	}
 }
 
@@ -2522,7 +2524,23 @@ function FT8_message_chosen(event){
 		// that leading '#' (not alphanumeric) and silently produces
 		// empty fields, so it has to come off before this goes back to
 		// the server as a real protocol message.
-		websocket_send("FT8_check "+deco_strip(message_text));
+		// Real report, direct consequence of the exact bug just fixed in
+		// websocket_send() itself: when this send silently failed before
+		// (dropped/threw with no return value to check), everything
+		// below -- all purely client-side, no server round trip needed --
+		// still ran anyway. FT8_list_append made RX Frequency look
+		// populated and qso_in_progress got stuck true forever, since
+		// none of the 3 real "QSO ended" triggers could ever fire for a
+		// QSO that never actually started server-side (the command that
+		// would have started it never arrived). Gating on the real
+		// send() result means a failed click now visibly fails (alert)
+		// instead of leaving the UI in a state that looks like it
+		// worked while nothing happened and Simplify's solo logic
+		// permanently thinks a QSO is running.
+		if (!websocket_send("FT8_check "+deco_strip(message_text))){
+			alert("Couldn't reach the server -- try again.");
+			return;
+		}
 		// Copy (not move -- stays in the CQ panel too) the clicked CQ
 		// into RX Frequency right away, user's own ask -- otherwise that
 		// panel stays empty until either our own reply transmits or the
