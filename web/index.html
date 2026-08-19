@@ -1438,8 +1438,27 @@ function waterfall_record_period_boundary(mode){
 	// resize) -- don't draw a marker for a period that was already
 	// partway through before we started watching, only ones that
 	// genuinely begin from here on.
-	if (wf_last_boundary_ms !== null)
-		wf_period_boundaries.push({ms: boundary_ms, elapsed_sec: wf_rx_elapsed_sec});
+	if (wf_last_boundary_ms !== null){
+		// Real bug, confirmed live via real screenshots: this used to tag
+		// the boundary with wf_rx_elapsed_sec as of WHENEVER this
+		// function happened to actually notice the crossing, implicitly
+		// assuming that's always "right now, the instant it happened".
+		// Real audio content keeps scrolling on its own continuous clock
+		// regardless of when this runs, so any delay in noticing the
+		// crossing (confirmed live: landing close to a full ~13s -- this
+		// project's own well-documented decode-processing window --
+		// consistently inside the slot's own quiet gap instead of at its
+		// clean start) left the marker sitting that far behind where it
+		// truly belongs. Retroactively subtracting however much real
+		// wall-clock time has already passed since the true boundary
+		// (Date.now() - boundary_ms) corrects for it regardless of the
+		// exact cause/magnitude of the delay. Assumes no TX happened in
+		// that gap -- wf_rx_elapsed_sec pauses during TX but real time
+		// doesn't, so this can't be reconstructed exactly across a TX
+		// pause -- a much rarer case than plain detection lag.
+		var late_sec = (Date.now() - boundary_ms) / 1000;
+		wf_period_boundaries.push({ms: boundary_ms, elapsed_sec: wf_rx_elapsed_sec - late_sec});
+	}
 	wf_last_boundary_ms = boundary_ms;
 }
 
