@@ -1495,19 +1495,26 @@ function draw_period_markers(ctx, width, height){
 	// exact pixel-perfect position down (see this function's own
 	// "parked" comment above): rather than a thin 2px line that needs
 	// exact timing to land in the right place, draw a band spanning the
-	// real ~2s quiet decode gap's own duration, centered on the
-	// computed position. Whatever residual timing imprecision remains
-	// is far less visually jarring when the marker's own width already
-	// tolerates it.
+	// real ~2s quiet decode gap's own duration. Whatever residual timing
+	// imprecision remains is far less visually jarring when the
+	// marker's own width already tolerates it.
 	var band_height = Math.max(2, Math.round(2 * wf_rows_per_sec));
 	for (var i = 0; i < wf_period_boundaries.length; i++){
 		var b = wf_period_boundaries[i];
 		var y = Math.round((wf_rx_elapsed_sec - b.elapsed_sec) * wf_rows_per_sec);
+		// Centering the band on y (first attempt) made it worse, per
+		// live testing -- extending it downward from y ate into
+		// territory that was already right. User's own fix: we now
+		// have a known, already-computed quantity (band_height) to use
+		// as the correction itself -- shift the whole band up (toward
+		// the top/newer edge) by its own height, so it spans
+		// [y - band_height, y] instead of straddling y.
+		var y_top = y - band_height;
 		ctx.fillStyle = "red";
-		ctx.fillRect(0, y - Math.floor(band_height / 2), width, band_height);
+		ctx.fillRect(0, y_top, width, band_height);
 		ctx.font = "10px monospace";
 		ctx.textBaseline = "top";
-		ctx.fillText(waterfall_utc_label(b.ms), 2, y + 3);
+		ctx.fillText(waterfall_utc_label(b.ms), 2, y_top + 3);
 	}
 }
 
