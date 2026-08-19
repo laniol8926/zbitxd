@@ -1326,25 +1326,35 @@ void ft8_poll(int tx_is_on){
 		// window and then goes false until the next one opens, arriving
 		// here again with a small slot_time right at that real boundary.
 		//
-		// Cutoff widened from a strict 200ms after a real, measured
-		// miss: a genuine reply (already queued before its target window
-		// opened -- not a fresh mid-window click, the original bug this
-		// gate exists for) landed at slot_time 1746ms, past the old
-		// 200ms gate, and had to wait a full extra 30s/one alternating-
-		// pair cycle for the next same-parity window instead of
-		// transmitting a few seconds late. ftx_start_tx(slot_time)
-		// already seeds a real, correctly-synced offset into the
-		// waveform for any slot_time >= 1000ms (not the sample-0 restart
-		// the original 200ms threshold was guarding against) -- so a
-		// late-but-still-open window can transmit a slightly truncated
-		// but still correctly-timed message instead of being skipped
-		// outright. 2000ms trims at most the first ~2s off a ~12.64s
-		// FT8 message (comfortably past the 1746ms real miss, still
-		// leaves 2 of the message's 3 Costas sync blocks and the large
-		// majority of its payload intact) -- past that point a skip to
-		// the next window is judged better than transmitting too little
-		// of the message to realistically decode.
-		if (slot_time < 2000) {
+		// Cutoff widened twice now, both times from a real measured
+		// miss: 200ms -> 2000ms after a genuine reply landed at
+		// slot_time 1746ms; then 2000ms -> 4500ms after a second one
+		// landed at 2160ms, missing that gate by just 160ms -- and
+		// paying for it with a full extra 30s/one alternating-pair
+		// cycle instead of transmitting a few seconds late. Two real
+		// near-misses this close to whatever the gate happened to be
+		// set to says these are a normal, recurring part of real
+		// operation (a reply queued right as its window opens), not a
+		// rare edge case -- and the cost of missing (30s) is severe
+		// while the cost of allowing a later start is minor.
+		//
+		// ftx_start_tx(slot_time) already seeds a real, correctly-
+		// synced offset into the waveform for any slot_time >= 1000ms
+		// (not the sample-0 restart the original 200ms threshold was
+		// guarding against), so a late-but-still-open window transmits
+		// a truncated but still correctly-timed message instead of
+		// being skipped outright. 4500ms is reasoned from FT8's actual
+		// structure this time, not another round number close to the
+		// latest miss: a message is 7-symbol Costas + 29-symbol data +
+		// 7-symbol Costas + 29-symbol data + 7-symbol Costas (79
+		// symbols, 0.16s/symbol), so the 2nd Costas sync block starts
+		// at 5.76s -- 4500ms trims at most the 1st Costas block plus
+		// some leading data, comfortably (1.26s of margin) before
+		// touching the 2nd, still leaving 2 of 3 Costas blocks and the
+		// majority of the payload intact. Past that point a skip to
+		// the next window is judged better than transmitting too
+		// little of the message to realistically decode.
+		if (slot_time < 4500) {
 			LOG(LOG_DEBUG, "%05d ft8_poll: tx_is_on %d ft8_tx_nsamples %d start '%s'\n",
 				wallclock_day_ms % 60000, tx_is_on, ft8_tx_nsamples, ft8_tx_text);
 			ftx_start_tx(slot_time); // modulate audio at current frequency setting
@@ -1408,7 +1418,7 @@ void ft8_poll(int tx_is_on){
 			int window_id = wallclock_day_ms / (is_ft4 ? 7500 : 15000);
 			if (window_id != last_logged_window) {
 				last_logged_window = window_id;
-				LOG(LOG_INFO, "%05d ft8_poll: MISSED window, slot_time %d ms (>= 2000ms gate), queued '%s'\n",
+				LOG(LOG_INFO, "%05d ft8_poll: MISSED window, slot_time %d ms (>= 4500ms gate), queued '%s'\n",
 					wallclock_day_ms % 60000, slot_time, ft8_tx_text);
 			}
 		}
