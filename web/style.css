@@ -1174,6 +1174,21 @@ body {
 	cursor: pointer;
 }
 
+/* Invisible hit-slop -- user's own report: the badge is a 1-2 digit
+   glyph, easy to miss with a fingertip on a phone. ::after generates a
+   larger transparent box around it purely for tap-target purposes;
+   clicks anywhere in it still target the real element (pseudo-element
+   clicks bubble to their host), so the visible glyph position and the
+   click handler both stay exactly as they were. */
+.ft8-repeat-count::after {
+	content: "";
+	position: absolute;
+	top: -10px;
+	right: -10px;
+	bottom: -10px;
+	left: -10px;
+}
+
 .macro-btn {
 	height: 45px;
 	min-width: 50px;
