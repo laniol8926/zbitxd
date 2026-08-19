@@ -3927,6 +3927,15 @@ function response_handler(response){
 				session_id = args;
 				document.cookie ="sessionid="+session_id+";path=/";
 				log("session_id set to " + session_id);
+				// Real gap, confirmed live: this app never reloads the
+				// page across a login/logout cycle (end_login() just
+				// shows the login panel again on the same DOM/JS state),
+				// so without this, Band Activity/CQ/RX Frequency still
+				// held whatever the PREVIOUS session had decoded --
+				// stale, possibly hours old, and easy to mistake for
+				// live traffic right after logging back in. Same clear
+				// already used on a band change (SELBAND, below).
+				FT8_lists_clear();
 				show_main();
 				resize_ui();
 				// surface rig/audio connection status right after login,
