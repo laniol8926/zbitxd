@@ -1491,30 +1491,25 @@ function draw_period_markers(ctx, width, height){
 			break;
 		wf_period_boundaries.shift(); // oldest boundary has scrolled off-screen
 	}
-	// User's own call, after two rounds of live testing couldn't pin the
-	// exact pixel-perfect position down (see this function's own
-	// "parked" comment above): rather than a thin 2px line that needs
-	// exact timing to land in the right place, draw a band spanning the
-	// real ~2s quiet decode gap's own duration. Whatever residual timing
-	// imprecision remains is far less visually jarring when the
-	// marker's own width already tolerates it.
-	var band_height = Math.max(2, Math.round(2 * wf_rows_per_sec));
+	// User's own call, after several rounds of live testing (see this
+	// function's own "parked" comment above): the misalignment was
+	// consistently upward-correctable, so rather than pin down the
+	// exact root cause, shift the marker up by a known quantity --
+	// 2.64s, the real FT8 silence-period length -- then draw it back at
+	// its original thin 2px height (a wider band was tried as an
+	// in-between step; this replaces that, using the same shift amount
+	// purely to compute the correction, not the drawn size).
+	var shift_sec = 2.64;
+	var shift_height = Math.round(shift_sec * wf_rows_per_sec);
 	for (var i = 0; i < wf_period_boundaries.length; i++){
 		var b = wf_period_boundaries[i];
 		var y = Math.round((wf_rx_elapsed_sec - b.elapsed_sec) * wf_rows_per_sec);
-		// Centering the band on y (first attempt) made it worse, per
-		// live testing -- extending it downward from y ate into
-		// territory that was already right. User's own fix: we now
-		// have a known, already-computed quantity (band_height) to use
-		// as the correction itself -- shift the whole band up (toward
-		// the top/newer edge) by its own height, so it spans
-		// [y - band_height, y] instead of straddling y.
-		var y_top = y - band_height;
+		var y_shifted = y - shift_height;
 		ctx.fillStyle = "red";
-		ctx.fillRect(0, y_top, width, band_height);
+		ctx.fillRect(0, y_shifted, width, 2);
 		ctx.font = "10px monospace";
 		ctx.textBaseline = "top";
-		ctx.fillText(waterfall_utc_label(b.ms), 2, y_top + 3);
+		ctx.fillText(waterfall_utc_label(b.ms), 2, y_shifted + 3);
 	}
 }
 
