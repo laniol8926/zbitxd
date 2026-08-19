@@ -11,6 +11,7 @@
 #include <stdint.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <time.h>
 #include <math.h>
 #include <complex.h>
 #include <fftw3.h>
@@ -299,6 +300,34 @@ static void gen_spectrum_update(int32_t *samples, int n)
 	if (samples_since_refresh < GENERIC_SPEC_REFRESH_SAMPLES)
 		return;
 	samples_since_refresh = 0;
+
+	// Stall heartbeat -- real report: waterfall showed a band of static,
+	// unchanging vertical streaking (not real signal texture -- no
+	// row-to-row wobble at all) during the single busiest SIC/AP decode
+	// slot of a whole test session (12 decodes vs. the usual 4-8),
+	// coinciding with heavy CPU load, with no TX active (ruled out via
+	// journalctl -- not the known TX-freeze behavior). Working theory,
+	// not yet confirmed: the capture thread (this function) got starved
+	// of CPU long enough that spectrum_plot[] stopped being refreshed
+	// for a stretch, so the client's independent scroll timer just kept
+	// redrawing the same stale last_wf_row -- frozen data looks exactly
+	// like straight, unchanging streaks once painted repeatedly. This
+	// refresh is throttled to land roughly every GENERIC_SPEC_REFRESH_
+	// SAMPLES (~100ms) apart; logging only the rare cases that land far
+	// outside that (not every refresh, which would flood the log at
+	// ~10/sec) turns a future recurrence into a direct, checkable
+	// journalctl timestamp gap instead of another screenshot to guess
+	// from.
+	static struct timespec last_refresh_ts = {0, 0};
+	struct timespec now_ts;
+	clock_gettime(CLOCK_MONOTONIC, &now_ts);
+	if (last_refresh_ts.tv_sec != 0) {
+		long gap_ms = (now_ts.tv_sec - last_refresh_ts.tv_sec) * 1000
+			+ (now_ts.tv_nsec - last_refresh_ts.tv_nsec) / 1000000;
+		if (gap_ms > 300)
+			fprintf(stderr, "sound_generic: spectrum refresh stalled, gap %ld ms (expected ~100ms)\n", gap_ms);
+	}
+	last_refresh_ts = now_ts;
 
 	// same raw-sample-to-float divisor sbitx.c's own rx_linear() uses
 	// (input_rx[j] / 20000000.0) for its FFT input, kept here for a
