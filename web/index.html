@@ -113,10 +113,10 @@
       		<input type="range" class="linear-slider"
         		id="slider_FT8_REPEAT" max="10" min="1" step="1" value="3" />
 			</div>
+		</div><div class="sbitxv3-control tx-suspend-indicator" id="tx_suspend_indicator" title="Pause transmission without cancelling the QSO -- click again to resume">
+			<div class="sbitxv3-label">Susp.</div>
 		</div><div class="tx-calling-group"><div class="sbitxv3-control tx-enabled-indicator" id="tx_enabled_indicator">
 			<div class="sbitxv3-label">TX Enabled</div>
-		</div><div class="sbitxv3-control tx-suspend-indicator" id="tx_suspend_indicator" title="Pause transmission without cancelling the QSO -- click again to resume">
-			<div class="sbitxv3-label">Suspend</div>
 		</div><button class="sbitxv3-btn macro-btn" id="F1" style="display:none">F1</button>
 		<div class="sbitxv3-control cqkind-control">
 			<div class="sbitxv3-label">Calling</div>
@@ -3733,10 +3733,24 @@ function waterfall_calc_height(){
 	// physical pixel height. Clamp bounds scaled down by the same 2/3
 	// factor so they stay proportional.
 	var h = Math.round(window.innerHeight * 0.35 * (2/3));
+	// Real report: a percentage of raw viewport height means a tall
+	// portrait phone always computes a large waterfall (267px, this
+	// clamp's own max) regardless of how little width is actually
+	// available for it -- directly working against CQ Panel/RX
+	// Frequency, the panels that actually matter, on exactly the
+	// device most real users hold their phone in by default. User's
+	// own framing: someone glancing at this in portrait and finding it
+	// unusable there concludes the app doesn't work on a phone at all,
+	// not just "this one orientation needs adjusting." Portrait
+	// (narrower than tall) gets a noticeably lower cap so it stays
+	// compact there specifically, while landscape's existing 100-267
+	// range is untouched.
+	var portrait = window.innerWidth < window.innerHeight;
+	var max_h = portrait ? 150 : 267;
 	if (h < 100)
 		h = 100;
-	if (h > 267)
-		h = 267;
+	if (h > max_h)
+		h = max_h;
 	return h;
 }
 

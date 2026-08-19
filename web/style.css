@@ -1295,6 +1295,15 @@ body {
    red at a glance. */
 .tx-suspend-indicator {
 	cursor: pointer;
+	/* Narrower than the default 49px .sbitxv3-control -- real report:
+	   this control (added later than the row it sits in) pushed the
+	   TX Enabled/F1/Calling group -- which has to wrap as one
+	   unsplittable block, see .tx-calling-group -- past the point
+	   where it still fit on a phone-portrait row, leaving a visible
+	   gap when it wrapped. "Susp." (shorter label, set alongside this)
+	   fits fine at this width. */
+	width: 34px;
+	padding-left: 2px;
 }
 .tx-suspend-indicator .sbitxv3-label {
 	color: white;
