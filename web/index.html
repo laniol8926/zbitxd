@@ -459,7 +459,7 @@
 				</ol>
 			</div>
 			<div id="wsjtx-rx" class="sbitx-list-container" >
-				<div class="sbitx-list-title">RX Frequency</div>
+				<div class="sbitx-list-title">RX Frequency<span id="ft8_tx_pending"></span></div>
 				<ol size="10" class="sbitx-list-box">
 				</ol>
 			</div>
@@ -4127,6 +4127,15 @@ function response_handler(response){
 			// login push FT8_REPEAT's own value is already in place by
 			// the time this case runs.
 			el("FT8_REPEATCNT_DISPLAY").textContent = (args == "0") ? el("FT8_REPEAT").value : args;
+			break;
+		case 'FT8_TX_PENDING':
+			// Live "what's queued to transmit right now" indicator -- see
+			// its own CSS comment (#ft8_tx_pending). Pushed by the server
+			// (ft8_tx()/ft8_tx_3f()) any time a new FT8/FT4 message gets
+			// queued, so this always reflects the real current target,
+			// including redirects the user makes by clicking a different
+			// message mid-pileup.
+			el("ft8_tx_pending").textContent = args;
 			break;
 		case 'MODE':
 			mode_set(args);

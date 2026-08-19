@@ -1126,6 +1126,9 @@ void ft8_tx(char *message, int freq){
 
 	strncpy(ft8_tx_text, message, sizeof(ft8_tx_text));
 	const int message_type = ftx_message_get_i3(&ftx_tx_msg);
+	// Live "what's queued to transmit" indicator -- see the identical
+	// call/full reasoning in ft8_tx_3f() above.
+	set_field("#ft8_tx_pending", ft8_tx_text);
 	ftx_would_send(); // update wallclock_day_ms, ft8_pitch, ft8_tx1st
 	if (!freq)
 		freq = ft8_pitch;
@@ -1173,8 +1176,13 @@ void ft8_tx_3f(const char* call_to, const char* call_de, const char* extra) {
 		return;
 	}
 	const int message_type = ftx_message_get_i3(&ftx_tx_msg);
-	// nice idea to let the user edit the outgoing message right away... but we don't necessarily want to log it
-	// field_set("TEXT", ft8_tx_text);
+	// Live "what's queued to transmit" indicator, user's own ask -- a
+	// dedicated display-only field (#ft8_tx_pending), not the shared
+	// keyboard/CW "TEXT" field the abandoned attempt above would have
+	// reused (that field is real user-typed input -- see #text_in in
+	// sbitx_daemon.c -- overwriting it here would have corrupted
+	// keyboard/CW text entry, not shown a TX preview).
+	set_field("#ft8_tx_pending", ft8_tx_text);
 	ftx_would_send(); // update ft8_pitch, is_cq, ft8_tx1st
 	snprintf(hmst_wallclock_time_sprint(buf), sizeof(buf) - 8, "  TX     %4d ~ %s\n", ft8_pitch, ft8_tx_text);
 	write_console(STYLE_FT8_QUEUED, buf);
@@ -1778,6 +1786,30 @@ void ft8_process(char *message, ftx_operation operation){
 		return;
 	}
 
+	// Real bug, confirmed live via journalctl: none of the three
+	// branches below (73/RR73/RRR/signal-report) verified that THIS
+	// message's actual sender (m2) is the same station CALL is
+	// currently tracking -- only that CALL was non-empty. In a real
+	// pileup, answering one CQ, then abandoning it to answer another
+	// before the first one resolves, is completely normal operation --
+	// user's own framing: "this one is of my own making; but I can see
+	// it happening in the real world." When a late decode from the
+	// FIRST (already-abandoned) station arrived after CALL had moved on
+	// to a second, unrelated one, it still got auto-processed as if it
+	// were that second exchange's next step: enter_qso() would have
+	// logged the wrong callsign (it logs field_str("CALL"), not m2),
+	// and ft8_on_signal_report() auto-transmitted a real reply to a
+	// station with zero operator action at all -- confirmed exactly:
+	// W8FSM's -15 report auto-triggered a transmitted R-04 with no
+	// preceding click. A manual click never hits this -- it always
+	// goes through ft8_on_start_qso() above (operation ==
+	// FTX_START_QSO), which deliberately rebinds CALL to whatever was
+	// clicked -- so this only guards the auto-detect path.
+	if (strlen(call) && strcmp(m2, call)){
+		LOG(LOG_INFO, "ft8_process: ignoring stale-exchange message from '%s' (CALL is '%s')\n", m2, call);
+		return;
+	}
+
 	if (!strcmp(m3, "73")){
 		ft8_abort();
 		enter_qso(); // W9JES
@@ -1810,16 +1842,22 @@ void ft8_process(char *message, ftx_operation operation){
 		ft8_tx_3f(m2, mycall, "73");
 		enter_qso();
 		call_wipe();
-		// Real report: courtesy "73" used to be single-shot only (no
-		// repeat), so if it never reached the other station, they were
-		// left waiting on a "73" that would never arrive -- with the
-		// QSO already logged on our end regardless, since enter_qso()
-		// above already ran and isn't tied to how many times "73"
-		// itself gets (re)sent. Safe to let it retry like everything
-		// else: ft8_tx_3f() itself now applies the same FT8_REPEAT
-		// count here too (see its own comment), so nothing needs
-		// setting explicitly -- this used to override that back down
-		// to 1 right after, which is exactly the bug.
+		// Real report (earlier): courtesy "73" used to be single-shot
+		// only (no repeat), so if it never reached the other station,
+		// they were left waiting on a "73" that would never arrive.
+		// Fixed by letting ft8_tx_3f() apply the full FT8_REPEAT count
+		// here same as everything else -- but with a real RPT of 5,
+		// that meant up to 5*30s = 2.5 minutes of "73" still
+		// transmitting after the QSO had already logged. New real
+		// report: "I am continuing to send the ... 73 message after
+		// the qso had been logged. It's caught in a loop" -- confirmed
+		// live, had to manually abort every time. User's own call: it
+		// needs to stop as soon as the QSO is logged. Capped back down
+		// to a single transmission, decoupled from FT8_REPEAT (which
+		// still applies in full to RR73/signal-report/grid replies via
+		// ft8_tx_3f() elsewhere -- those genuinely need the retries,
+		// they're soliciting a response, not closing one out).
+		ft8_repeat = 1;
 		// Auto CQ: our courtesy "73" above still needs to actually go
 		// out first -- resume gets picked up once all of its repeats
 		// finish and ft8_repeat naturally reaches 0 (see ft8_poll()).

@@ -685,6 +685,15 @@ struct field main_controls[] = {
 	// sends this field; it's display-only.
   { "#ft8_repeat_count", NULL, 1000, -1000, 50, 50, "FT8_REPEATCNT", 40, "0", FIELD_NUMBER,
     "", 0, 10, 1, FT8_CONTROL},
+	// Read-only "what's queued to transmit right now, and to whom" --
+	// broadcast from ft8_tx()/ft8_tx_3f() any time a new message gets
+	// queued (modem_ft8.c). User's own ask, modeled on WSJT-X's
+	// always-visible Tx1-6 grid: with real multiple overlapping QSOs
+	// (normal with real-world QRM/QSB), this is what lets the operator
+	// see what a click actually queued instead of guessing. Client
+	// never sends this field; it's display-only.
+  { "#ft8_tx_pending", NULL, 1000, -1000, 50, 50, "FT8_TX_PENDING", 100, "", FIELD_TEXT,
+    "", 0, 100, 0, FT8_CONTROL},
 	// Replaces the old free-text TEXT box for CQ variants (user used to
 	// type e.g. "CQ DX AI5II EM72" by hand) -- picked here instead,
 	// spliced into the F1 macro's composed CQ text in do_macro(). "CQ"
@@ -1863,6 +1872,12 @@ void call_wipe(){
 	field_set("RECV", "");
 	field_set("EXCH", "");
 	field_set("NR", "");
+	// Keeps the "what's queued to transmit" indicator (#ft8_tx_pending,
+	// see ft8_tx()/ft8_tx_3f() in modem_ft8.c) honest -- call_wipe()
+	// already runs at every real "this exchange is over" boundary, so
+	// clearing it here means it never shows stale text from a finished
+	// exchange as if it were still pending.
+	set_field("#ft8_tx_pending", "");
 }
 
 // calcualtes the LOW and HIGH settings from bw

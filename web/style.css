@@ -797,6 +797,24 @@ select, select option, input {
 	flex: none;
 }
 
+/* Live "what's queued to transmit right now, and to whom" indicator --
+   user's own ask, modeled on WSJT-X's always-visible Tx1-6 grid: with
+   real-world QRM/QSB, working multiple stations in parallel and
+   picking whichever reply actually gets through is normal operation,
+   not a mistake -- this is what lets the operator make that call
+   deliberately instead of guessing what a click actually queued.
+   Server pushes it (see ft8_tx()/ft8_tx_3f() in modem_ft8.c) any time
+   a new FT8/FT4 message gets queued. */
+#ft8_tx_pending {
+	margin-left: 8px;
+	font-weight: normal;
+	color: #5fd75f;
+}
+#ft8_tx_pending:not(:empty)::before {
+	content: "TX: ";
+	color: #888;
+}
+
 .panel-toggle-label {
 	display: inline-block;
 	margin-left: 8px;
