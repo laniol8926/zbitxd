@@ -1225,8 +1225,22 @@ void ft8_rx(int32_t *samples, int count) {
 
 	//if there is an overflow, then reset to the begining
 	if (ft8_rx_buff_index + (count/decimation_ratio) >= FT8_MAX_BUFF){
+		// Real bug, root-caused live: this used to reset only
+		// ft8_rx_buff_index, leaving ft8_rx_buff_start_ms stale at
+		// whatever the last true slot_time<500 boundary was (see that
+		// branch below). sbitx_ft8_decode()'s dt_buffer_start_correction_sec
+		// is computed FROM ft8_rx_buff_start_ms -- so any decode that
+		// completed against buffer contents starting here, before the
+		// next real slot boundary refreshed it, got a dt off by however
+		// stale start_ms was (observed live: a decode with dt off by
+		// -14.7s in the same window this overflow fired). Buffer is
+		// sized for 18s, slots are only 15s (7.5s FT4), so this should
+		// only ever fire if the capture thread misses a slot_time<500
+		// window entirely (e.g. a scheduling stall) -- rare, but when it
+		// does, start_ms must be resynced here too, not just the index.
 		ft8_rx_buff_index = 0;
-		printf("Buffer Overflow\n");
+		ft8_rx_buff_start_ms = wallclock_day_ms;
+		LOG(LOG_INFO, "%05d ft8_rx: Buffer Overflow, resetting\n", wallclock_day_ms % 100000);
 	}
 
 	//down convert to 12000 Hz sampling rate
@@ -1395,8 +1409,25 @@ void ft8_poll(int tx_is_on){
 					// A bare click on TX Enabled re-arms and starts a
 					// fresh round -- no need to touch the checkbox again.
 					ft8_autocq_stop();
-				else
+				else {
+					// Real bug, confirmed live: this dead-end (an in-QSO
+					// reply -- e.g. our own answer to someone else's CQ --
+					// running out of retries with no response) scheduled
+					// the Auto CQ resume but never cleared CALL, unlike
+					// every other "this exchange is over" path (the "73"
+					// and RR73/RRR branches in ft8_process(), abort_tx()).
+					// Left stale, it silently blocked ft8_process()'s own
+					// auto-respond gate ("!strlen(call)") from recognizing
+					// the *next* genuine new caller answering a fresh CQ --
+					// confirmed live: Auto CQ kept re-transmitting its own
+					// CQ instead of replying to a real new answer, because
+					// the auto-respond path never even ran. Same class of
+					// stale-CALL problem already documented on the "73"
+					// branch above, just a different path that hadn't been
+					// covered yet.
+					call_wipe();
 					ft8_autocq_resume_pending = true;
+				}
 			}
 			// Live countdown for the operator -- broadcast every time
 			// ft8_repeat changes (decrement above, plus any refill just
