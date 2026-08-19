@@ -782,13 +782,32 @@ function on_message(event){
 }
 
 function websocket_send(str){
-	//adds the session id 
-	if (socket == null)
+	//adds the session id
+	// Real report: this only ever checked socket == null, never its
+	// actual readyState. A socket that exists but isn't OPEN (mid-
+	// reconnect, right after a fresh login -- confirmed live via a
+	// real case where a CQ click's PITCH/FT8_check commands never
+	// reached the server at all, no error shown, while purely client-
+	// side UI updates in the same handler still ran normally) makes
+	// .send() throw -- and since nothing here caught that, it silently
+	// aborted whatever was calling this, with zero indication anything
+	// had gone wrong. Checking readyState catches connecting/closing/
+	// closed uniformly (not just null), and the try/catch is defense
+	// in depth against any other unexpected throw -- logged either way
+	// so a failure like this is at least visible in CMD/console
+	// instead of invisible.
+	if (socket == null || socket.readyState !== WebSocket.OPEN){
+		log("websocket_send: dropped, socket not open (\"" + str + "\")");
 		return;
+	}
 
 	var request = session_id + "\n" + str;
 //	log("ws tx:[" + request + "]");
-	socket.send(request);
+	try {
+		socket.send(request);
+	} catch (e) {
+		log("websocket_send: send() threw (\"" + str + "\"): " + e);
+	}
 }
 
 function on_error(event){
