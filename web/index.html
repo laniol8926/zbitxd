@@ -1112,9 +1112,31 @@ function resize_ui(){
 	// picks up a phone orientation flip (fires as a resize event) without
 	// needing the user to switch modes. Skipped specifically around a
 	// fullscreen transition -- see wf_height_locked_for_fullscreen above.
+	//
+	// Real bug, confirmed live via a real screenshot: two period-boundary
+	// markers landed only a few pixels apart instead of a real 15s scroll
+	// distance apart, in portrait only. Root cause: setting a canvas's
+	// .height always wipes its pixel buffer, even to the SAME value it
+	// already had (see sync_wf_overlay_size()'s own comment on this same
+	// quirk) -- and this used to reassign unconditionally on every resize
+	// event, including ones where waterfall_calc_height() computes the
+	// identical number as before. Mobile Chrome fires resize on address-
+	// bar show/hide while scrolling -- exactly what happens scrolling the
+	// long CQ/Band Activity/RX Frequency panels, which is a portrait-
+	// specific habit -- and portrait's low 150px clamp means a wide range
+	// of real innerHeight values all collapse to the same clamped output,
+	// making "nothing actually changed" the COMMON case there, not the
+	// exception. Each spurious reset (waterfall_setup_scroll_rate() zeroes
+	// wf_rx_elapsed_sec and clears wf_period_boundaries) restarted the
+	// marker timeline from scratch, so two markers recorded moments apart
+	// across two nearby resets both landed near the top of a freshly-
+	// cleared canvas instead of their true 15s-apart positions.
 	if (!wf_height_locked_for_fullscreen){
-		el("waterfall").height = waterfall_calc_height();
-		waterfall_setup_scroll_rate();
+		var new_wf_height = waterfall_calc_height();
+		if (el("waterfall").height !== new_wf_height){
+			el("waterfall").height = new_wf_height;
+			waterfall_setup_scroll_rate();
+		}
 	}
 	sync_wf_overlay_size();
 	el("waterfall_scale").width = b.width()-sidebar_width;
