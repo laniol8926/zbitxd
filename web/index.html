@@ -37,10 +37,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, minimum-scale=0.5, maximum-scale=5">
     <title>sBitx</title>
     <script src="jquery.min.js"></script>
-    <script src="pcm-player.js"></script>
-	<script src="proj4.js"></script>
-    <script src="gridmap.js"></script>
-	<link rel="stylesheet" href="style.css">
+    <!-- ?v=N cache-busting on every external asset below -- real report:
+	     mobile browsers/intermediate layers didn't always honor the
+	     Cache-Control: no-cache header webserver.c already sends on
+	     every response, causing genuine "the fix is deployed but the
+	     browser won't show it" confusion more than once this session.
+	     A version bump changes the actual URL, which no cache (however
+	     it's misbehaving) can serve a stale copy of. No build step in
+	     this project to automate this -- bump the ?v= on whichever
+	     file's line changed, by hand, same as any other deploy. -->
+    <script src="pcm-player.js?v=1"></script>
+	<script src="proj4.js?v=1"></script>
+    <script src="gridmap.js?v=1"></script>
+	<link rel="stylesheet" href="style.css?v=1">
   </head>
   <body>
 	<input type="hidden" id="FREQ" value="7040000"/>

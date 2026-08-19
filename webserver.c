@@ -286,6 +286,20 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
       // browser caching that outweighs always serving what's actually
       // installed.
       //
+      // Clear-Site-Data alongside Cache-Control, not instead of it --
+      // user's own reasoning: different browsers/intermediate layers
+      // handle caching differently, and Cache-Control alone hasn't
+      // fully solved this in practice (still needed manual hard
+      // refreshes more than once this session despite it already being
+      // here). Clear-Site-Data is a real, purpose-built header that
+      // actively instructs the browser to wipe cached data for this
+      // origin, not just decline to reuse it going forward -- well
+      // supported in Chrome/Edge/Samsung Internet (this project's real
+      // targets), weaker support in Safari. Belt-and-suspenders with
+      // the ?v= cache-busting on script/style URLs in index.html (a
+      // third, independent mechanism that doesn't rely on the browser
+      // honoring any caching directive at all).
+      //
       // logbook_export.adi specifically: real report -- clicking Export
       // ADIF opened the file inline in the browser instead of
       // downloading it. .adi isn't a MIME type mongoose knows, so it
@@ -297,8 +311,10 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
           .root_dir = s_web_root,
           .extra_headers = mg_http_match_uri(hm, "/logbook_export.adi")
               ? "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                "Clear-Site-Data: \"cache\"\r\n"
                 "Content-Disposition: attachment; filename=\"logbook_export.adi\"\r\n"
               : "Cache-Control: no-cache, no-store, must-revalidate\r\n"
+                "Clear-Site-Data: \"cache\"\r\n"
       };
       mg_http_serve_dir(c, ev_data, &opts);
     }
