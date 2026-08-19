@@ -1142,6 +1142,11 @@ function resize_ui(){
 	el("waterfall_scale").width = b.width()-sidebar_width;
 	draw_wf_scale();
 	height = b.height();
+	// Picks up a portrait<->landscape flip: an empty RX Frequency panel
+	// only hides in portrait (see its own comment), so rotating needs to
+	// re-evaluate it either way -- hide it on a flip into portrait while
+	// still empty, or unhide it on a flip into landscape regardless.
+	update_rx_panel_visibility();
 }
 
 // Static 0-3000Hz frequency scale, drawn once and only redrawn on
@@ -2509,6 +2514,7 @@ function FT8_list_append(list_id, text, style){
 	// down to read/click.
 	if (reversed && was_at_top)
 		ol.scrollTop = 0;
+	update_rx_panel_visibility();
 }
 
 //you can choose messages that are:
@@ -2612,8 +2618,51 @@ function FT8_message_chosen(event){
 function FT8_lists_clear() {
 	document.querySelector('#wsjtx-activity ol').innerHTML ="";
 	document.querySelector('#wsjtx-cq ol').innerHTML ="";
-	document.querySelector('#wsjtx-rx ol').innerHTML ="";
+	FT8_rx_clear();
 	FT8_list_last_period = {};
+}
+
+// Real ask: once a QSO is logged, its RX Frequency transcript is pure
+// history -- has nothing to do with whatever the next exchange turns
+// out to be. Clearing it here keeps the panel showing only the
+// exchange(s) actually in progress, same "stale content survives past
+// where it's relevant" class of fix as FT8_lists_clear() on login/
+// band-change, just scoped to this one panel instead of all three --
+// Band Activity/CQ Panel still show real, still-relevant traffic right
+// after a QSO logs.
+//
+// callsign, if given, removes only THAT station's own entries --
+// user's own catch: with two overlapping QSOs genuinely in progress at
+// once (real QRM/QSB operation, not a mistake -- see the #ft8_tx_pending
+// indicator's own comment), logging one of them must not wipe the
+// still-in-progress transcript for the other. Omit callsign for a full
+// wipe (login/band-change, where every exchange is genuinely invalid
+// regardless of station).
+function FT8_rx_clear(callsign){
+	var ol = document.querySelector('#wsjtx-rx ol');
+	if (!callsign){
+		ol.innerHTML = "";
+	} else {
+		var target = callsign.toUpperCase();
+		Array.from(ol.children).forEach(function(item){
+			var tokens = (item.dataset.message || "").toUpperCase().split(/\s+/);
+			if (tokens.indexOf(target) !== -1)
+				ol.removeChild(item);
+		});
+	}
+	update_rx_panel_visibility();
+}
+
+// Portrait-only: an empty RX Frequency panel (no exchange in
+// progress) contributes nothing to the UI and just eats vertical
+// space that matters far more there than in landscape -- user's own
+// ask. Hidden via display:none (not removed from the DOM) so its
+// container's flex siblings reflow to fill the freed space; always
+// shown in landscape, where the extra height isn't a real cost.
+function update_rx_panel_visibility(){
+	var portrait = window.innerWidth < window.innerHeight;
+	var has_content = el("wsjtx-rx").querySelector("ol").firstElementChild !== null;
+	el("wsjtx-rx").style.display = (portrait && !has_content) ? "none" : "";
 }
 
 function FT8_new_message(text, style){
@@ -3992,6 +4041,9 @@ function response_handler(response){
 			break;
 		case 'QSO':
 			logbook_update(args);
+			// token[8] is callsign_recv -- see logbook_update()'s own
+			// comment on the column order.
+			FT8_rx_clear(args.split("|")[8]);
 			break;
 		case 'TEXT':
 			log("text: [ " + args + "]");
