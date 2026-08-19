@@ -1443,27 +1443,22 @@ function waterfall_record_period_boundary(mode){
 	// resize) -- don't draw a marker for a period that was already
 	// partway through before we started watching, only ones that
 	// genuinely begin from here on.
-	if (wf_last_boundary_ms !== null){
-		// Real bug, confirmed live via real screenshots: this used to tag
-		// the boundary with wf_rx_elapsed_sec as of WHENEVER this
-		// function happened to actually notice the crossing, implicitly
-		// assuming that's always "right now, the instant it happened".
-		// Real audio content keeps scrolling on its own continuous clock
-		// regardless of when this runs, so any delay in noticing the
-		// crossing (confirmed live: landing close to a full ~13s -- this
-		// project's own well-documented decode-processing window --
-		// consistently inside the slot's own quiet gap instead of at its
-		// clean start) left the marker sitting that far behind where it
-		// truly belongs. Retroactively subtracting however much real
-		// wall-clock time has already passed since the true boundary
-		// (Date.now() - boundary_ms) corrects for it regardless of the
-		// exact cause/magnitude of the delay. Assumes no TX happened in
-		// that gap -- wf_rx_elapsed_sec pauses during TX but real time
-		// doesn't, so this can't be reconstructed exactly across a TX
-		// pause -- a much rarer case than plain detection lag.
-		var late_sec = (Date.now() - boundary_ms) / 1000;
-		wf_period_boundaries.push({ms: boundary_ms, elapsed_sec: wf_rx_elapsed_sec - late_sec});
-	}
+	//
+	// Known issue, parked: the marker doesn't line up exactly with the
+	// true slot boundary (real report: lands somewhere in the quiet
+	// decode gap rather than at the clean start of the next slot),
+	// barely visible on a desktop browser but obvious on a phone. A
+	// retroactive wall-clock correction was tried here and made live --
+	// confirmed by the user to make the misalignment worse, not better,
+	// so reverted back to this simpler version. Root cause not
+	// conclusively identified (phone clock accuracy was ruled out: it's
+	// GPS-synced, and FT8 decode itself requires sub-second sync to
+	// work at all, which it does) -- same category as the still-unlisted
+	// waterfall-scale-in-portrait issue elsewhere in this project:
+	// real, but not misleading actual radio operation, parked rather
+	// than guessed at further without better instrumentation.
+	if (wf_last_boundary_ms !== null)
+		wf_period_boundaries.push({ms: boundary_ms, elapsed_sec: wf_rx_elapsed_sec});
 	wf_last_boundary_ms = boundary_ms;
 }
 
@@ -1496,11 +1491,20 @@ function draw_period_markers(ctx, width, height){
 			break;
 		wf_period_boundaries.shift(); // oldest boundary has scrolled off-screen
 	}
+	// User's own call, after two rounds of live testing couldn't pin the
+	// exact pixel-perfect position down (see this function's own
+	// "parked" comment above): rather than a thin 2px line that needs
+	// exact timing to land in the right place, draw a band spanning the
+	// real ~2s quiet decode gap's own duration, centered on the
+	// computed position. Whatever residual timing imprecision remains
+	// is far less visually jarring when the marker's own width already
+	// tolerates it.
+	var band_height = Math.max(2, Math.round(2 * wf_rows_per_sec));
 	for (var i = 0; i < wf_period_boundaries.length; i++){
 		var b = wf_period_boundaries[i];
 		var y = Math.round((wf_rx_elapsed_sec - b.elapsed_sec) * wf_rows_per_sec);
 		ctx.fillStyle = "red";
-		ctx.fillRect(0, y, width, 2);
+		ctx.fillRect(0, y - Math.floor(band_height / 2), width, band_height);
 		ctx.font = "10px monospace";
 		ctx.textBaseline = "top";
 		ctx.fillText(waterfall_utc_label(b.ms), 2, y + 3);
