@@ -1142,11 +1142,6 @@ function resize_ui(){
 	el("waterfall_scale").width = b.width()-sidebar_width;
 	draw_wf_scale();
 	height = b.height();
-	// Picks up a portrait<->landscape flip: an empty RX Frequency panel
-	// only hides in portrait (see its own comment), so rotating needs to
-	// re-evaluate it either way -- hide it on a flip into portrait while
-	// still empty, or unhide it on a flip into landscape regardless.
-	update_rx_panel_visibility();
 }
 
 // Static 0-3000Hz frequency scale, drawn once and only redrawn on
@@ -2659,16 +2654,18 @@ function FT8_rx_clear(callsign){
 	update_rx_panel_visibility();
 }
 
-// Portrait-only: an empty RX Frequency panel (no exchange in
-// progress) contributes nothing to the UI and just eats vertical
-// space that matters far more there than in landscape -- user's own
-// ask. Hidden via display:none (not removed from the DOM) so its
-// container's flex siblings reflow to fill the freed space; always
-// shown in landscape, where the extra height isn't a real cost.
+// An empty RX Frequency panel (no exchange in progress) contributes
+// nothing to the UI -- an empty panel is noise regardless of how much
+// screen space is available, not just a portrait-specific space-
+// pressure problem (this used to be portrait-only; user's own call to
+// extend it to landscape too, matching the same "show only what's
+// currently relevant" philosophy already used elsewhere in this app --
+// Band Activity hiding during a QSO, B4 hiding worked stations).
+// Hidden via display:none (not removed from the DOM) so its
+// container's flex siblings reflow to fill the freed space.
 function update_rx_panel_visibility(){
-	var portrait = window.innerWidth < window.innerHeight;
 	var has_content = el("wsjtx-rx").querySelector("ol").firstElementChild !== null;
-	el("wsjtx-rx").style.display = (portrait && !has_content) ? "none" : "";
+	el("wsjtx-rx").style.display = has_content ? "" : "none";
 }
 
 function FT8_new_message(text, style){
