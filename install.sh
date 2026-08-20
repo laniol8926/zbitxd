@@ -49,9 +49,15 @@ echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo "*** base packages"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 sudo apt update
+# libncurses-dev: sbitx_daemon.c #includes <ncurses.h> (a vestigial header-
+# only dependency, confirmed live -- no ncurses.h symbols are actually
+# called and the Makefile never links -lncurses, so this is purely a
+# compile-time need) -- missing on a genuinely fresh box, confirmed live
+# via a real "ncurses.h: No such file or directory" build failure.
 sudo apt install -y \
 	git libasound2-dev libfftw3-dev libsqlite3-dev libsystemd-dev sqlite3 \
-	build-essential autoconf automake libtool libusb-1.0-0-dev libltdl-dev
+	build-essential autoconf automake libtool libusb-1.0-0-dev libltdl-dev \
+	libncurses-dev
 
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo "*** system time (FT8 needs it accurate)"
@@ -94,6 +100,33 @@ else
 	echo "image, or swap is managed some other way) -- skipping the automatic"
 	echo "resize. The Hamlib build below may be memory-tight on a low-RAM"
 	echo "board without it; increase swap manually first if you hit OOM."
+fi
+
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+echo "*** pkg-config (Hamlib's own configure.ac requires pkg.m4 >= 0.29.2"
+echo "*** via PKG_PREREQ -- an old distro's packaged pkg-config, e.g."
+echo "*** Debian/Raspbian Buster's 0.29, fails this outright and the"
+echo "*** Hamlib build below never even gets to ./configure)"
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+pkgconfig_version="$(pkg-config --version 2>/dev/null || echo 0)"
+if dpkg --compare-versions "$pkgconfig_version" lt 0.29.2; then
+	echo "pkg-config ${pkgconfig_version} is too old (Hamlib needs >= 0.29.2) -- switching to pkgconf."
+	# pkgconf implements the pkg-config CLI/API and Debian's package
+	# diverts /usr/bin/pkg-config, /usr/share/aclocal/pkg.m4, etc. to
+	# point at it automatically (and pulls pkg-config itself out via a
+	# package conflict) -- confirmed live, no manual symlinking needed.
+	sudo apt install -y pkgconf
+	# But even pkgconf's own pkg.m4 self-declares PKG_MACROS_VERSION
+	# 0.29.1 -- one patch version short of what Hamlib's PKG_PREREQ
+	# actually checks for -- confirmed live against pkgconf's current
+	# upstream master, not just a stale Buster package. pkgconf's real
+	# capability is a strict superset of pkg-config 0.29.2's, so
+	# bumping this one version string it self-reports is safe.
+	if [ -f /usr/share/aclocal/pkg.m4 ]; then
+		sudo sed -i "s/\[PKG_MACROS_VERSION\], \[0.29.1\]/[PKG_MACROS_VERSION], [0.29.2]/" /usr/share/aclocal/pkg.m4
+	fi
+else
+	echo "pkg-config ${pkgconfig_version}, already at/above the 0.29.2 minimum."
 fi
 
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
