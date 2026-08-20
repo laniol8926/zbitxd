@@ -63,6 +63,40 @@ if systemctl list-unit-files fake-hwclock.service >/dev/null 2>&1; then
 fi
 
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+echo "*** swap (the from-source Hamlib build below is memory-heavy --"
+echo "*** make -j\$(nproc) further down means that many parallel GCC"
+echo "*** jobs at once -- a fresh low-RAM board's small default swap"
+echo "*** (confirmed live: a Pi Zero 2 W, 512MB total) can OOM or thrash"
+echo "*** badly here. Learned the hard way -- user's own words.)"
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+MIN_SWAP_MB=1024
+current_swap_kb=$(awk '/SwapTotal/{print $2}' /proc/meminfo)
+current_swap_mb=$((current_swap_kb / 1024))
+if [ "$current_swap_mb" -ge "$MIN_SWAP_MB" ]; then
+	echo "Current swap: ${current_swap_mb}MB, already at/above the ${MIN_SWAP_MB}MB minimum."
+elif [ -f /etc/dphys-swapfile ]; then
+	echo "Current swap: ${current_swap_mb}MB, below the ${MIN_SWAP_MB}MB minimum -- resizing via dphys-swapfile."
+	sudo dphys-swapfile swapoff
+	# Handles CONF_SWAPSIZE already present (commented or not) or missing
+	# entirely -- sed only touches an existing uncommented line; the grep
+	# fallback covers every other case by just appending an active one
+	# (a later CONF_SWAPSIZE= line takes effect over an earlier commented
+	# one regardless).
+	sudo sed -i "s/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=${MIN_SWAP_MB}/" /etc/dphys-swapfile
+	if ! grep -q "^CONF_SWAPSIZE=${MIN_SWAP_MB}$" /etc/dphys-swapfile; then
+		echo "CONF_SWAPSIZE=${MIN_SWAP_MB}" | sudo tee -a /etc/dphys-swapfile >/dev/null
+	fi
+	sudo dphys-swapfile setup
+	sudo dphys-swapfile swapon
+else
+	echo "Current swap: ${current_swap_mb}MB, below the ${MIN_SWAP_MB}MB minimum, and"
+	echo "dphys-swapfile isn't present on this system (not a Raspberry Pi OS"
+	echo "image, or swap is managed some other way) -- skipping the automatic"
+	echo "resize. The Hamlib build below may be memory-tight on a low-RAM"
+	echo "board without it; increase swap manually first if you hit OOM."
+fi
+
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo "*** Hamlib (from source -- see rig_generic.c for why the packaged"
 echo "*** version isn't enough for the generic-rig backend)"
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
