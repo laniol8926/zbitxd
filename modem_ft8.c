@@ -868,6 +868,20 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
             // Blind decode failed -- retry once assuming this candidate
             // is addressed to us (CALL_TO = mycallsign) before giving up
             // on it entirely. See ap_known_bits' own comment above.
+            //
+            // Real task #25 finding (2026-08-20): a second AP hypothesis
+            // (CQ-pattern, jt9's iaptype=1) was tried here and reverted --
+            // 550 real attempts across 3 real captures, 0 recoveries.
+            // Combined with this original mycall-only hint *also* having
+            // shown zero measured effect in the earlier session, two
+            // independently-implemented AP hypotheses both landing on
+            // zero is a real signal: a candidate that survives neither
+            // blind decode nor a correct, well-targeted hint is more
+            // likely a genuinely bad *candidate* (poor time/frequency
+            // localization from ftx_find_candidates() itself) than a
+            // good one just missing the right guess. Investigating
+            // ftx_find_candidates() directly is the follow-up, not more
+            // AP hypothesis variety -- see [[project_ft8_ldpc_sensitivity]].
             if (!ap_available || !ftx_decode_candidate_ap(&mon.wf, cand, kLDPC_iterations,
                     ap_known_bits, 29, &message, &status)){
                 // printf("000000 %3d %+4.2f %4.0f ~  ---\n", cand->score, time_sec, freq_hz);
