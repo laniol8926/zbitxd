@@ -111,9 +111,6 @@
       			<input type="range" class="linear-slider"
         			id="slider_TX_PITCH" max="4000" min="10" step="10" value="1900" />
 				</div>
-			</div><div class="sbitxv3-control" id="clear_freq_control" title="Scan recent spectrum data and set TX TONE to an unoccupied gap">
-				<button class="logger-button" id="clear_freq_button">Find Clear</button>
-				<div class="settings-hint" id="clear_freq_status"></div>
 			</div><div class="linear" id="linear_FT8_REPEAT" title="Set the Number Of Repeat Transmissions">
     			<div class="linear-label">RPT</div>
     			<input type="number" id="FT8_REPEAT" min="1" max="10" class="linear-value" />
@@ -645,107 +642,6 @@ function update_noise_floor(update){
 		auto_noise_floor = raw_floor;
 	else
 		auto_noise_floor += (raw_floor - auto_noise_floor) * AUTO_FLOOR_SMOOTHING;
-}
-
-// Find Clear TX Frequency -- user's own framing: the waterfall's real
-// job is "find a free frequency to transmit on", not "show the
-// spectrum". This does that job directly instead of requiring someone
-// to eyeball the display, which is what actually makes Hide Band
-// Activity/Hide Waterfall usable as a normal operating view instead of
-// just an occasional toggle.
-//
-// Rolling buffer of recent RX spectrum rows (same decode formula as
-// update_noise_floor() above, kept separate rather than shared so
-// neither function's logic has to bend to fit the other). 30 seconds
-// -- a full even+odd FT8 slot pair -- so a gap only judged "clear"
-// from one parity's traffic (which carries a different set of
-// stations than the other) doesn't get picked. Populated continuously
-// from every RX row (not just when the button is clicked) so clicking
-// Find Clear never has to make the user wait for data to accumulate.
-var clear_freq_buffer = [];
-const CLEAR_FREQ_BUFFER_MS = 30000;
-const CLEAR_FREQ_MIN_HZ = 90;    // FT8's real ~50Hz footprint + drift/filter-skirt margin
-const CLEAR_FREQ_MARGIN = 8;     // raw v-units above the floor still counted as "quiet"
-// User's own real-operating point: this isn't just about avoiding a
-// spot that looks occupied right now -- the receive bandpass itself
-// degrades near its own edges, and more importantly, wherever *we*
-// transmit constrains where the other station's reply has to land for
-// the receive window to still catch it reliably. A "clear" spot found
-// too close to the raw edge is a worse pick than a busier-looking spot
-// with real margin either side, so this stays well inside the nominal
-// 0-3000Hz span rather than hugging it. Tune these two based on how
-// this plays out against the real RS-978/mcHF passband -- there's
-// nothing authoritative about these exact numbers yet.
-const CLEAR_FREQ_LO_HZ = 400;
-const CLEAR_FREQ_HI_HZ = 2600;
-
-function record_clear_freq_sample(update){
-	var n = update.length - 3;
-	if (n <= 0)
-		return;
-	var levels = new Array(n);
-	for (var k = 0; k < n; k++)
-		levels[k] = (update.charCodeAt(k + 3) - 32) * 2;
-	var now = Date.now();
-	clear_freq_buffer.push({ t: now, levels: levels });
-	while (clear_freq_buffer.length && now - clear_freq_buffer[0].t > CLEAR_FREQ_BUFFER_MS)
-		clear_freq_buffer.shift();
-}
-
-function find_clear_frequency(){
-	var status = el("clear_freq_status");
-	if (!clear_freq_buffer.length ||
-	    Date.now() - clear_freq_buffer[0].t < CLEAR_FREQ_BUFFER_MS - 5000){
-		if (status) status.textContent = "gathering data, try again shortly";
-		return;
-	}
-
-	var n = clear_freq_buffer[clear_freq_buffer.length - 1].levels.length;
-	var hz_per_bin = 3000 / n;
-	var max_level = new Array(n).fill(-Infinity);
-	for (var r = 0; r < clear_freq_buffer.length; r++){
-		var levels = clear_freq_buffer[r].levels;
-		for (var k = 0; k < n; k++)
-			if (levels[k] > max_level[k])
-				max_level[k] = levels[k];
-	}
-
-	var bin_lo = Math.floor(CLEAR_FREQ_LO_HZ / hz_per_bin);
-	var bin_hi = Math.min(n - 1, Math.ceil(CLEAR_FREQ_HI_HZ / hz_per_bin));
-	var min_bins = Math.ceil(CLEAR_FREQ_MIN_HZ / hz_per_bin);
-	var threshold = auto_noise_floor === null ? Infinity : auto_noise_floor + CLEAR_FREQ_MARGIN;
-
-	var best_start = -1, best_len = 0;
-	var run_start = -1;
-	for (var i = bin_lo; i <= bin_hi + 1; i++){
-		var quiet = i <= bin_hi && max_level[i] <= threshold;
-		if (quiet){
-			if (run_start < 0) run_start = i;
-		} else {
-			if (run_start >= 0){
-				var len = i - run_start;
-				if (len > best_len){ best_len = len; best_start = run_start; }
-			}
-			run_start = -1;
-		}
-	}
-
-	if (best_len < min_bins){
-		if (status) status.textContent = "no clear gap found -- band is busy";
-		return;
-	}
-
-	var center_bin = best_start + best_len / 2;
-	var freq = Math.round(center_bin * hz_per_bin);
-	if (freq < 10) freq = 10;
-	if (freq > 4000) freq = 4000;
-
-	el("TX_PITCH").value = freq;
-	el("slider_TX_PITCH").value = freq;
-	websocket_send("TX_PITCH " + freq);
-	if (typeof draw_wf_overlay === "function")
-		draw_wf_overlay();
-	if (status) status.textContent = "set to " + freq + " Hz";
 }
 
 // FT8/FT4 waterfall real-time scroll driver -- see waterfall_scroll_tick()
@@ -4052,7 +3948,6 @@ function response_handler(response){
 		if (response.substring(0,2) == "RX"){
 			last_wf_row = response;
 			update_noise_floor(response);
-			record_clear_freq_sample(response);
 		}
 
 		var mode = el("MODE").value;
@@ -4554,7 +4449,6 @@ $("#btn-logbook-close").on("click", close_logbook);
 $("#btn-logbook-search").on("click", logbook_request);
 $("#btn-logbook-load").on("click", logbook_more);
 $("#btn-logbook-export").on("click", logbook_export);
-$("#clear_freq_button").on("click", find_clear_frequency);
 $("#logbook-search").on("input", logbook_search);
 
 //settings buttons
