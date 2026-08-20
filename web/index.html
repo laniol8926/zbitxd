@@ -385,8 +385,20 @@
 					<p>The sBitx is an open-source, hackable, next generation radio.</p>
  			 			<p>Enter passkey to access your sbitx.</p> 
 						<div id="login_error"></div>
-  					<input type="text" class="sbitx-text-input" id="passkey" 
-						name="passkey" autocomplete="off" placeholder="passkey"/>
+					<!-- Was type="text" -- plaintext-visible AND, per a real report,
+					     the likely cause of a brief flash of the logged-in app right
+					     after reopening a closed mobile browser: on_open() sends
+					     "login="+this field's value the instant ANY websocket opens
+					     (see its own code), and nothing guards against the browser's
+					     own tab-resume form-state restoration (a different, more
+					     aggressive mechanism than classic autofill) silently
+					     repopulating a still-valid passkey before the user does
+					     anything at all. Browsers are far more conservative about
+					     restoring password-type fields than plain text ones --
+					     autocomplete="new-password" (not "off", which browsers
+					     increasingly ignore) is the standard way to opt further out. -->
+  					<input type="password" class="sbitx-text-input" id="passkey"
+						name="passkey" autocomplete="new-password" placeholder="passkey"/>
   					<button class="logger-button" id="start_login" >Start</button>
 					<p>New user? Try 123 as the passkey. Change it when prompted.</p>	
 					<p>Released under General Public Licens v3.0.<br/>
