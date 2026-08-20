@@ -38,3 +38,11 @@ void ft8_suspend();
 void ft8_resume();
 // TEMPORARY, task #25 SIC validation only -- remove once done.
 int ft8_decode_file(const char *path);
+
+// Real task #25 ask: while continuing a QSO, restrict candidate search
+// to a narrow window around the other station's already-known
+// frequency instead of the whole band, so it can't lose a heap slot to
+// unrelated traffic elsewhere in the passband. freq_hz < 0 means
+// unlocked (search the whole band, the default/normal behavior). See
+// its own definition in modem_ft8.c for the margin used.
+void ft8_set_qso_lock(float freq_hz);

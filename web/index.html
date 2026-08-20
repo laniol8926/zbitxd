@@ -2679,6 +2679,14 @@ function update_rx_panel_visibility(){
 	var has_content = el("wsjtx-rx").querySelector("ol").firstElementChild !== null;
 	el("wsjtx-rx").style.display = has_content ? "" : "none";
 	update_ft8_panel_layout();
+	// Real task #25 ask: release the server's frequency-locked candidate
+	// search once there's genuinely no in-progress exchange left to
+	// protect -- see the QSO_LOCK send in FT8_new_message() above. This
+	// fires from every call site that can empty the panel (full wipe on
+	// login/band-change, a QSO logging, or a per-callsign partial clear
+	// that happens to take the last entry with it), not just one of them.
+	if (!has_content)
+		websocket_send("QSO_UNLOCK");
 }
 
 // Widens whichever of the 3 FT8 panels (Band Activity, CQ Panel, RX
@@ -2741,8 +2749,20 @@ function FT8_new_message(text, style){
 			autoans_pick_and_answer();
 	}
 	var mycallsign = $("#MYCALLSIGN").val().toUpperCase();
-	if (words[3] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0)
+	if (words[3] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0){
 		FT8_list_append("wsjtx-rx", text, style);
+		// Real task #25 ask: narrow the server's own candidate search to
+		// this station's frequency while the QSO continues, so a weak
+		// reply from them can't lose a heap slot to unrelated band
+		// traffic. Re-sent on every message that lands here (not just
+		// the first), so it tracks if their own frequency drifts a
+		// little over the exchange -- see ft8_set_qso_lock()'s own
+		// comment in modem_ft8.c for the margin used. Unlocked again in
+		// update_rx_panel_visibility() once this panel goes empty.
+		var lock_freq = parseFloat(words[3]);
+		if (!isNaN(lock_freq))
+			websocket_send("QSO_LOCK " + lock_freq);
+	}
 }
 
 // setup the html for wsjtx

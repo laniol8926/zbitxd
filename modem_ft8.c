@@ -85,6 +85,45 @@ static const int kMin_score = 10; // Minimum sync score threshold for candidates
 static const int kMax_candidates = 140;
 static const int kLDPC_iterations = 25;
 
+// Real task #25 ask, from a real QSO-reliability concern: with all
+// other FT8 panels hidden during a QSO (user's own established
+// preference), the only decode that actually matters right now is the
+// other station's own reply -- yet ftx_find_candidates() still spends
+// its fixed kMax_candidates heap budget across the whole band by
+// default, letting unrelated traffic elsewhere in the passband crowd
+// out a weak-but-real reply (a real, measured failure mode this same
+// session -- see project_ft8_ldpc_sensitivity memory). qso_lock_freq_hz
+// adds a small *supplementary* search around a known frequency once one
+// is set, run alongside (never instead of) the normal full-band search
+// -- see its use at the ftx_find_candidates() call site for why it
+// can't just restrict the main search instead (breaks SIC). < 0 means
+// unlocked (no supplementary search, unchanged normal behavior).
+static float qso_lock_freq_hz = -1.0f;
+
+// Search margin either side of qso_lock_freq_hz, in Hz. FT8's own
+// signal footprint is 8 tones * 6.25Hz = 50Hz, but that's already
+// handled by ftx_find_candidates()'s own inner num_tones bounds check
+// on *each* candidate base frequency it tries -- this margin only
+// needs to cover how far the other station's own base tone frequency
+// could plausibly have drifted since we last decoded them, not the
+// signal's own width on top of that. User's own real-world judgment,
+// after an initial +/-25Hz proposal: "drift is real but [not] that
+// much. then somebody's got a problem" -- kept tight and easy to
+// widen later if real QSO testing shows genuine replies being missed.
+static const float kQSO_lock_margin_hz = 10.0f;
+
+// Small dedicated heap size for the supplementary lock-window search --
+// this window is narrow enough (a handful of freq_offset bins) that it
+// will never have anywhere near kMax_candidates worth of real distinct
+// signals in it; kept small on purpose so a locked search can't itself
+// start crowding out real candidates found by the main search once
+// merged together.
+static const int kQSO_lock_extra_candidates = 8;
+
+void ft8_set_qso_lock(float freq_hz){
+	qso_lock_freq_hz = freq_hz;
+}
+
 static const int kMax_decoded_messages = 50;
 
 static const int kFreq_osr = 2; // Frequency oversampling rate (bin subdivision)
@@ -845,9 +884,65 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 //    LOG(LOG_DEBUG, "Waterfall accumulated %d symbols\n", mon.wf.num_blocks);
 //    LOG(LOG_INFO, "Max magnitude: %.1f dB\n", mon.max_mag);
 
-    // Find top candidates by Costas sync score and localize them in time and frequency
-    ftx_candidate_t candidate_list[kMax_candidates];
-    int num_candidates = ftx_find_candidates(&mon.wf, kMax_candidates, candidate_list, kMin_score);
+    // Find top candidates by Costas sync score and localize them in time and frequency.
+    //
+    // Real task #25 finding, caught live during testing: this MUST stay
+    // a full-band search, not restricted to qso_lock_freq_hz's window --
+    // successive interference cancellation (below) only works because
+    // this search finds and later subtracts *every* real signal in the
+    // capture, including ones nowhere near the locked frequency. A
+    // stronger nearby signal masking the locked one can only get out of
+    // the way once it's itself been found and cancelled; narrowing this
+    // search to just the lock window means that masking signal is never
+    // found at all, and the very signal the lock exists to protect stays
+    // masked forever -- confirmed live: a real signal at a known,
+    // exactly-correct locked frequency decoded 0 times with the naive
+    // restrict-everything version of this, on a file that decoded it
+    // fine unlocked.
+    ftx_candidate_t candidate_list[kMax_candidates + kQSO_lock_extra_candidates];
+    int num_candidates = ftx_find_candidates(&mon.wf, kMax_candidates, candidate_list, kMin_score, 0, mon.wf.num_bins);
+
+    // qso_lock_freq_hz's own comment above explains why this exists.
+    // Run as a small, *additional* narrow-window search on top of the
+    // full one above (never instead of it, see that comment) -- this is
+    // what actually protects the locked frequency from losing its
+    // fixed-size heap slot to unrelated candidates elsewhere in the
+    // band, without breaking SIC's need to see the whole capture.
+    if (qso_lock_freq_hz >= 0.0f){
+        int center_bin = lroundf(qso_lock_freq_hz * mon.symbol_period);
+        int margin_bins = (int)ceilf(kQSO_lock_margin_hz * mon.symbol_period);
+        int lock_lo = center_bin - margin_bins;
+        int lock_hi = center_bin + margin_bins;
+        ftx_candidate_t lock_candidates[kQSO_lock_extra_candidates];
+        int n_lock = ftx_find_candidates(&mon.wf, kQSO_lock_extra_candidates, lock_candidates, kMin_score, lock_lo, lock_hi);
+        int n_merged = 0;
+        for (int li = 0; li < n_lock; ++li){
+            bool already_present = false;
+            for (int mi = 0; mi < num_candidates; ++mi){
+                if (candidate_list[mi].time_offset == lock_candidates[li].time_offset &&
+                    candidate_list[mi].freq_offset == lock_candidates[li].freq_offset &&
+                    candidate_list[mi].time_sub == lock_candidates[li].time_sub &&
+                    candidate_list[mi].freq_sub == lock_candidates[li].freq_sub){
+                    already_present = true;
+                    break;
+                }
+            }
+            if (!already_present){
+                candidate_list[num_candidates++] = lock_candidates[li];
+                ++n_merged;
+            }
+        }
+        // Only logged when the supplementary search actually rescues a
+        // candidate the main search's own heap would otherwise have
+        // dropped -- real signal that the lock mechanism did something,
+        // not routine per-cycle noise (should be rare on a normally-
+        // loaded band, more common on a busy one -- see this feature's
+        // own real-world verification note in project_ft8_ldpc_sensitivity
+        // memory).
+        if (n_merged > 0)
+            LOG(LOG_INFO, "qso_lock: rescued %d candidate(s) near %.1fHz that the main search's heap would have dropped\n",
+                n_merged, qso_lock_freq_hz);
+    }
 
     int new_this_pass = 0;
     // Go over candidates and attempt to decode messages

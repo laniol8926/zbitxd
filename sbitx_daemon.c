@@ -3565,6 +3565,20 @@ void cmd_exec(char *cmd){
 		}
 		set_field("#tx_pitch", args);
 	}
+	// Real task #25 ask: narrow the FT8 decoder's candidate search to a
+	// window around a known frequency while a QSO is in progress, so a
+	// weak-but-real reply can't lose its heap slot to unrelated traffic
+	// elsewhere in the band. Client sends QSO_LOCK every time a message
+	// lands in the RX Frequency panel (see FT8_new_message() in
+	// web/index.html) and QSO_UNLOCK once that panel goes empty again --
+	// see ft8_set_qso_lock()'s own comment in modem_ft8.c for the margin
+	// used.
+	else if (!strcmp(exec, "QSO_LOCK")){
+		ft8_set_qso_lock((float)atof(args));
+	}
+	else if (!strcmp(exec, "QSO_UNLOCK")){
+		ft8_set_qso_lock(-1.0f);
+	}
   else if (!strcmp(exec, "exit")){
     tx_off();
     set_field("#record", "OFF");
