@@ -512,7 +512,14 @@ select, select option, input {
 #settings_panel {
 	padding-bottom: 10px;
 	position: fixed;
-	left: 200px;
+	/* Real report: left:200px (assuming the desktop #sidebar's width,
+	   never actually reserved now -- show_main() hides #sidebar
+	   unconditionally) shoved the panel off center to the right, close
+	   button cut off. left:50%+transform (tried) overcorrected the other
+	   way, too far left. User's own fix: back to the original 200px,
+	   nudged left by roughly the close button's own width (~90px) so it
+	   comes back into view without swinging past center. */
+	left: 110px;
 	top: 0px;
 	border: solid 1px white;
 	background-color: black;
@@ -526,7 +533,9 @@ select, select option, input {
 #connect_panel {
 	padding-bottom: 10px;
 	position: fixed;
-	left: 200px;
+	/* Back to ~200px, nudged left -- see #settings_panel's own comment
+	   for the full story. */
+	left: 110px;
 	top: 30px;
 	border: solid 1px white;
 	background-color: black;
@@ -537,12 +546,10 @@ select, select option, input {
 	max-height: 90vh;
 }
 
-/* #settings_panel/#connect_panel's left:200px assumes the desktop
-   #sidebar's width -- but show_main() hides #sidebar unconditionally
-   now (both branches), so that space is never actually reserved. On a
-   narrow phone-portrait viewport this pushes the panel's right edge
-   well past the visible screen, overlapping #restore-btn (fixed
-   top:0/right:0) instead of sitting inside the window. */
+/* On a narrow phone-portrait viewport, the fixed 110px left offset
+   above (see #settings_panel's own comment) still pushes the panel's
+   right edge well past the visible screen -- span the full width with
+   a small margin instead. */
 @media (max-width: 480px) {
 	#settings_panel, #connect_panel {
 		left: 5px;
