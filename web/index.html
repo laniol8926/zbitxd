@@ -2666,6 +2666,35 @@ function FT8_rx_clear(callsign){
 function update_rx_panel_visibility(){
 	var has_content = el("wsjtx-rx").querySelector("ol").firstElementChild !== null;
 	el("wsjtx-rx").style.display = has_content ? "" : "none";
+	update_ft8_panel_layout();
+}
+
+// Widens whichever of the 3 FT8 panels (Band Activity, CQ Panel, RX
+// Frequency) currently happen to be visible so they fill the row
+// evenly instead of leaving blank space where a hidden one used to
+// be. Real report: RX Frequency hiding itself when empty (see
+// update_rx_panel_visibility() above) left Band Activity/CQ Panel
+// sitting at their old fixed width instead of reflowing into the
+// freed space -- the exact same problem set_band_activity_hidden()
+// already solved for the Band-Activity-hidden case, just not
+// generalized to every combination yet. Reads each panel's actual
+// current display state rather than tracking hide/solo flags
+// separately, so it stays correct regardless of *why* a panel is
+// hidden (manual Band Activity preference, Simplify's CQ-hide, RX
+// Frequency being empty, any combination) or which order those
+// changes happen in: 2 visible -> 50/50 (.wsjtx-panel-expanded), 1
+// visible -> full width (.wsjtx-panel-solo), all 3 -> default fixed
+// width.
+function update_ft8_panel_layout(){
+	var panel_ids = ["wsjtx-activity", "wsjtx-cq", "wsjtx-rx"];
+	var visible_ids = panel_ids.filter(function(id){
+		return el(id).style.display !== "none";
+	});
+	panel_ids.forEach(function(id){
+		var is_visible = visible_ids.indexOf(id) !== -1;
+		el(id).classList.toggle("wsjtx-panel-expanded", is_visible && visible_ids.length === 2);
+		el(id).classList.toggle("wsjtx-panel-solo", is_visible && visible_ids.length === 1);
+	});
 }
 
 function FT8_new_message(text, style){
@@ -4379,12 +4408,6 @@ var band_activity_manual_pref = (localStorage.getItem("hide_band_activity") === 
 function set_band_activity_hidden(hide){
 	el("wsjtx-activity").style.display = hide ? "none" : "";
 	el("HIDE_BAND_ACTIVITY_CHECK").checked = hide;
-	// CQ Panel/RX Frequency: the ones actually read/clicked mid-QSO --
-	// widen them and bump the font/row size into the space Band
-	// Activity just vacated, instead of leaving it blank (user's own
-	// ask: "dynamically change to a 50-50% display").
-	el("wsjtx-cq").classList.toggle("wsjtx-panel-expanded", hide);
-	el("wsjtx-rx").classList.toggle("wsjtx-panel-expanded", hide);
 
 	// Simplify During QSO: go one step further and hide CQ Panel too,
 	// giving RX Frequency the full row instead of a 50/50 split with a
@@ -4394,7 +4417,11 @@ function set_band_activity_hidden(hide){
 	// qso_in_progress's own comment above for the full story).
 	var solo = qso_in_progress && simplify_during_qso_enabled;
 	el("wsjtx-cq").style.display = solo ? "none" : "";
-	el("wsjtx-rx").classList.toggle("wsjtx-panel-solo", solo);
+
+	// Widths/expanded-vs-solo state for whichever panels ended up
+	// visible are computed generically -- see update_ft8_panel_layout()'s
+	// own comment.
+	update_ft8_panel_layout();
 }
 $("#HIDE_BAND_ACTIVITY_CHECK").on("change", function(){
 	band_activity_manual_pref = this.checked;
