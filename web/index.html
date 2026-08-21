@@ -431,52 +431,71 @@
 	</div>
 
 <!--   panadapter, xxxx_open functions will resize this as needed -->
-<!-- pan adapter and waterfall -->
-		<div id="pan_adapter">
-			<div id="tx_meters">
-				<div class="menu-item">
-					<span class="slider-label">Watts</span>
-					<meter id="POWER_meter" max="500" min="0" value="0"></meter>
-					<span id="POWER_reading"></span> 
-				</div>
-				<div class="menu-item">
-					<span class="slider-label">SWR</span> 
-					<meter id="REF_meter" max="1000" min="0" value="0"></meter>
-					<span id="REF_reading"/></span>
-				</div>
-			</div><!-- end of tx_meters -->
-			<canvas id="waterfall_scale" width="600" height="16"></canvas>
-			<div id="waterfall_wrap" width="100%">
-				<canvas id="waterfall" width="600" height="80"></canvas>
-				<canvas id="waterfall_overlay" width="600" height="80"></canvas>
-			</div>
-		</div>
-<!-- end of panadapter -->
 <!- wsjtx specific controls -->
+<!-- Real report, live: this toolbar row used to sit right after
+     #pan_adapter, which put it roughly mid-page between a short
+     waterfall and short panels below. Once the panels moved into a
+     tall left column beside #pan_adapter (see #pan_and_ft8list_row
+     below), that same DOM position left it sitting below the whole
+     tall row instead -- moved above it here so CMD/SET/Reboot/
+     Shutdown/the Hide checkboxes stay reachable at the top regardless
+     of how tall the panel column ends up. -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div class="panel-toolbar-row">
 				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label" title="Hide Band Activity"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Band</label><label class="panel-toggle-label" title="Hide Waterfall"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> WF</label><label class="panel-toggle-label" title="Hide Worked (stations already logged on this band/mode)"><input type="checkbox" id="HIDE_WORKED_CHECK" /> B4</label><label class="panel-toggle-label" title="Simplify During QSO -- during an active QSO, hide CQ Panel too (not just Band Activity) -- whether anyone's calling CQ is irrelevant while you're already in one. Both come back once the QSO ends."><input type="checkbox" id="SIMPLIFY_QSO_CHECK" /> Simplify</label>
-			</div>
-			<div id="wsjtx-activity" class="sbitx-list-container" >
-				<div class="sbitx-list-title">Band Activity</div>
-				<ol size="10" class="sbitx-list-box">
-				</ol>
-			</div>
-			<div id="wsjtx-cq" class="sbitx-list-container" >
-				<div class="sbitx-list-title">CQ Panel</div>
-				<ol size="10" class="sbitx-list-box">
-				</ol>
-			</div>
-			<div id="wsjtx-rx" class="sbitx-list-container" >
-				<div class="sbitx-list-title">RX Frequency<span id="ft8_tx_pending"></span></div>
-				<ol size="10" class="sbitx-list-box">
-				</ol>
 			</div>
 			<!-- <div id="gridmap"></div> -->
 			<div id="FT8_controls">
 			</div>
 			<!-- end of FT8_controls -->
 		</div>
+<!-- pan adapter and waterfall, side by side with the FT8 decode column
+     (whichever single panel Hide Band Activity/Simplify During QSO/an
+     active QSO currently selects -- see update_ft8_panel_layout()'s own
+     comment, unchanged). align-items:stretch (the flex default) is what
+     makes #ft8_list_column match #pan_adapter's real height with no
+     hardcoded number, and is also what makes #pan_adapter automatically
+     reclaim full width the instant #ft8_list_column is display:none in
+     CW/Voice mode -- one rule covers both cases for free. -->
+		<div id="pan_and_ft8list_row">
+			<div id="ft8_list_column" class="mode-panel">
+				<div id="wsjtx-activity" class="sbitx-list-container" >
+					<div class="sbitx-list-title">Band Activity</div>
+					<ol size="10" class="sbitx-list-box">
+					</ol>
+				</div>
+				<div id="wsjtx-cq" class="sbitx-list-container" >
+					<div class="sbitx-list-title">CQ Panel</div>
+					<ol size="10" class="sbitx-list-box">
+					</ol>
+				</div>
+				<div id="wsjtx-rx" class="sbitx-list-container" >
+					<div class="sbitx-list-title">RX Frequency<span id="ft8_tx_pending"></span></div>
+					<ol size="10" class="sbitx-list-box">
+					</ol>
+				</div>
+			</div>
+			<div id="pan_adapter">
+				<div id="tx_meters">
+					<div class="menu-item">
+						<span class="slider-label">Watts</span>
+						<meter id="POWER_meter" max="500" min="0" value="0"></meter>
+						<span id="POWER_reading"></span>
+					</div>
+					<div class="menu-item">
+						<span class="slider-label">SWR</span>
+						<meter id="REF_meter" max="1000" min="0" value="0"></meter>
+						<span id="REF_reading"/></span>
+					</div>
+				</div><!-- end of tx_meters -->
+				<canvas id="waterfall_scale" width="600" height="16"></canvas>
+				<div id="waterfall_wrap" width="100%">
+					<canvas id="waterfall" width="600" height="80"></canvas>
+					<canvas id="waterfall_overlay" width="600" height="80"></canvas>
+				</div>
+			</div>
+		</div>
+<!-- end of pan_and_ft8list_row -->
 	</div>
 <!- cw pane -->
 		<div id="CW_ui" class="sbitx-panel mode-panel">
@@ -1013,7 +1032,18 @@ function resize_ui(){
 
 	log("resize_ui w = " + b.width() + " h = " + b.height());
 
-	el("waterfall").width = b.width()-sidebar_width;//-sidebar.width;
+	// Real task #25-adjacent finding (2026-08-21): the waterfall used to
+	// assume it always spans (nearly) the full page width. Since
+	// #pan_adapter now shares a row with #ft8_list_column (see
+	// #pan_and_ft8list_row in style.css), its own real width is already
+	// correctly narrowed when that column is showing (FT8 mode) and
+	// already correctly full-width when it isn't (every other mode,
+	// where the column is display:none and the flex row gives
+	// #pan_adapter all of it) -- reading #pan_adapter's own actual
+	// rendered width covers both cases with no mode-specific branch
+	// needed here.
+	var pan_adapter_width = $("#pan_adapter").width();
+	el("waterfall").width = pan_adapter_width;
 	$(".sbitx-panel").width = b.width()-sidebar_width;
 	el("CW_ui").width = b.width()-sidebar_width;//-sidebar.width;
 	// recalculate on every resize, not just mode changes -- this is what
@@ -1047,7 +1077,7 @@ function resize_ui(){
 		}
 	}
 	sync_wf_overlay_size();
-	el("waterfall_scale").width = b.width()-sidebar_width;
+	el("waterfall_scale").width = pan_adapter_width;
 	draw_wf_scale();
 	height = b.height();
 }
@@ -2684,6 +2714,10 @@ function FT8_open(){
 	// the stylesheet -- confirmed live as the actual reason a real
 	// portrait-layout fix appeared to do nothing at all.
 	el("FT8_ui").style.display = "flex";
+	// Same reasoning, same fix, for the new left-column panel (moved out
+	// of #FT8_ui so it can sit beside #pan_adapter instead of below it --
+	// see #pan_and_ft8list_row in style.css).
+	el("ft8_list_column").style.display = "flex";
 }
 
 /* cw functionality */
@@ -3898,6 +3932,7 @@ function mode_set(new_mode){
 		case 'FT8':
 			FT8_open();
 			$("#FT8_ui").show();
+			$("#ft8_list_column").show();
 			logger_set_macro("FT8");
 			sound_mute = true;
 			wf_scroll_timer = setInterval(waterfall_scroll_tick, WF_SCROLL_INTERVAL_MS);
@@ -4354,14 +4389,23 @@ function set_band_activity_hidden(hide){
 	el("wsjtx-activity").style.display = hide ? "none" : "";
 	el("HIDE_BAND_ACTIVITY_CHECK").checked = hide;
 
-	// Simplify During QSO: go one step further and hide CQ Panel too,
-	// giving RX Frequency the full row instead of a 50/50 split with a
-	// panel that's now irrelevant. Gated on qso_in_progress, not hide
-	// -- real bug: hide alone can be true purely from the manual Band
-	// Activity checkbox/preference, with no QSO happening at all (see
-	// qso_in_progress's own comment above for the full story).
-	var solo = qso_in_progress && simplify_during_qso_enabled;
-	el("wsjtx-cq").style.display = solo ? "none" : "";
+	// User's own ask: Band Activity is the default view; checking Hide
+	// Band Activity replaces it with CQ Panel instead of leaving both
+	// visible side by side (the old behavior -- CQ Panel used to show
+	// regardless of hide, which meant the *default* state was both
+	// panels at once, not Band Activity alone as intended). Mutually
+	// exclusive with Band Activity now, same as CQ Panel/RX Frequency
+	// already are during a QSO.
+	//
+	// Simplify During QSO still takes priority when a QSO is active:
+	// hides CQ Panel even if Band Activity is *also* hidden, giving RX
+	// Frequency the full row instead of a 50/50 split with a panel
+	// that's now irrelevant. Gated on qso_in_progress, not hide alone
+	// -- real bug otherwise: hide can be true purely from the manual
+	// Band Activity checkbox/preference, with no QSO happening at all
+	// (see qso_in_progress's own comment above for the full story).
+	var simplify_hide = qso_in_progress && simplify_during_qso_enabled;
+	el("wsjtx-cq").style.display = (hide && !simplify_hide) ? "" : "none";
 
 	// Widths/expanded-vs-solo state for whichever panels ended up
 	// visible are computed generically -- see update_ft8_panel_layout()'s

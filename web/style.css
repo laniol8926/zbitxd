@@ -779,6 +779,17 @@ input[type="checkbox"] {
 	/* see #sidebar's comment -- avoids a flash of the main window before
 	   show_login() runs */
 	display: none;
+	/* Flex item inside #pan_and_ft8list_row (see that rule's own
+	   comment) -- flex:1 grows to fill whatever width
+	   #ft8_list_column's fixed flex-basis doesn't use (or the whole
+	   row, when that column is display:none in non-FT8 modes).
+	   min-width:0 stops the waterfall/waterfall_scale canvases' own
+	   initial HTML width="600" attribute from forcing this wider than
+	   intended on first paint, before resize_ui() has run even once --
+	   the same flex/replaced-element gotcha #ft8_list_column already
+	   guards against for its own content. */
+	flex: 1;
+	min-width: 0;
 }
 
 
@@ -807,20 +818,24 @@ input[type="checkbox"] {
 
 /* FT8/ wsjt-x styling */
 
+/* Real task #25-adjacent change (2026-08-21): height used to be a
+   fixed 280px (see the old comment this replaced, kept in git history)
+   -- fine when this panel shared a row below a full-width waterfall,
+   but this panel now lives in #ft8_list_column, a tall left column
+   beside #pan_adapter (see #pan_and_ft8list_row), where a fixed 280px
+   would waste most of the real available height instead of using it.
+   height:auto + flex:1 fills whatever height #pan_and_ft8list_row's
+   own align-items:stretch gives the column (which matches
+   #pan_adapter's real height automatically) -- no fixed number to
+   re-guess if that changes later. .sbitx-list-box below still scrolls
+   internally on a busy band regardless of how tall this ends up. */
 .sbitx-list-container {
 	display: inline-flex;
 	flex-direction: column;
 	font-family: courier, monspace-ui, monospace;
 	font-size: 10pt;
-	/* Was 386px -- on a quiet band each panel is mostly empty black
-	   space below its actual decoded lines, which reads as if whatever
-	   comes right after it (e.g. the CMD/SET/Reboot/Shutdown toolbar
-	   row) is still part of this panel instead of clearly being the
-	   next thing. Shrunk so the empty gap is far less pronounced;
-	   .sbitx-list-box below still scrolls internally for busier bands.
-	   200px turned out to scroll too readily on a moderately busy band
-	   -- 280px is the middle ground. */
-	height: 280px;
+	height: auto;
+	flex: 1;
 	width: 320px;
 	border: none;
 }
@@ -990,6 +1005,49 @@ input[type="checkbox"] {
 	display: flex;
 	flex-wrap: wrap;
 }
+
+/* Real task #25-adjacent redesign (2026-08-21), user's own reference:
+   the FT8 decode panel (whichever single one is currently selected --
+   Band Activity, or CQ Panel with it hidden, or RX Frequency during a
+   QSO, unchanged logic) now sits in a tall left column beside
+   #pan_adapter instead of in a row below a full-width waterfall.
+   align-items:stretch (the flex default, not overridden here) is what
+   makes #ft8_list_column automatically match #pan_adapter's real
+   height, and is also what makes #pan_adapter automatically reclaim
+   full width the instant #ft8_list_column is display:none in CW/Voice
+   mode -- one rule handles both cases, no per-mode branching needed. */
+#pan_and_ft8list_row {
+	display: flex;
+	flex-direction: row;
+	gap: 8px;
+}
+/* flex-basis (not a hard width) so it still shares gracefully if this
+   number ever needs tuning; min-width:0 stops a flex item's own
+   content (e.g. a long decoded message line) from forcing it wider
+   than this basis -- a common flex gotcha, the default min-width:auto
+   would otherwise let content blow past the intended column width.
+   width:100% explicitly overridden here on purpose -- .mode-panel
+   above sets it for CW_ui/Voice_ui's own benefit (see that rule's own
+   comment), and #ft8_list_column needs the same class for the hide/
+   show-in-sync behavior but not that particular property; ID beats
+   class specificity, same precedent as #FT8_ui already relies on. */
+#ft8_list_column {
+	/* Real report, live: this showed up (empty panel titles only, no
+	   decodes yet) below the login window before ever logging in.
+	   .sbitx-panel's own display:none is what keeps every other
+	   mode-panel (#FT8_ui/#CW_ui/#Voice_ui) hidden until show_login()/
+	   a real mode switch explicitly shows one -- deliberately not
+	   given .sbitx-panel here (avoids its float:left, see this whole
+	   section's earlier comment), so it never inherited that default.
+	   Setting it directly here instead; FT8_open()/the mode-switch
+	   handler already correctly flip this to flex at the right time
+	   (see index.html), same as every other mode-panel. */
+	display: none;
+	flex-flow: row wrap;
+	flex: 0 0 38%;
+	width: auto;
+	min-width: 0;
+}
 @media (max-width: 700px) {
 	#wsjtx-cq { order: 1; }
 	#wsjtx-rx { order: 2; }
@@ -1002,6 +1060,18 @@ input[type="checkbox"] {
 	   already does for the non-expanded case. */
 	.sbitx-list-container.wsjtx-panel-expanded {
 		width: 100%;
+	}
+	/* Real, established usage pattern for this app (phone portrait) --
+	   a side-by-side column squeeze here would leave both the decode
+	   panel and the waterfall unreadably narrow. Falls back to the
+	   same stacked (column) arrangement this app already used before
+	   today's redesign, just via flex-direction instead of separate
+	   elements. */
+	#pan_and_ft8list_row {
+		flex-direction: column;
+	}
+	#ft8_list_column {
+		flex-basis: auto;
 	}
 }
 /* Same navy gradient as .sbitxv3-btn (identical base color, see its
