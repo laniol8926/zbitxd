@@ -1178,6 +1178,28 @@ input[type="checkbox"] {
 	   length instead. */
 }
 
+/* RX Frequency's own frequency-offset sub-field, inside .ft8-label --
+   real report, live: the callsign column shifted depending on how many
+   digits the offset had ("197" vs "2694"), since re-tokenizing already
+   threw away the server's own fixed-width padding and nothing replaced
+   it. Two text-padding attempts (a non-breaking-space filler, both
+   leading and trailing) failed the same way: whichever edge of
+   .ft8-label's own inline-block box the filler landed on, a browser
+   trimmed it -- edge-of-box whitespace trimming is a separate rule
+   from (and not bypassed by) U+00A0 not being "collapsible" whitespace.
+   A fixed CSS width sidesteps that -- nothing text-content-based here
+   for a browser to trim, the box itself always reserves 4ch regardless
+   of how many digits actually render inside it. 4ch, not the file-wide
+   22ch .ft8-label used before, since this is sized to just this one
+   sub-field (max real frequency offset is 4 digits, 0-3000Hz). Relies
+   on .sbitx-list-box's own monospace font-family for "ch" to mean a
+   consistent width regardless of which digits happen to show. */
+.ft8-freq-field {
+	display: inline-block;
+	width: 4ch;
+	text-align: left;
+}
+
 .ft8-message {
 	font-size: 9pt;
 	font-weight: bold;

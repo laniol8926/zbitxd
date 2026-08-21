@@ -2322,30 +2322,54 @@ function FT8_stylize_message_item(item, text, style, list_id) {
 
     var label_position = text.search("~");
     var label = text.substring(0, label_position);
-    // RX Frequency -- user's own ask: drop the DT/SNR diagnostic
-    // numbers, keep just the timestamp and frequency. A focused view of
-    // one exchange doesn't need signal-quality metadata the way picking
-    // which CQ to answer does (Band Activity/CQ Panel keep the full
-    // label). token_list[tilde_pos - 1] is always the frequency field
+    // Real report, live, purely cosmetic: the callsign column shifted
+    // left/right depending on how many digits the frequency offset had
+    // (e.g. "197" vs "2694") -- always exactly one space either side
+    // regardless, in both RX Frequency's own rebuilt label and Band
+    // Activity/CQ Panel's raw-server-text one (a screenshot showed
+    // "350 CQ PD1TVN" sitting one character left of "1697 FG4AO
+    // EA3AAY"). Root cause, same for both: tokenizing on \S+ above
+    // already discarded the server's own fixed-width padding
+    // (modem_ft8.c's "%4d" for this field) -- RX Frequency's label is
+    // rebuilt from scratch below so that padding was simply never
+    // there to begin with; Band Activity/CQ Panel's raw text still has
+    // it, but as *leading* spaces sitting at the very start of
+    // .ft8-label's own inline-block box, which a browser trims on
+    // render regardless of which characters make it up.
+    //
+    // Two earlier attempts at RX Frequency specifically (padStart, then
+    // padEnd, with a U+00A0 non-breaking-space filler) both failed the
+    // same way, confirmed live: whichever end got the pad character, it
+    // sat at that same edge of .ft8-label's box, and a browser trims
+    // whitespace at *both* edges of an inline-block, not just a line's
+    // own start -- U+00A0 included, despite it not being "collapsible"
+    // whitespace by spec for consecutive-space collapsing (a separate
+    // rule from this edge-trimming one). Wrapping the frequency token in
+    // its own nested inline-block (see .ft8-freq-field in style.css)
+    // sidesteps this entirely for both panels -- a fixed 4ch CSS width
+    // reserves the space via the box model itself, nothing text-
+    // content-based for a browser to trim away.
+    //
+    // DT/SNR ("+0.0"/"-05") don't need this same treatment for Band
+    // Activity/CQ Panel -- %+4.1f/%+03d guarantee those are always
+    // exactly 4/3 characters for any real value, nothing variable-width
+    // to lose by tokenizing+rejoining with plain single spaces, unlike
+    // frequency's real 1-4 digit range.
+    //
+    // token_list[tilde_pos - 1] is always the frequency field
     // immediately before the tilde, in both the RX-decode label shape
     // (time/DT/SNR/freq) and the shorter TX-echo shape (time/TX/freq,
-    // which never had DT/SNR to begin with).
-    if (list_id === "wsjtx-rx"){
-	// Real report, live, purely cosmetic: the callsign column shifted
-	// left/right depending on how many digits the frequency offset had
-	// (e.g. "197" vs "2694") -- always exactly one space either side
-	// regardless. Root cause: tokenizing on \S+ above already discarded
-	// the server's own fixed-width padding (modem_ft8.c's "%4d" for this
-	// same field), so re-joining with a single literal space here never
-	// had a consistent total width to align against. padStart puts that
-	// same 4-char field width back -- with U+00A0 (non-breaking space),
-	// not a plain space, since .ft8-label has no white-space:pre (see
-	// its own CSS comment on staying auto-width) and a browser collapses
-	// consecutive plain spaces in rendered HTML, which would have
-	// silently undone this same padding.
-	var freq_field = token_list[tilde_pos - 1].padStart(4, " ");
+    // which never had DT/SNR to begin with) -- true for either list_id.
+    var freq_field = "<span class='ft8-freq-field'>" + token_list[tilde_pos - 1] + "</span>";
+    if (list_id === "wsjtx-rx")
+	// User's own ask: drop the DT/SNR diagnostic numbers here, keep
+	// just the timestamp and frequency -- a focused view of one
+	// exchange doesn't need signal-quality metadata the way picking
+	// which CQ to answer does (Band Activity/CQ Panel keep the full
+	// label, see the else branch).
 	label = token_list[0] + " " + freq_field + " ";
-    }
+    else
+	label = token_list.slice(0, tilde_pos - 1).join(" ") + " " + freq_field + " ";
 
     // fields from RX messages
     var confidence_score = token_list[1];
@@ -3053,6 +3077,15 @@ function tx_enabled_indicator_clicked(){
 	// band_activity_manual_pref.
 	qso_in_progress = false;
 	set_band_activity_hidden(band_activity_manual_pref);
+	// Real report, live: with Band Activity hidden (manual pref) so CQ
+	// Panel takes its place, cancelling a QSO this way correctly
+	// restored CQ Panel but left RX Frequency's stale content on screen
+	// too -- both visible at once. Same gap logger_abort() already had
+	// (see its own comment): this never cleared RX Frequency either, so
+	// update_rx_panel_visibility() had nothing telling it the exchange
+	// was actually over. FT8_rx_clear() is the same "genuinely invalid,
+	// not just for one station" case its own comment already covers.
+	FT8_rx_clear();
 }
 
 // Suspend/resume -- deliberately separate from tx_enabled_indicator_
