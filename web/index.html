@@ -2330,8 +2330,22 @@ function FT8_stylize_message_item(item, text, style, list_id) {
     // immediately before the tilde, in both the RX-decode label shape
     // (time/DT/SNR/freq) and the shorter TX-echo shape (time/TX/freq,
     // which never had DT/SNR to begin with).
-    if (list_id === "wsjtx-rx")
-	label = token_list[0] + " " + token_list[tilde_pos - 1] + " ";
+    if (list_id === "wsjtx-rx"){
+	// Real report, live, purely cosmetic: the callsign column shifted
+	// left/right depending on how many digits the frequency offset had
+	// (e.g. "197" vs "2694") -- always exactly one space either side
+	// regardless. Root cause: tokenizing on \S+ above already discarded
+	// the server's own fixed-width padding (modem_ft8.c's "%4d" for this
+	// same field), so re-joining with a single literal space here never
+	// had a consistent total width to align against. padStart puts that
+	// same 4-char field width back -- with U+00A0 (non-breaking space),
+	// not a plain space, since .ft8-label has no white-space:pre (see
+	// its own CSS comment on staying auto-width) and a browser collapses
+	// consecutive plain spaces in rendered HTML, which would have
+	// silently undone this same padding.
+	var freq_field = token_list[tilde_pos - 1].padStart(4, " ");
+	label = token_list[0] + " " + freq_field + " ";
+    }
 
     // fields from RX messages
     var confidence_score = token_list[1];
