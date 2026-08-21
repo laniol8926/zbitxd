@@ -884,16 +884,21 @@ input[type="checkbox"] {
    its own 50% case -- short message lines in a small 9pt font left
    most of the newly-available width looking like empty black
    background, indistinguishable by eye from the panel genuinely being
-   narrow. Sized a step beyond .wsjtx-panel-expanded's own 13pt/18pt,
-   matching solo having roughly double the row's own width to work
-   with instead of half. */
+   narrow.
+
+   16pt was sized back when "solo" meant the whole page's width (the
+   old stacked layout). Since the side-by-side redesign, solo only
+   ever means 100% of #ft8_list_column's own ~38%-of-row width --
+   narrower than .wsjtx-panel-expanded's 50% case even, not wider --
+   so 16pt was real text-wrapping overkill for this narrower context.
+   Dropped below expanded's own 13pt/18pt accordingly, not above it. */
 .wsjtx-panel-solo .ft8-label,
 .wsjtx-panel-solo .ft8-message,
 .wsjtx-panel-solo .sbitx-list-box {
-	font-size: 16pt;
+	font-size: 11pt;
 }
 .wsjtx-panel-solo .sbitx-list-box li {
-	height: 22pt;
+	height: 15pt;
 }
 
 .sbitx-list-title {
@@ -1048,7 +1053,7 @@ input[type="checkbox"] {
 	width: auto;
 	min-width: 0;
 }
-@media (max-width: 700px) {
+@media (max-width: 900px) {
 	#wsjtx-cq { order: 1; }
 	#wsjtx-rx { order: 2; }
 	#wsjtx-activity { order: 3; }
@@ -1061,12 +1066,17 @@ input[type="checkbox"] {
 	.sbitx-list-container.wsjtx-panel-expanded {
 		width: 100%;
 	}
-	/* Real, established usage pattern for this app (phone portrait) --
-	   a side-by-side column squeeze here would leave both the decode
-	   panel and the waterfall unreadably narrow. Falls back to the
-	   same stacked (column) arrangement this app already used before
-	   today's redesign, just via flex-direction instead of separate
-	   elements. */
+	/* Real, established usage pattern for this app (phone portrait AND
+	   landscape -- real report: portrait alone worked fine at the old
+	   700px, but real phone landscape widths commonly land in the
+	   700-900px range, past that threshold, so #ft8_list_column's own
+	   38% there was still a real unreadable-text-wrapping squeeze.
+	   Raised to 900px so both orientations get this same fallback, not
+	   just portrait) -- a side-by-side column squeeze here would leave
+	   both the decode panel and the waterfall unreadably narrow. Falls
+	   back to the same stacked (column) arrangement this app already
+	   used before the side-by-side redesign, just via flex-direction
+	   instead of separate elements. */
 	#pan_and_ft8list_row {
 		flex-direction: column;
 	}
