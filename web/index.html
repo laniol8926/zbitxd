@@ -2972,6 +2972,20 @@ function logger_wipe(event){
 function logger_abort(event){
 	websocket_send("abort=1");
 	clear_cq_highlight();
+	// Real report, live: answering a CQ then cancelling (ESC/this
+	// function) left both Band Activity and RX Frequency visible at
+	// once -- exactly the side-by-side layout this UI should never show.
+	// Root cause: this never cleared RX Frequency's content, so even
+	// after the abort's TXACTIVE 1->0 correctly restored Band Activity
+	// (see that handler's own call to set_band_activity_hidden() below),
+	// RX Frequency stayed visible too (update_rx_panel_visibility() only
+	// hides it once genuinely empty). An aborted attempt is exactly the
+	// same "every exchange is genuinely invalid" case FT8_rx_clear()'s
+	// own comment already covers for login/band-change -- same fix here.
+	// Also releases the QSO frequency lock (see FT8_rx_clear()'s own
+	// QSO_UNLOCK) rather than leaving it engaged for an exchange that's
+	// no longer happening.
+	FT8_rx_clear();
 }
 
 // TX Enabled indicator doubles as a click-to-abort kill switch while

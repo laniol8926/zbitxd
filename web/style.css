@@ -243,11 +243,20 @@ input[type="checkbox"] {
 	font-size: 18pt;
 	line-height: 23px;
 	font-weight: bold;
-	color: black;
+	/* Real report, live: this read as invisible (black text on an
+	   effectively-black box). Root cause is actually #dial's own
+	   background -- .sbitxv3-control's opaque gradient background-image
+	   (see that rule) still paints over #dial's own background-color
+	   (#3dacbf, teal) since #dial's rule never clears the image, so the
+	   box never actually showed that color despite it being correct in
+	   computed style. White text sidesteps that entirely rather than
+	   fixing the background layering -- readable regardless of which
+	   background color #dial ends up actually painting. */
+	color: white;
 }
 
 #other_freq {
-	color: black;
+	color: white;
 }
 
 .dial_details {
