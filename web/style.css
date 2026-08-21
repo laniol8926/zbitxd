@@ -793,6 +793,12 @@ input[type="checkbox"] {
 }
 
 
+#spectrum {
+	display: block;
+	background-color: black;
+	margin-bottom: 2px;
+}
+
 #waterfall_scale {
 	display: block;
 	background-color: black;

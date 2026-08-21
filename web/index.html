@@ -488,6 +488,7 @@
 						<span id="REF_reading"/></span>
 					</div>
 				</div><!-- end of tx_meters -->
+				<canvas id="spectrum" width="600" height="60"></canvas>
 				<canvas id="waterfall_scale" width="600" height="16"></canvas>
 				<div id="waterfall_wrap" width="100%">
 					<canvas id="waterfall" width="600" height="80"></canvas>
@@ -1079,6 +1080,12 @@ function resize_ui(){
 	sync_wf_overlay_size();
 	el("waterfall_scale").width = pan_adapter_width;
 	draw_wf_scale();
+	// Setting .width wipes the canvas like every other one here -- redraw
+	// immediately from the last real row instead of leaving it blank
+	// until the next RX response happens to arrive.
+	el("spectrum").width = pan_adapter_width;
+	if (last_wf_row != null)
+		spectrum_update(last_wf_row);
 	height = b.height();
 
 	// Real report, live: on a narrow phone-portrait screen, the CMD/SET
@@ -1148,6 +1155,89 @@ function draw_wf_scale(){
 	}
 }
 
+var spectrum_gradient = null;
+var spectrum_gradient_h = 0;
+
+// Live 0-3kHz spectrum amplitude trace, drawn above the waterfall --
+// shares the exact same per-pixel value (waterfall_value_at_x()) and
+// color ramp (waterfall_color_for_v()) the waterfall itself colors that
+// same column with, so a strong station reads as both "tall here" and
+// "bright here" consistently. User's own ask (2026-08-21), inspired by
+// mhweaver/sbitx's reference spectrum display -- that one's a real
+// wideband SDR panadapter (fixed 1024-bin/46.875Hz-per-bin span, dial
+// centered with +/-Hz on either side, CW/SSB filter-edge dragging), none
+// of which applies here (this app is locked to a 0-3kHz audio-derived
+// span with the dial at the left edge -- see waterfall_value_at_x()'s
+// own comment on why -- and USB/FT8/FT4 only), so only the live-trace-
+// with-gradient-fill idea and the two reference guide lines were
+// adapted, not any of that mode-specific machinery.
+function spectrum_update(update){
+	var c = el("spectrum");
+	if (!c || c.width == 0 || c.height == 0)
+		return;
+	var ctx = c.getContext("2d");
+	var w = c.width, h = c.height;
+
+	ctx.fillStyle = "#000";
+	ctx.fillRect(0, 0, w, h);
+
+	// Cached top(strong)-to-bottom(weak) gradient built once from the
+	// waterfall's own color ramp, reused every frame as a single
+	// fillStyle instead of recomputing an RGB per bar -- same technique
+	// the mhweaver/sbitx reference spectrum uses for its own gradient
+	// fill. Rebuilt only if the canvas height actually changes (resize).
+	if (!spectrum_gradient || spectrum_gradient_h !== h){
+		spectrum_gradient = ctx.createLinearGradient(0, 0, 0, h);
+		for (var vv = 0; vv <= 100; vv++){
+			var clr = waterfall_color_for_v(100 - vv);
+			spectrum_gradient.addColorStop(vv / 100, "rgb(" + clr.r + "," + clr.g + "," + clr.b + ")");
+		}
+		spectrum_gradient_h = h;
+	}
+
+	// Faint vertical grid, purely a visual reference -- splits the
+	// locked 3kHz span into quarters (750Hz bands), same left-edge-is-
+	// 0Hz convention as draw_wf_scale() below.
+	ctx.strokeStyle = "#333";
+	ctx.beginPath();
+	for (var gx = 1; gx < 4; gx++){
+		var px = Math.round(w * gx / 4);
+		ctx.moveTo(px, 0);
+		ctx.lineTo(px, h);
+	}
+	ctx.stroke();
+
+	// Suggested RX-gain operating range -- v=20 and v=80 are exactly
+	// where waterfall_color_for_v()'s own ramp crosses from blue into
+	// cyan/green, and from yellow/orange into red -- so background noise
+	// sitting between these two lines means RX gain is neither so low
+	// it's crushed into pure blue nor so hot that routine noise is
+	// already flirting with full-red clipping. Adapted from mhweaver/
+	// sbitx's own "recommended audio limit lines", re-keyed to this
+	// app's own 0-100 noise-floor-normalized scale rather than raw audio
+	// level (this app has no equivalent of raw-level guide lines to
+	// adapt directly -- auto_noise_floor already absorbs that).
+	ctx.strokeStyle = "rgba(255,70,70,0.6)";
+	ctx.setLineDash([4, 3]);
+	ctx.beginPath();
+	[20, 80].forEach(function(v){
+		var y = h - (v / 100) * h;
+		ctx.moveTo(0, y);
+		ctx.lineTo(w, y);
+	});
+	ctx.stroke();
+	ctx.setLineDash([]);
+
+	// One bar per pixel column, height = that column's own
+	// noise-floor-normalized magnitude.
+	ctx.fillStyle = spectrum_gradient;
+	for (var x = 0; x < w; x++){
+		var v = waterfall_value_at_x(update, x, w);
+		var bar_h = (v / 100) * h;
+		ctx.fillRect(x, h - bar_h, 1, bar_h);
+	}
+}
+
 // Keeps #waterfall_overlay's own pixel buffer sized to match #waterfall
 // exactly -- called anywhere the waterfall's own width/height changes
 // (resize_ui(), mode_set()), since a canvas's drawing surface resets
@@ -1202,6 +1292,107 @@ $('#waterfall').mousedown(function(e) {
 // + llh
 var nbins = 0;
 
+// Interpolated, noise-floor-normalized magnitude (0-100) for one pixel
+// column of a raw "TX "/"RX "-prefixed spectrum string -- factored out
+// of waterfall_build_row() so the spectrum trace (spectrum_update(),
+// below) can read the exact same per-pixel value the waterfall colors
+// that same column with, rather than recomputing it separately and
+// risking the two ever showing different signal strength for the same
+// pixel/frequency.
+function waterfall_value_at_x(update, x, width){
+	var n = update.length - 3;
+	var scale = n/width;
+
+	// interpolate between the two bins bracketing this pixel's
+	// fractional bin position, rather than sampling only the nearest
+	// one -- with a locked 3kHz span spread across a much wider canvas
+	// (hundreds of pixels), nearest-neighbor sampling left long runs of
+	// pixels repeating the same bin's value verbatim, a visibly blocky/
+	// low-resolution waterfall (confirmed live).
+	//
+	// bin 0 (0Hz/dial frequency) maps to x=0 (left edge), increasing
+	// bin index maps to increasing x -- matches the server's
+	// left-edge-anchored layout (see GENERIC_SPEC_START_BIN's comment in
+	// sound_generic.c): USB only contains audio content above the dial
+	// frequency, so the dial belongs at the left edge, not the center.
+	// Was "(w.width - x) * scale" (reversed), caught by direct
+	// correction: "14.074 is not the center frequency... it is the left
+	// edge of the waterfall."
+	var bin_f = x * scale;
+	var bin0 = Math.floor(bin_f);
+	var bin1 = bin0 + 1;
+	var frac = bin_f - bin0;
+	if (bin0 < 0) bin0 = 0;
+	if (bin0 > n - 1) bin0 = n - 1;
+	if (bin1 < 0) bin1 = 0;
+	if (bin1 > n - 1) bin1 = n - 1;
+
+	//the first three are status
+	var v0 = (update.charCodeAt(bin0+3) - 32) * 2;
+	var v1 = (update.charCodeAt(bin1+3) - 32) * 2;
+	var v = v0 + (v1 - v0) * frac;
+
+	// Auto noise-floor remap, display-only -- see update_noise_floor()
+	// above. Doesn't touch the audio RX RF sees, only which color/height
+	// a given magnitude picks. Before the first real row arrives,
+	// auto_noise_floor is still null -- treat that as "no floor
+	// subtracted yet" rather than crashing.
+	v = (v - (auto_noise_floor === null ? 0 : auto_noise_floor)) * (100 / AUTO_DISPLAY_SPAN);
+
+	if (v > 100)
+		v = 100;
+	if (v < 0)
+		v = 0;
+	return v;
+}
+
+// Maps a normalized 0-100 magnitude to an RGB color -- factored out of
+// waterfall_build_row() so the spectrum trace below can share the exact
+// same 5-color ramp, rather than a second copy that could drift out of
+// sync with it over time.
+function waterfall_color_for_v(v){
+	// Each band normalized to its own 0..1 fraction (t) before scaling
+	// to 0..255, rather than the flat "*12" this used to use -- that
+	// only reached 228-240 out of 255 at the top of each band before
+	// jumping to the next band's fixed 255, a visible color-banding
+	// discontinuity at all 4 boundaries (v=20/40/60/80) confirmed by
+	// comparing against a reference waterfall implementation
+	// (drexjj/zbitx) using the same 5-color palette with this same
+	// normalize-then-scale fix already in place.
+	var r, g, b, t;
+	if (v < 20){
+		t = v / 20;
+		r = 0;
+		g = 0;
+		b = Math.round(t * 255);
+	}
+	else if (v < 40){
+		t = (v - 20) / 20;
+		r = 0;
+		g = Math.round(t * 255);
+		b = 255;
+	}
+	else if (v < 60){
+		t = (v - 40) / 20;
+		r = 0;
+		g = 255;
+		b = Math.round((1.0 - t) * 255);
+	}
+	else if (v < 80){
+		t = (v - 60) / 20;
+		r = Math.round(t * 255);
+		g = 255;
+		b = 0;
+	}
+	else {
+		t = (v - 80) / 20;
+		r = 255;
+		g = Math.round((1.0 - t) * 255);
+		b = 0;
+	}
+	return {r: r, g: g, b: b};
+}
+
 // Builds one pixel-high row of waterfall color data from a raw "TX "/
 // "RX "-prefixed spectrum string -- factored out of waterfall_update()
 // so the FT8/FT4 sweep display (waterfall_scroll_tick()) can draw a row
@@ -1209,97 +1400,15 @@ var nbins = 0;
 // shift logic below, which doesn't apply to a sweep display.
 function waterfall_build_row(update, ctx, width){
 	var n = update.length - 3;
-	var scale = n/width;
 	var img = ctx.createImageData(width, 1);
 	var i = 0;
 
 	for (var x = 0; x < width; x++){
-		// interpolate between the two bins bracketing this pixel's
-		// fractional bin position, rather than sampling only the
-		// nearest one -- with a locked 3kHz span spread across a much
-		// wider canvas (hundreds of pixels), nearest-neighbor sampling
-		// left long runs of pixels repeating the same bin's color
-		// verbatim, a visibly blocky/low-resolution waterfall (confirmed
-		// live -- this was noticeably worse-looking than the spectrum
-		// trace next to it, which got smooth interpolation for free
-		// from canvas's native line drawing).
-		//
-		// bin 0 (0Hz/dial frequency) maps to x=0 (left edge), increasing
-		// bin index maps to increasing x -- matches the server's
-		// left-edge-anchored layout (see GENERIC_SPEC_START_BIN's
-		// comment in sound_generic.c): USB only contains audio content
-		// above the dial frequency, so the dial belongs at the left
-		// edge, not the center. Was "(w.width - x) * scale" (reversed),
-		// caught by direct correction: "14.074 is not the center
-		// frequency... it is the left edge of the waterfall."
-		var bin_f = x * scale;
-		var bin0 = Math.floor(bin_f);
-		var bin1 = bin0 + 1;
-		var frac = bin_f - bin0;
-		if (bin0 < 0) bin0 = 0;
-		if (bin0 > n - 1) bin0 = n - 1;
-		if (bin1 < 0) bin1 = 0;
-		if (bin1 > n - 1) bin1 = n - 1;
-
-		//the first three are status
-		var v0 = (update.charCodeAt(bin0+3) - 32) * 2;
-		var v1 = (update.charCodeAt(bin1+3) - 32) * 2;
-		var v = v0 + (v1 - v0) * frac;
-
-		// Auto noise-floor remap, display-only -- see update_noise_floor()
-		// above. Doesn't touch the audio RX RF sees, only which color a
-		// given magnitude picks. Before the first real row arrives,
-		// auto_noise_floor is still null -- treat that as "no floor
-		// subtracted yet" rather than crashing.
-		v = (v - (auto_noise_floor === null ? 0 : auto_noise_floor)) * (100 / AUTO_DISPLAY_SPAN);
-
-		if (v > 100)
-			v = 100;
-		if (v < 0)
-			v = 0;
-		// Each band normalized to its own 0..1 fraction (t) before
-		// scaling to 0..255, rather than the flat "*12" this used to
-		// use -- that only reached 228-240 out of 255 at the top of
-		// each band before jumping to the next band's fixed 255,
-		// a visible color-banding discontinuity at all 4 boundaries
-		// (v=20/40/60/80) confirmed by comparing against a reference
-		// waterfall implementation (drexjj/zbitx) using the same
-		// 5-color palette with this same normalize-then-scale fix
-		// already in place.
-		var r, g, b, t;
-		if (v < 20){
-			t = v / 20;
-			r = 0;
-			g = 0;
-			b = Math.round(t * 255);
-		}
-		else if (v < 40){
-			t = (v - 20) / 20;
-			r = 0;
-			g = Math.round(t * 255);
-			b = 255;
-		}
-		else if (v < 60){
-			t = (v - 40) / 20;
-			r = 0;
-			g = 255;
-			b = Math.round((1.0 - t) * 255);
-		}
-		else if (v < 80){
-			t = (v - 60) / 20;
-			r = Math.round(t * 255);
-			g = 255;
-			b = 0;
-		}
-		else {
-			t = (v - 80) / 20;
-			r = 255;
-			g = Math.round((1.0 - t) * 255);
-			b = 0;
-		}
-		img.data[i++] = r;
-		img.data[i++] = g;
-		img.data[i++] = b;
+		var v = waterfall_value_at_x(update, x, width);
+		var clr = waterfall_color_for_v(v);
+		img.data[i++] = clr.r;
+		img.data[i++] = clr.g;
+		img.data[i++] = clr.b;
 		img.data[i++] = 255;
 	}
 
@@ -3988,6 +4097,9 @@ function mode_set(new_mode){
 	el("waterfall_scale").width = pan_adapter_width;
 	draw_wf_scale();
 	sync_wf_overlay_size();
+	el("spectrum").width = pan_adapter_width;
+	if (last_wf_row != null)
+		spectrum_update(last_wf_row);
 //	if (window[new_mode+"_open"] == undefined)
 //		return;
 //	window[new_mode + "_open"]();
@@ -4044,6 +4156,11 @@ function response_handler(response){
 		if (response.substring(0,2) == "RX"){
 			last_wf_row = response;
 			update_noise_floor(response);
+			// Live spectrum trace -- updated every real RX row regardless
+			// of mode, same freeze-during-TX rule as last_wf_row above
+			// (a real radio mutes its receiver while transmitting, so a
+			// "TX ..." row has nothing meaningful to show here either).
+			spectrum_update(response);
 		}
 
 		var mode = el("MODE").value;
