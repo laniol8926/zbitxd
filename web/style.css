@@ -1080,6 +1080,17 @@ input[type="checkbox"] {
 	#pan_and_ft8list_row {
 		flex-direction: column;
 	}
+	/* Real report: stacked, DOM order (list column first, for the
+	   desktop row layout's left-column placement) put the waterfall
+	   below the decode panel here -- as the panel fills with data and
+	   the page grows, the waterfall gets pushed down/off-screen with
+	   it. order swaps only the *visual* stacking order, not the DOM
+	   itself, so the desktop side-by-side layout (outside this media
+	   query, order defaults to 0 for both, DOM order wins) is
+	   unaffected. */
+	#pan_adapter {
+		order: -1;
+	}
 	#ft8_list_column {
 		flex-basis: auto;
 	}
