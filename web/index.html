@@ -1206,30 +1206,44 @@ function waterfall_build_row(update, ctx, width){
 			v = 100;
 		if (v < 0)
 			v = 0;
-		var r, g, b;
+		// Each band normalized to its own 0..1 fraction (t) before
+		// scaling to 0..255, rather than the flat "*12" this used to
+		// use -- that only reached 228-240 out of 255 at the top of
+		// each band before jumping to the next band's fixed 255,
+		// a visible color-banding discontinuity at all 4 boundaries
+		// (v=20/40/60/80) confirmed by comparing against a reference
+		// waterfall implementation (drexjj/zbitx) using the same
+		// 5-color palette with this same normalize-then-scale fix
+		// already in place.
+		var r, g, b, t;
 		if (v < 20){
+			t = v / 20;
 			r = 0;
 			g = 0;
-			b = v * 12;
+			b = Math.round(t * 255);
 		}
 		else if (v < 40){
+			t = (v - 20) / 20;
 			r = 0;
-			g = (v - 20) * 12;
+			g = Math.round(t * 255);
 			b = 255;
 		}
 		else if (v < 60){
-			r =  0;
+			t = (v - 40) / 20;
+			r = 0;
 			g = 255;
-			b = (60-v) * 12;
+			b = Math.round((1.0 - t) * 255);
 		}
 		else if (v < 80){
-			r = (v-60) * 12;
+			t = (v - 60) / 20;
+			r = Math.round(t * 255);
 			g = 255;
 			b = 0;
 		}
 		else {
+			t = (v - 80) / 20;
 			r = 255;
-			g = (100-v) * 12;
+			g = Math.round((1.0 - t) * 255);
 			b = 0;
 		}
 		img.data[i++] = r;
@@ -3736,10 +3750,14 @@ function waterfall_clear(){
 	var img = ctx.createImageData(w.width, w.height);
 	var i = 0;
 	for (var n = 0; n < w.width * w.height; n++){
+		// Same normalized 0..1 scaling as waterfall_build_row()'s own
+		// color mapping (v stays under 20 here, so always the black->
+		// blue band) -- kept in sync so this synthetic fill's color
+		// range genuinely matches what real low-level data looks like.
 		var v = Math.random() * 15;
 		img.data[i++] = 0;
 		img.data[i++] = 0;
-		img.data[i++] = v * 12;
+		img.data[i++] = Math.round((v / 20) * 255);
 		img.data[i++] = 255;
 	}
 	ctx.putImageData(img, 0, 0);
