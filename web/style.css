@@ -266,14 +266,31 @@ select, select option, input {
 	text-transform:uppercase;
 }
 
+/* Tactile "real button" look -- gradient + drop shadow read as raised,
+   shadow shrinking + a 2px downward shift on :active reads as pressed.
+   Found by comparing against a reference implementation (drexjj/zbitx)
+   using this same technique; colors here are this button's own
+   existing #1a75ff lightened/darkened for the gradient rather than the
+   reference's neutral gray, so the meaningful blue-vs-navy distinction
+   from .sbitxv3-btn below is preserved, not just copied wholesale. */
 .logger-button {
 	height: 30px;
 	border-collapse: collapse;
 	border: none;
-	background-color: #1a75ff;
+	background: linear-gradient(to bottom, #2a85ff, #0a55cf);
 	color: white;
 	margin: 5px;
 	border-radius: 10px;
+	box-shadow: 0 4px #06316b;
+	cursor: pointer;
+	transition: all 0.15s ease-in-out;
+}
+.logger-button:hover {
+	background: linear-gradient(to bottom, #4a95ff, #1a65df);
+}
+.logger-button:active {
+	box-shadow: 0 2px #06316b;
+	transform: translateY(2px);
 }
 
 #SENT, #RECV {
@@ -1091,19 +1108,35 @@ body {
 	width: 70px;
 }
 
+/* Tactile "real button" look, same technique as .logger-button above
+   (see its own comment) -- gradient/shadow derived from this button's
+   own existing #0c2333 navy rather than the reference's neutral gray,
+   so it stays visually distinct from .logger-button's blue. border
+   dropped in favor of the shadow doing the "raised" work instead. */
 .sbitxv3-btn {
 	height: 43px;
 	width: 40px;
-	background-color: #0c2333;
-	border: solid 1px black;
+	background: linear-gradient(to bottom, #163449, #071620);
+	border: none;
+	border-radius: 6px;
+	box-shadow: 0 4px #030a10;
 	font-size: 12px;
 	color: white;
 	vertical-align:top;
 	display: inline-block;
+	cursor: pointer;
+	transition: all 0.15s ease-in-out;
 	/*line-height: 0;*/
 /*	margin-top: 1px;
 	margin-bottom: 1px;*/
 	/*padding: 7 0 7 0;*/
+}
+.sbitxv3-btn:hover {
+	background: linear-gradient(to bottom, #1e4058, #0a1e2c);
+}
+.sbitxv3-btn:active {
+	box-shadow: 0 2px #030a10;
+	transform: translateY(2px);
 }
 
 /* Shared "this is actively doing something" highlight -- Tune (keys the
