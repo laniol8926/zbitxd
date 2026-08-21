@@ -442,7 +442,7 @@
      of how tall the panel column ends up. -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div class="panel-toolbar-row">
-				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label" title="Hide Band Activity"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Band</label><label class="panel-toggle-label" title="Hide Waterfall"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> WF</label><label class="panel-toggle-label" title="Hide Worked (stations already logged on this band/mode)"><input type="checkbox" id="HIDE_WORKED_CHECK" /> B4</label><label class="panel-toggle-label" title="Simplify During QSO -- during an active QSO, hide CQ Panel too (not just Band Activity) -- whether anyone's calling CQ is irrelevant while you're already in one. Both come back once the QSO ends."><input type="checkbox" id="SIMPLIFY_QSO_CHECK" /> Simplify</label>
+				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label" title="Hide Band Activity"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Band</label><label class="panel-toggle-label" title="Hide Waterfall"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> WF</label><label class="panel-toggle-label" title="Hide Worked (stations already logged on this band/mode)"><input type="checkbox" id="HIDE_WORKED_CHECK" /> B4</label>
 			</div>
 			<!-- <div id="gridmap"></div> -->
 			<div id="FT8_controls">
@@ -1080,6 +1080,27 @@ function resize_ui(){
 	el("waterfall_scale").width = pan_adapter_width;
 	draw_wf_scale();
 	height = b.height();
+
+	// Real report, live: on a narrow phone-portrait screen, the CMD/SET
+	// toolbar sits partially hidden behind the row above it (#maincontrols
+	// -- Sound/Tune/RF/MODE/freq/BAND/AC/AA/SLOT/TX TONE/RPT/Susp./TX
+	// Enabled/Calling, all in a row). Root cause: #maincontrols is
+	// position:fixed (see its own CSS rule), taken out of normal document
+	// flow -- #main's own CSS margin-top is a hardcoded 46px guess for
+	// "one 43px row", correct only when every one of those controls fits
+	// on a single line without wrapping (landscape/wide screens). Portrait
+	// is narrow enough that they wrap onto several lines instead, making
+	// the actual fixed bar taller than 46px -- #main's content (starting
+	// with #FT8_ui's toolbar) started at the old fixed offset regardless,
+	// so the extra wrapped line(s) rendered on top of it. Reading
+	// #maincontrols' own real rendered height (already correct for
+	// whatever it actually wrapped to, same fresh-each-resize approach as
+	// pan_adapter_width above) and applying it as #main's margin-top
+	// replaces that single-line assumption with the real number,
+	// regardless of orientation or how many lines it takes.
+	var maincontrols_h = el("maincontrols").offsetHeight;
+	if (maincontrols_h > 0)
+		el("main").style.marginTop = maincontrols_h + "px";
 }
 
 // Static 0-3000Hz frequency scale, drawn once and only redrawn on
@@ -3943,8 +3964,30 @@ function mode_set(new_mode){
 			logger_set_macro("CW1");
 			if (active_panel.length > 0)
 				$(panel_name).show();
-					return;
+			break;
 	}
+
+	// Real bug, desktop-only (confirmed live 2026-08-21): switching into
+	// FT8/FT4 shows #ft8_list_column beside #pan_adapter (see FT8_open()
+	// above), which shrinks #pan_adapter's real rendered width on wide
+	// screens (#pan_and_ft8list_row is a row -- see style.css); below the
+	// 900px breakpoint that row stacks into a column instead, so
+	// #pan_adapter's width doesn't change there and this bug never showed
+	// on phone. #waterfall's own canvas.width (its pixel buffer) doesn't
+	// auto-follow #pan_adapter's box -- it's not itself the flex item --
+	// so without this it stayed at whatever width it had from the
+	// previous mode, overflowing #pan_adapter's new, narrower box. With
+	// overflow-x:hidden on <body>, that overflow got silently clipped
+	// instead of visibly overflowing, cropping the right ~38% of the
+	// waterfall (everything past ~1800Hz of the locked 3kHz span) rather
+	// than resizing it down. Same fix handles the reverse (leaving FT8
+	// mode, #pan_adapter widening back out) so the waterfall doesn't stay
+	// undersized there either.
+	var pan_adapter_width = $("#pan_adapter").width();
+	el("waterfall").width = pan_adapter_width;
+	el("waterfall_scale").width = pan_adapter_width;
+	draw_wf_scale();
+	sync_wf_overlay_size();
 //	if (window[new_mode+"_open"] == undefined)
 //		return;
 //	window[new_mode + "_open"]();
@@ -4330,37 +4373,25 @@ $("#FT8_TX1ST").on("click", ft8_txslot_clicked);
 $("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
 // Simplify During QSO -- user's own reasoning: once actually in a
 // QSO, whether anyone's calling CQ is irrelevant, same logic that
-// already hides Band Activity below.
+// already hides Band Activity below. Used to be a user-facing
+// checkbox (Simplify), removed (2026-08-21) -- this UI should never
+// show side-by-side panels at all, so this is no longer a preference,
+// it's just how the layout always behaves. Left as a plain constant
+// (not a checkbox-driven variable) rather than reworking
+// set_band_activity_hidden()'s own logic below, which already reads
+// this name.
 //
 // qso_in_progress is deliberately its OWN separate signal, not just
 // "is Band Activity currently hidden" -- real bug caught live: Band
 // Activity can be hidden purely from the *manual* checkbox/standing
-// preference, with no QSO happening at all. Checking Simplify While
-// that manual preference happened to already be on immediately hid CQ
-// Panel too, with no QSO in progress -- conflating "hidden" with "in a
-// QSO" was the actual bug, not the checkbox's own redraw-on-change
-// (that part's correct and needed). qso_in_progress is set true only
-// at the 4 genuine QSO-start triggers (manually starting a QSO, Auto
-// CQ/Auto Answer arming, Auto Answer picking a new target) and false
-// only at the 3 genuine QSO-end triggers (abort, QSO logged, TXACTIVE
+// preference, with no QSO happening at all. Conflating "hidden" with
+// "in a QSO" was the actual bug. qso_in_progress is set true only at
+// the 4 genuine QSO-start triggers (manually starting a QSO, Auto CQ/
+// Auto Answer arming, Auto Answer picking a new target) and false only
+// at the 3 genuine QSO-end triggers (abort, QSO logged, TXACTIVE
 // 1->0) -- see set_band_activity_hidden()'s own call sites for both.
-// Declared before that function since it reads both this and
-// simplify_during_qso_enabled starting from its very first call a few
-// lines down.
 var qso_in_progress = false;
-var simplify_during_qso_enabled = (localStorage.getItem("simplify_during_qso") === "1");
-$("#SIMPLIFY_QSO_CHECK").on("change", function(){
-	simplify_during_qso_enabled = this.checked;
-	localStorage.setItem("simplify_during_qso", this.checked ? "1" : "0");
-	// Re-apply immediately against whatever Band Activity's real
-	// current state already is, so toggling this mid-QSO takes effect
-	// right away instead of waiting for some unrelated trigger --
-	// solo itself now correctly depends on qso_in_progress, not on
-	// whatever gets passed in here, so this is safe regardless of
-	// *why* Band Activity happens to be hidden right now.
-	set_band_activity_hidden(el("HIDE_BAND_ACTIVITY_CHECK").checked);
-});
-el("SIMPLIFY_QSO_CHECK").checked = simplify_during_qso_enabled;
+var simplify_during_qso_enabled = true;
 
 // Band Activity is purely informational -- CQ Panel and RX Frequency
 // are the ones that actually matter (user's own call) -- lets it be

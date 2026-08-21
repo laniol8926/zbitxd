@@ -1009,6 +1009,26 @@ input[type="checkbox"] {
 #FT8_ui {
 	display: flex;
 	flex-wrap: wrap;
+	/* Real report, live (2026-08-21): a big empty black box appeared
+	   between the CMD toolbar row and the waterfall below it. Root
+	   cause: #FT8_ui is still a .sbitx-panel, which sets min-height:
+	   150px and resize:both/overflow:auto for panels that float as
+	   draggable/resizable dialogs (Settings, Connect, etc.) -- sizing
+	   #FT8_ui used to need before this same-day redesign moved the
+	   Band Activity/CQ Panel/RX Frequency panels out into
+	   #pan_and_ft8list_row (see that rule's own comment). #FT8_ui now
+	   holds only this slim toolbar row + the empty #FT8_controls div,
+	   well under 150px of real content, so align-content:stretch (the
+	   flex default for a wrapped multi-line container) stretched the
+	   empty second "line" to fill the leftover height instead of
+	   collapsing to it. min-height:0 lets it size to its actual
+	   content; resize:none/overflow:visible drop the drag-resize
+	   handle and internal scrollbar a toolbar bar has no business
+	   showing (ID beats .sbitx-panel's class here, same precedent
+	   .mode-panel already relies on above). */
+	min-height: 0;
+	resize: none;
+	overflow: visible;
 }
 
 /* Real task #25-adjacent redesign (2026-08-21), user's own reference:
