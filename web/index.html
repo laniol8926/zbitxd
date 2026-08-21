@@ -1393,6 +1393,18 @@ function waterfall_color_for_v(v){
 	return {r: r, g: g, b: b};
 }
 
+// Precomputed 0-100 color lookup for waterfall_color_for_v() -- real
+// perf win on the Pi Zero 2W: waterfall_build_row() below reruns this
+// ramp's branchy math for every pixel of every row, continuously, and
+// only 101 distinct integer inputs are ever possible once v is rounded.
+// Precomputing once and indexing avoids redoing that branch math
+// thousands of times a second. Same technique (an integer-v color
+// cache) mhweaver/sbitx's own reference waterfall uses for this same
+// ramp.
+var WATERFALL_COLOR_TABLE = [];
+for (var _wf_v = 0; _wf_v <= 100; _wf_v++)
+	WATERFALL_COLOR_TABLE[_wf_v] = waterfall_color_for_v(_wf_v);
+
 // Builds one pixel-high row of waterfall color data from a raw "TX "/
 // "RX "-prefixed spectrum string -- factored out of waterfall_update()
 // so the FT8/FT4 sweep display (waterfall_scroll_tick()) can draw a row
@@ -1405,7 +1417,7 @@ function waterfall_build_row(update, ctx, width){
 
 	for (var x = 0; x < width; x++){
 		var v = waterfall_value_at_x(update, x, width);
-		var clr = waterfall_color_for_v(v);
+		var clr = WATERFALL_COLOR_TABLE[Math.round(v)];
 		img.data[i++] = clr.r;
 		img.data[i++] = clr.g;
 		img.data[i++] = clr.b;
