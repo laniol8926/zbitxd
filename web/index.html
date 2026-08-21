@@ -4078,12 +4078,25 @@ function waterfall_scroll_tick(){
 }
 
 function waterfall_calc_height(){
-	// one third less than the original 35%-of-viewport sizing -- user's
-	// direct ask, after confirming the scroll-duration knob (how much
-	// TIME fits top-to-bottom) has zero effect on this, the actual
-	// physical pixel height. Clamp bounds scaled down by the same 2/3
-	// factor so they stay proportional.
-	var h = Math.round(window.innerHeight * 0.35 * (2/3));
+	// Real report: on a wide-enough screen (>=900px -- see
+	// #pan_and_ft8list_row's own @media breakpoint in style.css),
+	// #ft8_list_column now sits *beside* #pan_adapter instead of below
+	// it, so a taller waterfall there has nothing left underneath it to
+	// push off-screen -- the portrait/landscape caps below were sized
+	// back when every layout stacked panels below the waterfall,
+	// unconditionally. User's own ask, after that redesign freed up the
+	// space: let the waterfall use significantly more of it there,
+	// keeping the original percentage-of-viewport intent this whole
+	// function already used rather than an arbitrary new number.
+	//
+	// Below 900px, #pan_and_ft8list_row still stacks (the reason for
+	// that breakpoint, unchanged) -- both portrait and narrow-landscape
+	// phones keep the original, smaller formula/caps there, protecting
+	// CQ Panel/RX Frequency's visibility exactly as before.
+	var side_by_side = window.innerWidth >= 900;
+	var h = side_by_side
+		? Math.round(window.innerHeight * 0.55)
+		: Math.round(window.innerHeight * 0.35 * (2/3));
 	// Real report: a percentage of raw viewport height means a tall
 	// portrait phone always computes a large waterfall (267px, this
 	// clamp's own max) regardless of how little width is actually
@@ -4097,7 +4110,7 @@ function waterfall_calc_height(){
 	// compact there specifically, while landscape's existing 100-267
 	// range is untouched.
 	var portrait = window.innerWidth < window.innerHeight;
-	var max_h = portrait ? 150 : 267;
+	var max_h = side_by_side ? 600 : (portrait ? 150 : 267);
 	if (h < 100)
 		h = 100;
 	if (h > max_h)
