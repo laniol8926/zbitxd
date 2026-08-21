@@ -799,6 +799,25 @@ select, select option, input {
 .wsjtx-panel-solo {
 	width: calc(100% - 8px);
 }
+/* Real report: with the box itself confirmed correctly full-width
+   (verified live via a temporary outline: 4px solid red diagnostic --
+   it spanned the full row), the panel still visually read as "stuck
+   at the old 3-panel width" because nothing here bumped font size for
+   the solo case the way .wsjtx-panel-expanded already does above for
+   its own 50% case -- short message lines in a small 9pt font left
+   most of the newly-available width looking like empty black
+   background, indistinguishable by eye from the panel genuinely being
+   narrow. Sized a step beyond .wsjtx-panel-expanded's own 13pt/18pt,
+   matching solo having roughly double the row's own width to work
+   with instead of half. */
+.wsjtx-panel-solo .ft8-label,
+.wsjtx-panel-solo .ft8-message,
+.wsjtx-panel-solo .sbitx-list-box {
+	font-size: 16pt;
+}
+.wsjtx-panel-solo .sbitx-list-box li {
+	height: 22pt;
+}
 
 .sbitx-list-title {
 	flex: none;
@@ -879,6 +898,32 @@ select, select option, input {
    side (real hardware wraps to strictly one-per-row well above phone
    portrait widths), so this only kicks in once panels are genuinely
    stacked, not for a merely-narrow desktop window. */
+/* Real report: answering a CQ (Band Activity + CQ Panel both hidden,
+   RX Frequency alone) left RX Frequency narrow and pinned to the left
+   edge instead of taking the full row, even though its own
+   .wsjtx-panel-solo class (width: calc(100% - 8px)) was confirmed
+   correctly applied via live devtools inspection -- not a JS bug.
+   Root cause: .sbitx-panel (shared by every panel.mode-panel below,
+   plus genuinely-floating/draggable dialogs like Settings/Connect)
+   sets float: left, meant for those draggable dialogs' own shrink-
+   to-fit sizing. A floated element's own width defaults to shrink-
+   to-fit its content rather than stretching to fill its parent --
+   with 3 panels visible their combined content was wide enough to
+   look right by coincidence, but with only 1 panel showing, a
+   percentage width has nothing concrete to resolve against and
+   falls back to an intrinsic/narrow size. FT8_ui/CW_ui/Voice_ui are
+   documented elsewhere (see init_draggable_panels()'s own comment)
+   as "inline content areas in the main layout, not floating
+   dialogs" -- float: none here makes that explicit, restoring
+   normal block-level stretch-to-fill-parent sizing. #FT8_ui (this ID
+   selector) still wins the actual layout for FT8's own 3-panel
+   flex-wrap below since ID beats class specificity regardless of
+   source order; this rule only needs to exist for CW_ui/Voice_ui,
+   which don't have their own #id override for float. */
+.mode-panel {
+	float: none;
+	width: 100%;
+}
 #FT8_ui {
 	display: flex;
 	flex-wrap: wrap;
