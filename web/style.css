@@ -1090,17 +1090,33 @@ body {
 	padding-bottom: 0;
 }
 
+/* Visual consistency with the tactile .sbitxv3-btn/.logger-button
+   treatment above -- these (MODE/BAND/SLOT/etc.) were completely flat
+   and borderless before, same subtle-depth idea (gradient + border)
+   just without the button-specific press/shadow effect, since a
+   native <select> can't take over its own click/press rendering the
+   way a <button> can. appearance left alone (see the disabled
+   appearance:none below, kept as a comment, not restored) -- that
+   would drop the native dropdown arrow with no replacement here. */
 .sbitxv3-selection{
-	border: 0;
+	border: 1px solid #234;
+	background: linear-gradient(to bottom, #1a3040, #0a1620);
+	border-radius: 6px;
 	font-size: 13px;
 	margin: 0;
 	width: 48px;
+	color: white;
+	cursor: pointer;
+	transition: all 0.15s ease-in-out;
 	/*	background-color: #044b59; */
 
 /*	-webkit-appearance: none;
 	-ms-appearance: none;
 	-moz-appearane: none;
 	appearance: none;*/
+}
+.sbitxv3-selection:hover {
+	background: linear-gradient(to bottom, #234050, #0f2028);
 }
 
 .sbitxv3-selection option {
