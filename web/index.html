@@ -1025,11 +1025,38 @@ document.addEventListener("fullscreenchange", function(){
 	setTimeout(function(){ wf_height_locked_for_fullscreen = false; }, 300);
 });
 
+// User's own ask (2026-08-21): the waterfall/spectrum canvases were only
+// ever sized in CSS pixels (canvas.width = someMeasuredCssWidth), with no
+// devicePixelRatio awareness at all -- on a high-DPI screen (a phone's
+// 2x/3x display, unlike the Quadra's plain 1x monitor), that meant the
+// canvas's real drawing buffer had fewer pixels than the physical screen
+// it's displayed on, so the browser had to upscale it to fill the actual
+// hardware pixels -- exactly backwards from what a high-DPI screen can
+// support, and the likely reason things looked sharper on a phone by
+// accident rather than by design. These two helpers set a canvas's real
+// pixel buffer to cssSize*devicePixelRatio while pinning its on-screen
+// CSS size to the original cssSize via style.width/height, so the
+// rendered box stays the same physical size on screen but with a denser
+// backing store for the browser to actually use. Only the *size*
+// assignment needs this -- see draw_wf_scale()/draw_wf_overlay()'s own
+// comments for how their drawing code adapts to the now-denser buffer.
+function set_canvas_width(canvas, css_width){
+	var dpr = window.devicePixelRatio || 1;
+	canvas.width = Math.round(css_width * dpr);
+	canvas.style.width = css_width + "px";
+}
+function set_canvas_height(canvas, css_height){
+	var dpr = window.devicePixelRatio || 1;
+	canvas.height = Math.round(css_height * dpr);
+	canvas.style.height = css_height + "px";
+}
+
 function resize_ui(){
 	var b = $("body");
 	var sidebar_width = $("#sidebar").width();
 	if ($("#sidebar")[0].style.display == "none")
 		sidebar_width = 0;
+	var dpr = window.devicePixelRatio || 1;
 
 	log("resize_ui w = " + b.width() + " h = " + b.height());
 
@@ -1044,7 +1071,7 @@ function resize_ui(){
 	// rendered width covers both cases with no mode-specific branch
 	// needed here.
 	var pan_adapter_width = $("#pan_adapter").width();
-	el("waterfall").width = pan_adapter_width;
+	set_canvas_width(el("waterfall"), pan_adapter_width);
 	$(".sbitx-panel").width = b.width()-sidebar_width;
 	el("CW_ui").width = b.width()-sidebar_width;//-sidebar.width;
 	// recalculate on every resize, not just mode changes -- this is what
@@ -1072,18 +1099,35 @@ function resize_ui(){
 	// cleared canvas instead of their true 15s-apart positions.
 	if (!wf_height_locked_for_fullscreen){
 		var new_wf_height = waterfall_calc_height();
-		if (el("waterfall").height !== new_wf_height){
-			el("waterfall").height = new_wf_height;
+		// Compare against the *logical* (CSS-pixel) height the canvas is
+		// currently sized to, not its raw .height attribute -- that
+		// attribute is now devicePixelRatio-scaled (see set_canvas_height()),
+		// so comparing it directly against new_wf_height (always a plain
+		// CSS-pixel number) would never match once dpr != 1, defeating this
+		// guard entirely and reintroducing the exact spurious-reset bug its
+		// own comment above describes.
+		var current_logical_h = Math.round(el("waterfall").height / dpr);
+		if (current_logical_h !== new_wf_height){
+			set_canvas_height(el("waterfall"), new_wf_height);
 			waterfall_setup_scroll_rate();
 		}
 	}
 	sync_wf_overlay_size();
-	el("waterfall_scale").width = pan_adapter_width;
+	// waterfall_scale/spectrum's own heights (16px/60px) never change
+	// dynamically elsewhere -- only need the dpr-scaled buffer set up
+	// once, guarded the same way as the waterfall's own height above so
+	// a plain resize (no real height change) doesn't needlessly wipe
+	// either canvas.
+	if (Math.round(el("waterfall_scale").height / dpr) !== 16)
+		set_canvas_height(el("waterfall_scale"), 16);
+	set_canvas_width(el("waterfall_scale"), pan_adapter_width);
 	draw_wf_scale();
 	// Setting .width wipes the canvas like every other one here -- redraw
 	// immediately from the last real row instead of leaving it blank
 	// until the next RX response happens to arrive.
-	el("spectrum").width = pan_adapter_width;
+	if (Math.round(el("spectrum").height / dpr) !== 60)
+		set_canvas_height(el("spectrum"), 60);
+	set_canvas_width(el("spectrum"), pan_adapter_width);
 	if (last_wf_row != null)
 		spectrum_update(last_wf_row);
 	height = b.height();
@@ -1123,13 +1167,25 @@ function draw_wf_scale(){
 	var sc = el("waterfall_scale");
 	if (!sc || sc.width == 0 || sc.height == 0)
 		return;
+	// sc.width/height are now devicePixelRatio-scaled (see
+	// set_canvas_width()/set_canvas_height()) -- dividing back down to
+	// logical/CSS pixels here keeps every coordinate/font-size below
+	// exactly as originally tuned, with ctx.setTransform() doing the
+	// actual high-DPI scaling underneath rather than this function's own
+	// math needing to know about dpr at all. setTransform (not scale())
+	// so a second call from a later resize can't compound an already-
+	// applied transform -- this always sets the transform fresh instead
+	// of stacking onto whatever the context's state already was.
+	var dpr = window.devicePixelRatio || 1;
+	var w = sc.width / dpr, h = sc.height / dpr;
 	var ctx = sc.getContext("2d");
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 	ctx.fillStyle = "black";
-	ctx.fillRect(0, 0, sc.width, sc.height);
+	ctx.fillRect(0, 0, w, h);
 	ctx.fillStyle = "white";
 	ctx.textBaseline = "top";
 
-	var hz_per_pixel = sc.width / 3000;
+	var hz_per_pixel = w / 3000;
 
 	// unlabelled minor ticks every 100Hz, smaller than the labelled
 	// 500Hz major ticks below -- drawn first so they never sit on top
@@ -1247,8 +1303,16 @@ function sync_wf_overlay_size(){
 	var wf = el("waterfall");
 	var ov = el("waterfall_overlay");
 	if (!ov) return;
+	// Copying wf's own (devicePixelRatio-scaled) attributes keeps the
+	// overlay's real pixel buffer matched exactly -- but its on-screen
+	// CSS size needs copying too now, or the overlay would render dpr
+	// times too big and drift out of alignment with the waterfall
+	// underneath it (the buffer size and the CSS display size are no
+	// longer the same number, see set_canvas_width()'s own comment).
 	ov.width = wf.width;
 	ov.height = wf.height;
+	ov.style.width = wf.style.width;
+	ov.style.height = wf.style.height;
 	draw_wf_overlay();
 }
 
@@ -1470,10 +1534,18 @@ function draw_wf_overlay(){
 	if (!ov || ov.width == 0 || ov.height == 0)
 		return;
 
+	// ov.width/height and wf.height are now devicePixelRatio-scaled (see
+	// set_canvas_width()/set_canvas_height()) -- dividing back down to
+	// logical/CSS pixels keeps every coordinate/font-size below exactly
+	// as originally tuned, same technique and same reason as
+	// draw_wf_scale()'s own comment.
+	var dpr = window.devicePixelRatio || 1;
+	var ov_w = ov.width / dpr, ov_h = ov.height / dpr, wf_h = wf.height / dpr;
 	var mode = el("MODE").value;
-	var hz_per_pixel = ov.width / 3000;
+	var hz_per_pixel = ov_w / 3000;
 	var ctx = ov.getContext("2d");
-	ctx.clearRect(0, 0, ov.width, ov.height);
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	ctx.clearRect(0, 0, ov_w, ov_h);
 
 	// USB-only digital-mode backend: dial frequency is the LEFT edge of
 	// the display (0Hz pitch -> x=0), not centered -- matches the
@@ -1484,7 +1556,7 @@ function draw_wf_overlay(){
 	var rx_pitch = parseFloat(el("PITCH").value);
 	var rx_x;
 	if (mode == 'CWR' || mode == 'LSB')
-		rx_x = ov.width/2 - (rx_pitch * hz_per_pixel);
+		rx_x = ov_w/2 - (rx_pitch * hz_per_pixel);
 	else
 		rx_x = rx_pitch * hz_per_pixel;
 	rx_x = Math.round(rx_x);
@@ -1497,7 +1569,7 @@ function draw_wf_overlay(){
 	ctx.font = "10px sans-serif";
 	ctx.beginPath();
 	ctx.moveTo(rx_x + 0.5, 0);
-	ctx.lineTo(rx_x + 0.5, ov.height);
+	ctx.lineTo(rx_x + 0.5, ov_h);
 	ctx.stroke();
 	ctx.fillText("RX", rx_x + 3, 10);
 
@@ -1508,12 +1580,12 @@ function draw_wf_overlay(){
 		ctx.fillStyle = "red";
 		ctx.beginPath();
 		ctx.moveTo(tx_x + 0.5, 0);
-		ctx.lineTo(tx_x + 0.5, ov.height);
+		ctx.lineTo(tx_x + 0.5, ov_h);
 		ctx.stroke();
 		ctx.fillText("TX", tx_x + 3, 22);
 
 		waterfall_record_period_boundary(mode);
-		draw_period_markers(ctx, ov.width, wf.height);
+		draw_period_markers(ctx, ov_w, wf_h);
 	}
 }
 
@@ -1574,8 +1646,20 @@ function waterfall_record_period_boundary(mode){
 // can see the 2 second quiet decode time and it should show up at the
 // end of that."
 function draw_period_markers(ctx, width, height){
+	// wf_rows_per_sec (waterfall_setup_scroll_rate()) is in *physical*
+	// rows/sec -- it paces waterfall_scroll_tick()'s real pixel-row
+	// insertion into the waterfall's own devicePixelRatio-scaled buffer
+	// (raw putImageData, unaffected by any canvas transform). This
+	// function draws onto ctx AFTER draw_wf_overlay() has already applied
+	// ctx.setTransform(dpr,...) and handed it logical-pixel width/height,
+	// so it needs the *logical* rows/sec here -- real report, live:
+	// using the physical rate under an already-dpr-scaled transform
+	// compounded the two, scrolling this marker at dpr times the
+	// waterfall's own real content scroll rate underneath it.
+	var dpr = window.devicePixelRatio || 1;
+	var rows_per_sec = wf_rows_per_sec / dpr;
 	while (wf_period_boundaries.length > 0){
-		var y = (wf_rx_elapsed_sec - wf_period_boundaries[0].elapsed_sec) * wf_rows_per_sec;
+		var y = (wf_rx_elapsed_sec - wf_period_boundaries[0].elapsed_sec) * rows_per_sec;
 		if (y < height)
 			break;
 		wf_period_boundaries.shift(); // oldest boundary has scrolled off-screen
@@ -1589,10 +1673,10 @@ function draw_period_markers(ctx, width, height){
 	// in-between step; this replaces that, using the same shift amount
 	// purely to compute the correction, not the drawn size).
 	var shift_sec = 2.64;
-	var shift_height = Math.round(shift_sec * wf_rows_per_sec);
+	var shift_height = Math.round(shift_sec * rows_per_sec);
 	for (var i = 0; i < wf_period_boundaries.length; i++){
 		var b = wf_period_boundaries[i];
-		var y = Math.round((wf_rx_elapsed_sec - b.elapsed_sec) * wf_rows_per_sec);
+		var y = Math.round((wf_rx_elapsed_sec - b.elapsed_sec) * rows_per_sec);
 		var y_shifted = y - shift_height;
 		ctx.fillStyle = "red";
 		ctx.fillRect(0, y_shifted, width, 2);
@@ -1646,7 +1730,13 @@ function wf_overlay_click(event){
 	var rect = ov.getBoundingClientRect();
 	var clientX = event.touches ? event.touches[0].clientX : event.clientX;
 	var x = clientX - rect.left;
-	var hz_per_pixel = ov.width / 3000;
+	// rect.width, not ov.width -- ov.width is the canvas's own real pixel
+	// buffer, now devicePixelRatio-scaled (see set_canvas_width()), while
+	// x above is in the same logical/CSS-pixel space as
+	// getBoundingClientRect() itself. Mixing a logical x with a
+	// physical-pixel hz_per_pixel would put the clicked tone at roughly
+	// 1/dpr of the intended frequency on any high-DPI screen.
+	var hz_per_pixel = rect.width / 3000;
 	// Left-edge-anchored: x=0 is 0Hz/dial frequency, matching where the
 	// line is actually drawn (see draw_wf_overlay()).
 	var freq = Math.round(x / hz_per_pixel);
@@ -4124,7 +4214,7 @@ function mode_set(new_mode){
 	// new_mode, not el("MODE").value -- see waterfall_setup_scroll_rate()'s
 	// comment on why the DOM can be stale at this exact point for a
 	// server-pushed mode change.
-	wf.height = waterfall_calc_height();
+	set_canvas_height(wf, waterfall_calc_height());
 	waterfall_setup_scroll_rate(new_mode);
 	sync_wf_overlay_size();
 
@@ -4179,11 +4269,16 @@ function mode_set(new_mode){
 	// mode, #pan_adapter widening back out) so the waterfall doesn't stay
 	// undersized there either.
 	var pan_adapter_width = $("#pan_adapter").width();
-	el("waterfall").width = pan_adapter_width;
-	el("waterfall_scale").width = pan_adapter_width;
+	set_canvas_width(el("waterfall"), pan_adapter_width);
+	var dpr = window.devicePixelRatio || 1;
+	if (Math.round(el("waterfall_scale").height / dpr) !== 16)
+		set_canvas_height(el("waterfall_scale"), 16);
+	set_canvas_width(el("waterfall_scale"), pan_adapter_width);
 	draw_wf_scale();
 	sync_wf_overlay_size();
-	el("spectrum").width = pan_adapter_width;
+	if (Math.round(el("spectrum").height / dpr) !== 60)
+		set_canvas_height(el("spectrum"), 60);
+	set_canvas_width(el("spectrum"), pan_adapter_width);
 	if (last_wf_row != null)
 		spectrum_update(last_wf_row);
 //	if (window[new_mode+"_open"] == undefined)
