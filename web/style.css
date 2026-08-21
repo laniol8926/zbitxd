@@ -49,8 +49,24 @@ body {
 
 select, select option, input {
 	background: black;
-	color: #fff; 
+	color: #fff;
 	opacity: 1;
+}
+
+/* Native checkbox recoloring -- accent-color is well-supported
+   (Chrome/Edge/Firefox/Safari, this project's real targets) and
+   recolors the browser's own native check mark/box without losing
+   native click/keyboard/accessibility behavior, unlike a full custom
+   checkbox rebuild. Matches the same blue used throughout
+   (.logger-button/#keypad_enter) rather than each browser's own
+   default accent. Slightly larger + pointer cursor -- these were
+   otherwise the smallest, least-styled clickable controls in the app
+   once every button/select above got its own visual pass. */
+input[type="checkbox"] {
+	accent-color: #1a75ff;
+	width: 14px;
+	height: 14px;
+	cursor: pointer;
 }
 
 .sbitx-text-input {
@@ -442,14 +458,29 @@ select, select option, input {
 	color: black;
 }
 
+/* Same tactile gradient/shadow/press treatment as .sbitxv3-btn/
+   .logger-button (see their own comments) -- border kept here (unlike
+   those two) since this button's own black background wouldn't
+   otherwise read as a distinct shape against the page's own black. */
 .recorder-btn {
 	height: 40px;
 	width: 75px;
 	border-collapse: collapse;
 	border: 1px solid #888;
-	background-color: black;
+	background: linear-gradient(to bottom, #2a2a2a, #0a0a0a);
 	color: white;
 	margin: 2px;
+	border-radius: 6px;
+	box-shadow: 0 4px #000;
+	cursor: pointer;
+	transition: all 0.15s ease-in-out;
+}
+.recorder-btn:hover {
+	background: linear-gradient(to bottom, #3a3a3a, #1a1a1a);
+}
+.recorder-btn:active {
+	box-shadow: 0 2px #000;
+	transform: translateY(2px);
 }
 
 #record_start {
@@ -721,11 +752,25 @@ select, select option, input {
 	padding: 4px 6px;
 }
 
+/* Same tactile treatment as .recorder-btn above -- border added (had
+   none before) since it's the only thing that gave this button any
+   visible shape at all against the black page background. */
 .sbitx-btn-back {
 	font-size: 12pt;
-	background-color: black;
+	background: linear-gradient(to bottom, #2a2a2a, #0a0a0a);
 	color: white;
-	border: none;
+	border: 1px solid #888;
+	border-radius: 6px;
+	box-shadow: 0 4px #000;
+	cursor: pointer;
+	transition: all 0.15s ease-in-out;
+}
+.sbitx-btn-back:hover {
+	background: linear-gradient(to bottom, #3a3a3a, #1a1a1a);
+}
+.sbitx-btn-back:active {
+	box-shadow: 0 2px #000;
+	transform: translateY(2px);
 }
 
 /* waterfall and spectrum */
@@ -959,17 +1004,38 @@ select, select option, input {
 		width: 100%;
 	}
 }
+/* Same navy gradient as .sbitxv3-btn (identical base color, see its
+   own comment for the technique) -- this is the CMD/SET/Export ADIF/
+   Reboot/Shutdown row specifically, a different class from
+   .sbitxv3-btn despite the visual similarity. */
 .panel-toolbar-btn {
 	font-size: 8pt;
 	padding: 1px 5px;
 	height: auto;
-	background-color: #0c2333;
-	border: solid 1px black;
+	background: linear-gradient(to bottom, #163449, #071620);
+	border: none;
+	border-radius: 5px;
+	box-shadow: 0 3px #030a10;
 	color: white;
 	cursor: pointer;
+	transition: all 0.15s ease-in-out;
+}
+.panel-toolbar-btn:hover {
+	background: linear-gradient(to bottom, #1e4058, #0a1e2c);
+}
+.panel-toolbar-btn:active {
+	box-shadow: 0 1px #030a10;
+	transform: translateY(2px);
 }
 .panel-toolbar-btn.power-btn {
-	background-color: #bf0f0f;
+	background: linear-gradient(to bottom, #d92020, #8a0a0a);
+	box-shadow: 0 3px #4a0303;
+}
+.panel-toolbar-btn.power-btn:hover {
+	background: linear-gradient(to bottom, #e93030, #a01010);
+}
+.panel-toolbar-btn.power-btn:active {
+	box-shadow: 0 1px #4a0303;
 }
 
 /* styling the FT8 list */
@@ -1074,6 +1140,12 @@ body {
 	font-size: 15pt;
 }
 
+/* Same subtle-depth idea as .sbitxv3-selection below (gradient +
+   border-radius, no click-press effect since these are mostly labels/
+   readouts rather than clickable buttons) -- this is the shared
+   wrapper box around RF/MODE/BAND/SLOT/RPT/AC-AA/Susp/TX Enabled/
+   Calling CQ, all of which still looked flat/square after the button
+   and select fixes since none of them touch this wrapper class. */
 .sbitxv3-control {
 	text-align: left;
 	width: 49px;
@@ -1081,9 +1153,9 @@ body {
 	padding-left: 3px;
 	height: 36px;
 	min-height: 36px;
-	border: solid 1px #333; 
-    /*	background-color: #044b59; */
-	
+	border: 1px solid #333;
+	background: linear-gradient(to bottom, #1a1a1a, #0a0a0a);
+	border-radius: 5px;
 	font-size: 12px;
 	vertical-align:top;
 	display: inline-block;
@@ -1162,9 +1234,14 @@ body {
    .toggle-active alone) so this reliably wins regardless of where
    .macro-btn's own background-color (line ~975, same specificity,
    comes later in the cascade and silently won otherwise) sits in the
-   file. */
+   file. Gradient/shadow added so this doesn't look flat while every
+   other button now has the same tactile depth -- .macro-btn/
+   #tune_toggle's own :hover/:active (box-shadow shrink + translateY)
+   still apply underneath this, only background/box-shadow color
+   change here. */
 .toggle-active, .macro-btn.toggle-active, #tune_toggle.toggle-active {
-	background-color: lightgreen;
+	background: linear-gradient(to bottom, #b8f2b8, #6fd66f);
+	box-shadow: 0 4px #2f8f2f;
 	color: black;
 }
 
@@ -1240,6 +1317,8 @@ body {
 
 /* linear pot  styling */
 
+/* Same subtle-depth treatment as .sbitxv3-control above -- RF (DRIVE)/
+   RPT (FT8_REPEAT)/TX TONE all use this wrapper instead. */
 .linear{
 	text-align: left;
 	min-width: 50px;
@@ -1247,7 +1326,9 @@ body {
 	padding-left: 3px;
 	height: 36px;
 	min-height: 36px;
-	border: solid 1px #888;
+	border: 1px solid #888;
+	background: linear-gradient(to bottom, #1a1a1a, #0a0a0a);
+	border-radius: 5px;
 	font-size: 12px;
 	vertical-align:top;
 	display: inline-block;
@@ -1308,14 +1389,29 @@ body {
 	left: -10px;
 }
 
+/* Same tactile treatment as .recorder-btn/.sbitx-btn-back above.
+   .toggle-active's own combined-selector override (below) still wins
+   on background/box-shadow while this is lit green/active -- only
+   adding properties here, not changing selector specificity. */
 .macro-btn {
 	height: 45px;
 	min-width: 50px;
 	border-collapse: collapse;
 	border: 1px solid #888;
-	background-color: black;
+	background: linear-gradient(to bottom, #2a2a2a, #0a0a0a);
 	color: white;
 	line-height: 15px;
+	border-radius: 6px;
+	box-shadow: 0 4px #000;
+	cursor: pointer;
+	transition: all 0.15s ease-in-out;
+}
+.macro-btn:hover {
+	background: linear-gradient(to bottom, #3a3a3a, #1a1a1a);
+}
+.macro-btn:active {
+	box-shadow: 0 2px #000;
+	transform: translateY(2px);
 }
 
 .sbitx-text-field {
@@ -1418,7 +1514,7 @@ body {
 	color: white;
 }
 .tx-enabled-indicator.tx-active {
-	background-color: red;
+	background: linear-gradient(to bottom, #ff4444, #b30000);
 	cursor: pointer;
 }
 
@@ -1443,7 +1539,7 @@ body {
 	color: white;
 }
 .tx-suspend-indicator.tx-suspended {
-	background-color: orange;
+	background: linear-gradient(to bottom, #ffb733, #cc7a00);
 }
 
 /* FT8_TX1ST's click-to-toggle box (replaced the old ON/OFF <select>,
@@ -1683,41 +1779,70 @@ body {
 	margin: 8px;
 }
 
+/* Same tactile gradient/shadow/press treatment as every other button
+   class now (see .sbitxv3-btn's own comment for the technique).
+   #keypad_enter/_clear/_delete each keep their own distinct color,
+   just as gradient/shadow pairs instead of a flat color swap on
+   hover -- hover direction flipped to lighten (was darken) to match
+   the same convention as everywhere else, not left as the odd one out. */
 .keypad-btn {
-	background-color: #444;
+	background: linear-gradient(to bottom, #555, #333);
 	color: #fff;
 	border: 1px solid #555;
 	padding: 10px;
 	font-size: 16px;
 	cursor: pointer;
 	text-align: center;
+	border-radius: 6px;
+	box-shadow: 0 4px #111;
+	transition: all 0.15s ease-in-out;
 }
 
 .keypad-btn:hover {
-	background-color: #555;
+	background: linear-gradient(to bottom, #666, #444);
+}
+
+.keypad-btn:active {
+	box-shadow: 0 2px #111;
+	transform: translateY(2px);
 }
 
 #keypad_enter {
-	background-color: #1a75ff;
+	background: linear-gradient(to bottom, #2a85ff, #0a55cf);
+	box-shadow: 0 4px #06316b;
 }
 
 #keypad_enter:hover {
-	background-color: #0d47a1;
+	background: linear-gradient(to bottom, #4a95ff, #1a65df);
+}
+
+#keypad_enter:active {
+	box-shadow: 0 2px #06316b;
 }
 
 #keypad_clear {
-	background-color: #ff4444;
+	background: linear-gradient(to bottom, #ff5c5c, #cc2020);
+	box-shadow: 0 4px #7a0f0f;
 }
 
 #keypad_clear:hover {
-	background-color: #cc0000;
+	background: linear-gradient(to bottom, #ff7c7c, #dd3030);
+}
+
+#keypad_clear:active {
+	box-shadow: 0 2px #7a0f0f;
 }
 
 #keypad_delete {
-	background-color: #ffaa00;
+	background: linear-gradient(to bottom, #ffb733, #cc8800);
+	box-shadow: 0 4px #7a5200;
 }
 
 #keypad_delete:hover {
-	background-color: #cc8800;
+	background: linear-gradient(to bottom, #ffc753, #dd9800);
+}
+
+#keypad_delete:active {
+	box-shadow: 0 2px #7a5200;
 }
 
