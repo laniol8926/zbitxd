@@ -1231,6 +1231,17 @@ function draw_wf_scale(){
 
 var spectrum_gradient = null;
 var spectrum_gradient_h = 0;
+var spectrum_last_draw_ms = 0;
+// Real incident (2026-08-22): this is called from response_handler() on
+// every real "RX "-prefixed server push -- i.e. at whatever rate the
+// daemon streams audio blocks, unthrottled, in every mode (not just FT8),
+// for as long as the receiver is running (basically always). The Quadra's
+// Chromium GPU process was found pinned near 100% CPU for hours straight,
+// eventually starving Xorg's input handling badly enough to freeze
+// keyboard/mouse. 30fps is already well past what a human can perceive as
+// smoother on a bar-style trace, so gating the actual redraw here caps the
+// worst case without changing how it looks.
+var SPECTRUM_MIN_REDRAW_MS = 33;
 
 // Live 0-3kHz spectrum amplitude trace, drawn above the waterfall --
 // shares the exact same per-pixel value (waterfall_value_at_x()) and
@@ -1249,6 +1260,10 @@ function spectrum_update(update){
 	var c = el("spectrum");
 	if (!c || c.width == 0 || c.height == 0)
 		return;
+	var now = performance.now();
+	if (now - spectrum_last_draw_ms < SPECTRUM_MIN_REDRAW_MS)
+		return;
+	spectrum_last_draw_ms = now;
 	var ctx = c.getContext("2d");
 	var w = c.width, h = c.height;
 
@@ -1303,13 +1318,21 @@ function spectrum_update(update){
 	ctx.setLineDash([]);
 
 	// One bar per pixel column, height = that column's own
-	// noise-floor-normalized magnitude.
-	ctx.fillStyle = spectrum_gradient;
+	// noise-floor-normalized magnitude. Batched into a single Path2D +
+	// one fill() (instead of one fillRect() call per column) -- each
+	// fillRect is its own draw command with its own state-validation
+	// overhead, and at up to several hundred columns called on every RX
+	// row (see SPECTRUM_MIN_REDRAW_MS's own comment on how often that
+	// is), that overhead was a real, measurable contributor to the GPU
+	// pegging described there.
+	var bars = new Path2D();
 	for (var x = 0; x < w; x++){
 		var v = waterfall_value_at_x(update, x, w);
 		var bar_h = (v / 100) * h;
-		ctx.fillRect(x, h - bar_h, 1, bar_h);
+		bars.rect(x, h - bar_h, 1, bar_h);
 	}
+	ctx.fillStyle = spectrum_gradient;
+	ctx.fill(bars);
 }
 
 // Keeps #waterfall_overlay's own pixel buffer sized to match #waterfall
@@ -1338,7 +1361,24 @@ var waterfall_image = null;
 
 function waterfall_init(){
 	var w = el("waterfall");
-	var ctx = w.getContext("2d");
+	// willReadFrequently:true -- must match every other getContext("2d")
+	// call on this same canvas (waterfall_update()/draw_period_markers()/
+	// waterfall_scroll_tick()); a canvas's rendering backend (GPU-composited
+	// vs. CPU/software) is locked in by its *first* getContext() call and
+	// ignores the hint on every later call for the same canvas+contextId.
+	// This is that first call (waterfall_init() runs once at page load,
+	// before any of the others), so it was the one silently deciding the
+	// backend for the whole session -- without this hint here, the canvas
+	// got GPU-composited, and waterfall_scroll_tick()'s per-row
+	// getImageData()/putImageData() (needed several times/sec, continuously,
+	// for as long as FT8/FT4 is active) then forced a synchronous GPU->CPU
+	// readback on every call. Real incident (2026-08-22): the Quadra's
+	// Chromium GPU process pinned near 100% CPU for 3+ hours straight,
+	// starving Xorg's input handling badly enough that keyboard/mouse
+	// stopped responding locally, while the app stayed reachable over the
+	// network the whole time (confirming it was this specific process
+	// wedged, not a real system/kernel lockup).
+	var ctx = w.getContext("2d", {willReadFrequently:true});
 	var waterfall_image = ctx.createImageData(w.width,w.height);
 	i = 0;
 	for (var y = 0; y < w.height; y++){
