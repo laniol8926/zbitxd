@@ -2016,6 +2016,18 @@ void ft8_process(char *message, ftx_operation operation){
 		// gap, both needed a manual click.
 		call_wipe();
 		ft8_repeat = 0;
+		// Real report, live (2026-08-22): if we were still in the middle
+		// of repeating our own closing "73" (see ft8_qso_log_pending's own
+		// comment -- restored to using the full FT8_REPEAT count, not
+		// capped to one) when their "73" arrived here first, ft8_abort()
+		// above already stopped the repeats and enter_qso()/call_wipe()
+		// just ran directly, immediately, right above -- so there's
+		// nothing left for ft8_poll() to do once ft8_repeat reaches 0 from
+		// the abort. Left set, ft8_poll() would run enter_qso()/
+		// call_wipe() a second, redundant time (harmless in practice,
+		// enter_qso()'s own 5-minute dedup window catches it -- but still
+		// a real gap worth closing directly).
+		ft8_qso_log_pending = false;
 		// Auto CQ: this QSO is done and we have nothing further to send
 		// -- schedule ft8_poll() to re-queue CQ on its next idle cycle
 		// (see ft8_autocq_resume_pending's own comment).
@@ -2046,19 +2058,26 @@ void ft8_process(char *message, ftx_operation operation){
 		// Real report (earlier): courtesy "73" used to be single-shot
 		// only (no repeat), so if it never reached the other station,
 		// they were left waiting on a "73" that would never arrive.
-		// Fixed by letting ft8_tx_3f() apply the full FT8_REPEAT count
-		// here same as everything else -- but with a real RPT of 5,
-		// that meant up to 5*30s = 2.5 minutes of "73" still
-		// transmitting after the QSO had already logged. New real
-		// report: "I am continuing to send the ... 73 message after
-		// the qso had been logged. It's caught in a loop" -- confirmed
-		// live, had to manually abort every time. User's own call: it
-		// needs to stop as soon as the QSO is logged. Capped back down
-		// to a single transmission, decoupled from FT8_REPEAT (which
-		// still applies in full to RR73/signal-report/grid replies via
-		// ft8_tx_3f() elsewhere -- those genuinely need the retries,
-		// they're soliciting a response, not closing one out).
-		ft8_repeat = 1;
+		// ft8_tx_3f() above already applies the full FT8_REPEAT count on
+		// its own (same as any other reply) -- no override needed here.
+		//
+		// Previously capped to a single transmission (ft8_repeat = 1)
+		// after a real report: "I am continuing to send the ... 73
+		// message after the qso had been logged. It's caught in a loop"
+		// -- confirmed live, had to manually abort every time. That
+		// symptom was really a side effect of enter_qso()/call_wipe()
+		// running immediately (right where this comment block used to
+		// sit) while the repeats kept going for a while *after* --
+		// logged, yet still transmitting, looked exactly like stuck/
+		// looping. Now that logging is genuinely deferred (see
+		// ft8_qso_log_pending above) until the repeats actually finish
+		// (or get cut short by ft8_abort() in the "73"-received branch
+		// above, the moment their own confirmation arrives), that
+		// mismatch is gone -- restoring the full count is safe again,
+		// and is what the user actually wants: RX Frequency stays
+		// visible for the operator to see for as long as the closing
+		// "73" is still potentially going back and forth, not just its
+		// first transmission.
 		// Auto CQ: our courtesy "73" above still needs to actually go
 		// out first -- resume gets picked up once all of its repeats
 		// finish and ft8_repeat naturally reaches 0 (see ft8_poll()).
