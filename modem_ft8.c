@@ -979,12 +979,25 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
             // AP hypothesis variety -- see [[project_ft8_ldpc_sensitivity]].
             if (!ap_available || !ftx_decode_candidate_ap(&mon.wf, cand, kLDPC_iterations,
                     ap_known_bits, 29, &message, &status)){
+#ifdef FTX_OSD_FALLBACK
+                // OSD fallback: task #25's highest-measured remaining lever
+                // (+36% recovery on real candidates that survived neither
+                // blind nor AP decode -- see project_ft8_ldpc_sensitivity
+                // memory). Needs no a-priori guess, unlike AP, so it's tried
+                // unconditionally here rather than gated by ap_available.
+                if (!ftx_decode_candidate_osd(&mon.wf, cand, &message, &status)){
+#endif
                 // printf("000000 %3d %+4.2f %4.0f ~  ---\n", cand->score, time_sec, freq_hz);
 	        if (status.crc_calculated != status.crc_extracted)
 		    ++crc_mismatches;
                 //~ else if (status.ldpc_errors > 0)
                     //~ LOG(LOG_DEBUG, "LDPC decode: %d errors\n", status.ldpc_errors);
                 continue;
+#ifdef FTX_OSD_FALLBACK
+                }
+                LOG(LOG_INFO, "osd_decode: recovered %4.1fs / %dHz [%d] that blind+AP decode missed\n",
+                    time_sec, freq_hz, cand->score);
+#endif
             }
         }
 

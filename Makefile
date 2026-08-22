@@ -19,6 +19,12 @@ ifdef SBITX_DEBUG
 CFLAGS += -ggdb3 -fsanitize=address
 LIBS += -fsanitize=address
 endif
+ifdef SBITX_OSD
+## task #25 OSD decode fallback -- see project_ft8_ldpc_sensitivity memory.
+## Off by default until validated on real traffic (staged plan in
+## graceful-gathering-lightning.md); build with SBITX_OSD=1 make to enable.
+CFLAGS += -DFTX_OSD_FALLBACK
+endif
 CC = gcc
 LINK = gcc
 STRIP = strip
