@@ -1682,15 +1682,18 @@ function draw_period_markers(ctx, width, height){
 			break;
 		wf_period_boundaries.shift(); // oldest boundary has scrolled off-screen
 	}
-	// User's own call, after several rounds of live testing (see this
-	// function's own "parked" comment above): the misalignment was
-	// consistently upward-correctable, so rather than pin down the
-	// exact root cause, shift the marker up by a known quantity --
-	// 2.64s, the real FT8 silence-period length -- then draw it back at
-	// its original thin 2px height (a wider band was tried as an
-	// in-between step; this replaces that, using the same shift amount
-	// purely to compute the correction, not the drawn size).
-	var shift_sec = 2.64;
+	// Real, live-measured constant (2026-08-22), converged on via actual
+	// data rather than guessing: shift the marker up by this much so it
+	// lands at the true start of the next period instead of drifting
+	// into either the trailing silence gap or the next slot's own
+	// signal. History, in case this ever needs revisiting: 2.64s (the
+	// original, from this function's earlier "parked" investigation)
+	// landed ~2s into the next slot; 4.64s overshot the other way by
+	// about the same margin; 0 (measuring the raw, uncorrected offset
+	// directly) landed in the *middle* of the known ~2.64s FT8 silence
+	// gap, which put the real target at ~1.32s; the user's own final
+	// real-traffic check confirmed 1.00s lands right on it.
+	var shift_sec = 1.00;
 	var shift_height = Math.round(shift_sec * rows_per_sec);
 	for (var i = 0; i < wf_period_boundaries.length; i++){
 		var b = wf_period_boundaries[i];
