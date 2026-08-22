@@ -3695,10 +3695,33 @@ function logbook_more(){
 // done -- a short fixed delay before opening it is simpler than adding
 // a dedicated "export finished" signal for what's normally a
 // sub-second operation even for a large log.
+//
+// fetch()+blob+a synthetic <a download> click, not window.open() --
+// the server already sends Content-Disposition: attachment (see
+// webserver.c), which is enough to force a real download in an
+// ordinary browser tab, but this app is normally run as an installed
+// Chromium "app" window (no address bar, no visible download bar/
+// notification) -- window.open(url, "_blank") there can open a whole
+// new bare app window instead of actually saving anything, with no
+// feedback either way that anything happened. Fetching the bytes
+// ourselves and clicking a real download-attribute link reliably
+// forces an actual save to the client's Downloads folder regardless
+// of whether this is a plain tab, this app window, or a phone browser.
 function logbook_export(){
 	websocket_send("LOGEXPORT");
 	setTimeout(function(){
-		window.open("/logbook_export.adi", "_blank");
+		fetch("/logbook_export.adi", {cache: "no-store"})
+			.then(function(resp){ return resp.blob(); })
+			.then(function(blob){
+				var url = URL.createObjectURL(blob);
+				var a = document.createElement("a");
+				a.href = url;
+				a.download = "logbook_export.adi";
+				document.body.appendChild(a);
+				a.click();
+				a.remove();
+				URL.revokeObjectURL(url);
+			});
 	}, 1000);
 }
 
