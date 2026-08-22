@@ -446,6 +446,24 @@
 			</div>
 			<!-- <div id="gridmap"></div> -->
 			<div id="FT8_controls">
+				<!-- Real gap, confirmed live: several existing JS references
+				     (el("CALL")/$("#CALL"), logger_wipe(), etc.) already
+				     assumed a CALL field existed client-side to mirror the
+				     server's own field_str("CALL") -- the station the
+				     current exchange is actually with, kept live via the
+				     generic field-update handler in response_handler()'s
+				     default: case -- but no matching id="CALL" element
+				     was ever in this HTML at all in this generic-rig-
+				     backend fork (a CW-logger-era leftover, the manual
+				     text-entry version of this field having been removed
+				     along with the rest of that UI). Silently did nothing
+				     everywhere it was read -- el("CALL") just returned
+				     null. Added purely as a data sync target (hidden,
+				     never shown) so ft8_message_sender_if_addressed_to_me()'s
+				     own stale-exchange filter (FT8_new_message()) has real
+				     data to compare against, matching what ft8_process()
+				     itself already tracks server-side. -->
+				<input type="hidden" id="CALL" value=""/>
 			</div>
 			<!-- end of FT8_controls -->
 		</div>
@@ -2334,6 +2352,32 @@ function deco_to_span(text) {
     return "<span class='" + jclass + "'>" + deco_strip(text) + "</span>";
 }
 
+// Extracts the OTHER station's callsign (m2) from a message directed at
+// us specifically (m1 == mycallsign) -- null for anything else (a CQ
+// call, a message for someone else, our own TX echo, unparseable text).
+// Same tilde-position tokenization FT8_message_is_cq()/
+// FT8_stylize_message_item() already use, mirroring ft8_process()'s own
+// m1/m2 extraction server-side (modem_ft8.c). deco_strip() matters here
+// -- every field arrives with a "#"+style-letter markup glued on with no
+// delimiter (see that function's own comment), so a raw token would
+// never match a plain callsign string.
+function ft8_message_sender_if_addressed_to_me(text, mycallsign){
+    var token_list = text.match(/\S+/g);
+    if (!token_list || token_list.length < 6 || token_list.length > 9)
+	return null;
+    var tilde_pos = -1;
+    for (var i = 3; i < token_list.length; ++i)
+	if (token_list[i] == '~') {
+	    tilde_pos = i;
+	    break;
+	}
+    if (tilde_pos < 0 || tilde_pos + 2 >= token_list.length)
+	return null;
+    if (deco_strip(token_list[tilde_pos + 1]).toUpperCase() !== mycallsign)
+	return null;
+    return deco_strip(token_list[tilde_pos + 2]).toUpperCase();
+}
+
 // Same tilde/token parsing FT8_stylize_message_item() uses to decide
 // the 'wsjtx-cq-in-message' style, factored out so the CQ Panel filter
 // can't drift from what actually gets styled as a CQ call.
@@ -2895,8 +2939,21 @@ function update_rx_panel_visibility(){
 	// fires from every call site that can empty the panel (full wipe on
 	// login/band-change, a QSO logging, or a per-callsign partial clear
 	// that happens to take the last entry with it), not just one of them.
-	if (!has_content)
+	if (!has_content){
 		websocket_send("QSO_UNLOCK");
+		// Real report, live: the other half of the TXACTIVE 1->0 handler's
+		// own matching fix -- that one only restores Band Activity
+		// immediately if RX Frequency is *already* empty at that moment,
+		// deferring to here otherwise. qso_in_progress already false means
+		// TXACTIVE's own restore already ran (or never needed to -- e.g.
+		// abort/band-change/login clears, all also genuinely "not mid-QSO"),
+		// so this is the "RX Frequency was the one still lagging" case:
+		// apply the real standing state now that it's caught up. Harmless,
+		// idempotent no-op the many times RX Frequency was already empty
+		// when TXACTIVE flipped and this fires a moment later anyway.
+		if (!qso_in_progress)
+			set_band_activity_hidden(band_activity_manual_pref);
+	}
 }
 
 // Widens whichever of the 3 FT8 panels (Band Activity, CQ Panel, RX
@@ -2959,7 +3016,26 @@ function FT8_new_message(text, style){
 			autoans_pick_and_answer();
 	}
 	var mycallsign = $("#MYCALLSIGN").val().toUpperCase();
-	if (words[3] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0){
+	// Real report, live -- user's own scenario: a stale exchange (a
+	// station still resending RR73/RRR because our closing 73 never
+	// reached them) keeps decoding while a fresh CQ gets answered from a
+	// different station -- ft8_process()'s own "ignoring stale-exchange
+	// message" guard (modem_ft8.c) already stops the server from
+	// auto-replying to the stale one once #CALL has moved on, but this
+	// check never looked at #CALL at all, just "does this contain my
+	// callsign anywhere" -- so the stale station's resends kept landing
+	// in RX Frequency right alongside the real, current exchange, and
+	// kept re-sending QSO_LOCK for the stale frequency too, fighting the
+	// real lock the current exchange needs. #CALL (kept in sync
+	// client-side by the generic field-update handler, same field
+	// ft8_process() itself tracks) empty, or the sender not cleanly
+	// parseable as "directed at me" (our own TX echo addresses the OTHER
+	// station as m1, not us, so this is null for those, same as before),
+	// still falls through to the original callsign-anywhere check.
+	var current_call = el("CALL") ? el("CALL").value.toUpperCase() : "";
+	var msg_sender = ft8_message_sender_if_addressed_to_me(text, mycallsign);
+	var is_stale_exchange = current_call && msg_sender && msg_sender !== current_call;
+	if (!is_stale_exchange && (words[3] == $("#FT8-rx-freq").val() || text.search(mycallsign) >= 0)){
 		FT8_list_append("wsjtx-rx", text, style);
 		// Real task #25 ask: narrow the server's own candidate search to
 		// this station's frequency while the QSO continues, so a weak
@@ -4505,7 +4581,23 @@ function response_handler(response){
 			// exact same restore, and had no path to it at all before.
 			if (was_cq_active && !cq_active){
 				qso_in_progress = false;
-				set_band_activity_hidden(band_activity_manual_pref);
+				// Real report, live -- user's own diagnosis, confirmed
+				// correct: right after logging a QSO, both Band Activity
+				// and RX Frequency showed at once, briefly. Root cause:
+				// TXACTIVE going 1->0 (right here) can land *before* the
+				// final "73" actually gets decoded/appended and the
+				// server's own "QSO" logbook push clears RX Frequency
+				// (FT8_rx_clear(), in the 'QSO' case below) -- restoring
+				// Band Activity unconditionally the instant TX stops,
+				// regardless of whether RX Frequency still has that last
+				// exchange sitting in it, showed both for the gap between
+				// the two events. Only restore immediately if RX Frequency
+				// is already empty; if it isn't yet, update_rx_panel_
+				// visibility()'s own matching check (below) restores Band
+				// Activity itself once RX Frequency actually empties,
+				// whichever of the two genuinely happens last.
+				if (!el("wsjtx-rx").querySelector("ol").firstElementChild)
+					set_band_activity_hidden(band_activity_manual_pref);
 			}
 			// Also the sole authority for the TX Enabled indicator now
 			// (switch_to_tx()/switch_to_rx() no longer touch it) --
@@ -4560,6 +4652,24 @@ function response_handler(response){
 			// including redirects the user makes by clicking a different
 			// message mid-pileup.
 			el("ft8_tx_pending").textContent = args;
+			break;
+		case 'FT8_AUTOCQ_RUNNING':
+			// Real safety-adjacent gap: AUTOCQ_CHECK had zero server-side
+			// mirroring before this field existed, so a reconnecting/
+			// newly-logged-in client's checkbox always defaulted to
+			// unchecked regardless of whether Auto CQ was genuinely still
+			// running server-side (see #ft8_autocq_running's own comment,
+			// sbitx_daemon.c). A plain .value assignment (what every other
+			// field falls through to below) does nothing for a
+			// checkbox's checked state, hence its own case here. Also
+			// syncs autocq_client_running (read by the TXACTIVE 1->0
+			// handler elsewhere) so a client that reconnects while this is
+			// still genuinely running -- a deliberate handoff to a new
+			// device, not the disconnect case the server itself already
+			// stops on -- picks up correctly instead of silently
+			// disagreeing with reality.
+			el("AUTOCQ_CHECK").checked = (args === "ON");
+			autocq_client_running = (args === "ON");
 			break;
 		case 'MODE':
 			mode_set(args);

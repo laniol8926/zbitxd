@@ -677,6 +677,16 @@ struct field main_controls[] = {
 		"ON/OFF", 0,0,0, FT8_CONTROL},
   { "#ft8_repeat", NULL, 1000, -1000, 50, 50, "FT8_REPEAT", 40, "5", FIELD_NUMBER,
     "", 1, 10, 1, FT8_CONTROL},
+	// Read-only, broadcast from ft8_autocq_start()/ft8_autocq_stop() --
+	// the AUTOCQ_CHECK checkbox (web/index.html) has zero server-side
+	// mirroring otherwise, so it always defaulted to unchecked on a
+	// fresh login/reconnect regardless of whether Auto CQ was actually
+	// still running server-side -- real gap, could show "off" to an
+	// operator while the radio was genuinely still calling CQ
+	// autonomously. Client never sends this field; it's display-only,
+	// same pattern as #ft8_repeat_count/#ft8_tx_pending above.
+  { "#ft8_autocq_running", NULL, 1000, -1000, 50, 50, "FT8_AUTOCQ_RUNNING", 40, "OFF", FIELD_TOGGLE,
+    "ON/OFF", 0,0,0, FT8_CONTROL},
 	// Read-only countdown, broadcast from ft8_poll()'s single decrement
 	// point every time ft8_repeat changes -- lets the operator see how
 	// many repeats are left of whatever FT8_REPEAT governs (a CQ call,
@@ -1399,10 +1409,25 @@ void enter_qso(){
 		return;
 	}
  
-	if (logbook_count_dup(field_str("CALL"), 60)){
-		printf("Duplicate log entry not accepted for %s within two minutes of last entry of %s.\n", callsign, callsign);
+	// Real report, live: enter_qso() runs again every time the other
+	// station re-sends RR73/RRR because they never received our closing
+	// 73 -- ft8_process()'s RR73/RRR branch (modem_ft8.c) has no cap on
+	// how many times that can happen, so this dedup window is the only
+	// thing standing between a slow/stuck ping-pong and a genuine
+	// duplicate row in the logbook. 60s was too short: if the other
+	// station's repeats land more than a minute apart (plausible -- real
+	// propagation delays, a retry only every other 15s FT8 cycle, or
+	// just a slow retry cadence), this check found nothing recent enough
+	// and logbook_add() ran again for the same contact. Widened to 5
+	// minutes -- comfortably covers any realistic repeat cycle. User's
+	// own call: not a permanent per-station lock (deliberately time-
+	// based, not tracking "this exact exchange" indefinitely), since a
+	// real re-work of the same station shortly after is something the
+	// user does want to allow.
+	if (logbook_count_dup(field_str("CALL"), 300)){
+		printf("Duplicate log entry not accepted for %s within five minutes of last entry of %s.\n", callsign, callsign);
 		return;
-	}	
+	}
 	logbook_add(get_field("#contact_callsign")->value, 
 		get_field("#rst_sent")->value, 
 		get_field("#exchange_sent")->value, 

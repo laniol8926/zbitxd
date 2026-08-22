@@ -2077,6 +2077,10 @@ void ft8_repeat_reset(){
 void ft8_autocq_stop(){
 	ft8_autocq_running = false;
 	ft8_autocq_resume_pending = false;
+	// See #ft8_autocq_running's own comment in sbitx_daemon.c's field
+	// table -- keeps a reconnecting/newly-logging-in client's checkbox
+	// honest about whether this is genuinely still running server-side.
+	set_field("#ft8_autocq_running", "OFF");
 }
 
 // Arms Auto CQ mode: clicking TX Enabled while idle with FT8_AUTO ==
@@ -2087,5 +2091,6 @@ void ft8_autocq_stop(){
 void ft8_autocq_start(){
 	ft8_autocq_running = true;
 	ft8_autocq_resume_pending = false;
+	set_field("#ft8_autocq_running", "ON");
 	queue_cq_call();
 }

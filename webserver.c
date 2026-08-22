@@ -18,6 +18,23 @@ static const char *s_web_root = SHAREDIR "/web";
 static char session_cookie[100];
 static struct mg_mgr mgr;  // Event manager
 
+// Real report, user's own framing: this app is single-control-operator
+// only (one session_cookie, period -- see web_despatcher()'s own check),
+// but nothing at all ran when that one session's connection dropped --
+// a network failure, a locked phone, a closed tab, all left Auto CQ (and
+// any other in-flight/queued transmission) running completely unattended
+// server-side, indefinitely, with no operator present to stop it. That's
+// not a UI inconvenience, it's a real regulatory problem (unattended
+// automatic transmission without a control operator present) -- "some
+// hams would love that... set repeats to 9999, go to bed, wake up to 900
+// QSOs logged" is exactly the failure mode this exists to prevent, not
+// enable. Tracks which single connection is the currently-authenticated
+// one (set in do_login(), matching the single-session design already in
+// place) so fn()'s MG_EV_CLOSE/MG_EV_ERROR handler can tell whether the
+// connection that just dropped was genuinely the operator's, not some
+// unrelated/failed connection attempt that never even logged in.
+static struct mg_connection *authenticated_conn = NULL;
+
 static void web_respond(struct mg_connection *c, char *message){
 	mg_ws_send(c, message, strlen(message), WEBSOCKET_OP_TEXT);
 }
@@ -76,6 +93,14 @@ static void do_login(struct mg_connection *c, char *key){
 	set_field("#ft8_auto", "OFF");
 
 	sprintf(session_cookie, "%x", rand());
+	// See authenticated_conn's own comment -- this is what lets a
+	// disconnect of *this* connection specifically (not some unrelated
+	// one) trigger the safety stop in fn()'s MG_EV_CLOSE/MG_EV_ERROR
+	// handler. A fresh login from a new device is a deliberate handoff to
+	// a new, present operator, not the unattended case this guards
+	// against -- deliberately not stopping Auto CQ here, just retargeting
+	// which connection is being watched.
+	authenticated_conn = c;
 	char response[100];
 	sprintf(response, "login %s", session_cookie);
 	web_respond(c, response);
@@ -262,10 +287,21 @@ static void fn(struct mg_connection *c, int ev, void *ev_data, void *fn_data) {
   if (ev == MG_EV_OPEN) {
     // c->is_hexdumping = 1;
 	} else if (ev == MG_EV_ERROR || ev == MG_EV_CLOSE){
-//		if (ev == MG_EV_ERROR)
-//			printf("closing with MG_EV_ERROR : ");
-//		if (ev = MG_EV_CLOSE)
-//			printf("closing with MG_EV_CLOSE : ");
+		// Real safety fix -- see authenticated_conn's own comment. Only
+		// the currently-authenticated connection dropping triggers this;
+		// an unrelated/never-logged-in connection erroring out or closing
+		// is routine (a stray HTTP request, a browser tab that never
+		// bothered to log in) and must not disturb a real, separate
+		// active session. No grace period, no "give it a second to
+		// reconnect" -- the whole point is that automatic transmission
+		// must not continue even briefly with no operator connected, so
+		// this fires the instant the connection is gone, not after some
+		// timeout.
+		if (c == authenticated_conn){
+			printf("Operator's connection closed/errored -- stopping any automatic transmission (Auto CQ, queued replies) for safety.\n");
+			authenticated_conn = NULL;
+			abort_tx();
+		}
   } else if (ev == MG_EV_HTTP_MSG) {
     struct mg_http_message *hm = (struct mg_http_message *) ev_data;
     if (mg_http_match_uri(hm, "/websocket")) {
