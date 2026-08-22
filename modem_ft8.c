@@ -75,6 +75,23 @@ static bool ft8_tx1st = true;
 // needs to go out first, so it's deferred to the next idle poll instead.
 static bool ft8_autocq_running = false;
 static bool ft8_autocq_resume_pending = false;
+// Real report, live (2026-08-22): the RX Frequency panel (client) switched
+// to the CQ panel the instant the operator's closing "73" started sending,
+// not once it actually finished -- because enter_qso()/call_wipe() used to
+// run synchronously right where the closing "73" gets queued (ft8_tx_3f()
+// only enqueues it; the real over-the-air transmission is the *next* TX
+// slot), logging/clearing the exchange before any RF for it had even gone
+// out. Also silently broke the "other station didn't get my 73, re-sends
+// RR73, I should be able to see that exchange again" case: call_wipe()
+// already having run meant CALL was empty by the time a resend's RR73
+// arrived, so the client's own #CALL-gated re-display of RX Frequency
+// never got the state it needed to recognize the resend as the same
+// exchange. Same bridge-the-gap pattern as ft8_autocq_resume_pending right
+// above: set here, consumed by ft8_poll() once ft8_repeat naturally
+// reaches 0 (the courtesy "73" -- always a single shot, see its own
+// comment -- has actually finished transmitting), not the instant it's
+// merely queued.
+static bool ft8_qso_log_pending = false;
 
 static const int kMin_score = 10; // Minimum sync score threshold for candidates
 // Matched to ft8_lib's own reference demo tool (ft8_lib/demo/decode_ft8.c
@@ -1466,8 +1483,24 @@ void ft8_poll(int tx_is_on){
 		return;
 	}
 
-	if (!ft8_repeat && !ft8_autocq_resume_pending)
+	// ft8_qso_log_pending must be in this guard too, or a courtesy "73"
+	// sent with Auto CQ *not* running (ft8_autocq_resume_pending always
+	// false then) would return above before ever reaching the block below
+	// that actually consumes it -- the deferred log/call-wipe would just
+	// never happen.
+	if (!ft8_repeat && !ft8_autocq_resume_pending && !ft8_qso_log_pending)
 		return;
+
+	// See ft8_qso_log_pending's own comment: the courtesy "73" queued in
+	// ft8_process()'s RR73/RRR branch has now actually finished
+	// transmitting (ft8_repeat naturally reached 0, and tx_is_on's own
+	// early return above means we're not still mid-transmission) --
+	// log/clear the exchange now, not when it was merely queued.
+	if (!ft8_repeat && ft8_qso_log_pending){
+		ft8_qso_log_pending = false;
+		enter_qso();
+		call_wipe();
+	}
 
 	// Auto CQ: the QSO that just finished (ft8_process()'s "73"/"RR73"
 	// branches) scheduled this instead of re-queuing CQ directly there,
@@ -1997,8 +2030,19 @@ void ft8_process(char *message, ftx_operation operation){
 	//we don't check it against any fields of the logger
 	if (!strcmp(m3, "RR73") || !strcmp(m3, "RRR")){
 		ft8_tx_3f(m2, mycall, "73");
-		enter_qso();
-		call_wipe();
+		// Real report, live (2026-08-22): enter_qso()/call_wipe() used to
+		// run right here, synchronously with *queueing* the closing "73"
+		// above -- not with it actually going out over the air (that's
+		// the next TX slot). Logging/clearing the exchange this early
+		// switched the client's display away from RX Frequency before the
+		// operator had even started transmitting the courtesy "73", and
+		// (since CALL was already wiped) left no way for a genuine resend
+		// -- the other station repeating RR73/RRR because they missed our
+		// first "73" -- to be recognized as the same exchange either.
+		// Deferred instead (see ft8_qso_log_pending's own comment); picked
+		// up by ft8_poll() once ft8_repeat naturally reaches 0, i.e. once
+		// this single-shot "73" has actually finished transmitting.
+		ft8_qso_log_pending = true;
 		// Real report (earlier): courtesy "73" used to be single-shot
 		// only (no repeat), so if it never reached the other station,
 		// they were left waiting on a "73" that would never arrive.
