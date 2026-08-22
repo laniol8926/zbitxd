@@ -1034,8 +1034,28 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
             char text[FTX_MAX_MESSAGE_LENGTH];
 			ftx_message_offsets_t spans;
             ftx_message_rc_t unpack_status = ftx_message_decode(&message, &hash_if, text, &spans);
-            if (unpack_status != FTX_MESSAGE_RC_OK)
+            if (unpack_status != FTX_MESSAGE_RC_OK){
+                // Real report, live (2026-08-22): Band Activity showed a row
+                // with a real time/DT/SNR/frequency label and nothing after
+                // it -- CRC passed (this candidate already made it into
+                // found_empty_slot), but ftx_message_decode() itself failed
+                // to render *this* payload to text (same family of failure
+                // already guarded against inside ftx_decode_candidate_osd()
+                // for i3=6/7/3, see decode.c's own comment -- but that guard
+                // only covers OSD's *own* internal unpack call; this is a
+                // second, separate unpack of the same message.payload done
+                // unconditionally for every candidate regardless of which
+                // decode path found it, and had no equivalent check). This
+                // used to just log and fall through anyway with `text` left
+                // however ftx_message_decode() happened to leave it (empty,
+                // in practice) -- displaying, logging, and QSO-processing a
+                // message with no actual content. Skipping display entirely
+                // now; the SIC subtraction and hashtable/dedup bookkeeping
+                // above already ran and are left as-is (still correct
+                // regardless of whether this candidate's text can be shown).
                 LOG(LOG_DEBUG, "Error [%d] while unpacking!", (int)unpack_status);
+                continue;
+            }
 
 			//message_add(char *mode, unsigned int frequency, int outgoing, char *message);
 			// TODO if allowed by settings:
