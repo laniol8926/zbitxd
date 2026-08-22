@@ -1056,6 +1056,21 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
                 LOG(LOG_DEBUG, "Error [%d] while unpacking!", (int)unpack_status);
                 continue;
             }
+            // Real report, live (2026-08-22), same incident as the guard
+            // just above -- that one wasn't the whole story. Confirmed by
+            // reading ftx_message_decode() itself: FTX_MESSAGE_TYPE_FREE_TEXT
+            // and FTX_MESSAGE_TYPE_TELEMETRY *unconditionally* return
+            // FTX_MESSAGE_RC_OK regardless of what they actually produced --
+            // the unpack_status check above can never catch a bad decode of
+            // either type. ftx_message_decode_free() in particular ends with
+            // strcpy(text, trim(c14)) -- a garbage/CRC-aliased payload of
+            // this type can legitimately trim down to nothing (e.g. an
+            // all-blank c14), leaving text empty with rc still OK. Confirmed
+            // this was still reaching the client after the first guard went
+            // out: the label showed real time/DT/SNR/frequency, still
+            // nothing after it.
+            if (text[0] == 0)
+                continue;
 
 			//message_add(char *mode, unsigned int frequency, int outgoing, char *message);
 			// TODO if allowed by settings:
