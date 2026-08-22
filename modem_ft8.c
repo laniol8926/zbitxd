@@ -1623,6 +1623,23 @@ void ft8_poll(int tx_is_on){
 					// stale-CALL problem already documented on the "73"
 					// branch above, just a different path that hadn't been
 					// covered yet.
+					// Real report, live (2026-08-22), user's own protocol
+					// point: the other station typically logs their side
+					// and moves on the moment *they* send RR73 -- they
+					// often never send a confirming "73" back at all, so
+					// our own closing "73" repeats exhausting naturally
+					// (ft8_repeat reaching 0 right here, with nothing ever
+					// heard back) is the *normal*, expected end for it, not
+					// a rare edge case. If that's what's happening when
+					// this dead-end fires, ft8_repeat has just gone from 1
+					// to 0 in this same pass, before ft8_poll()'s own
+					// top-of-function check (which only sees the *previous*
+					// poll's value) ever gets a chance to consume
+					// ft8_qso_log_pending -- call_wipe() below would
+					// otherwise silently discard a real, complete QSO the
+					// same way abort_tx() used to. See
+					// ft8_finalize_pending_qso()'s own comment.
+					ft8_finalize_pending_qso();
 					call_wipe();
 					ft8_autocq_resume_pending = true;
 				}
@@ -2143,6 +2160,27 @@ void ft8_suspend(){
 
 void ft8_resume(){
 	ft8_tx_suspended = 0;
+}
+
+// Real report, live (2026-08-22): manually clicking TX Enabled to abort
+// while the closing "73" was still repeating (see ft8_qso_log_pending's
+// own comment) silently discarded a genuinely-complete QSO -- abort_tx()
+// (sbitx_daemon.c) calls call_wipe() directly, with no knowledge of this
+// file's own static ft8_qso_log_pending, wiping CALL/SENT/RECV before
+// ft8_poll() ever got a chance to consume the pending flag and log it.
+// The exchange itself (their RR73 received, our "73" sent at least once)
+// was real and complete by that point -- only the *extra* repeat
+// attempts were what got cut short by the abort, which is exactly what
+// an operator aborting mid-repeat actually means ("I'm confident they
+// got it, stop resending"), not "throw away what already happened."
+// abort_tx() calls this before its own call_wipe() so a pending log
+// still goes through with the still-valid fields, instead of being
+// silently lost to whichever runs first.
+void ft8_finalize_pending_qso(){
+	if (!ft8_qso_log_pending)
+		return;
+	ft8_qso_log_pending = false;
+	enter_qso();
 }
 
 int ft8_is_repeating(){

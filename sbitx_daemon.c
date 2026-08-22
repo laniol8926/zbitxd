@@ -1846,6 +1846,13 @@ void abort_tx(){
 	// non-terminating contexts that must NOT stop Auto CQ -- see
 	// ft8_autocq_stop()'s comment in modem_ft8.c).
 	ft8_autocq_stop();
+	// Real report, live: manually aborting while the closing "73" was
+	// still repeating (see ft8_finalize_pending_qso()'s own comment,
+	// modem_ft8.c) silently discarded a genuinely-complete QSO -- the
+	// exchange itself was real and done; only the extra repeat attempts
+	// were what the abort actually meant to cut short. Must run before
+	// call_wipe() below, or there's nothing left for it to log.
+	ft8_finalize_pending_qso();
 	// Also clear the logger's CALL field -- a manually-aborted QSO
 	// attempt (e.g. clicked the wrong station, gave up) otherwise
 	// leaves it holding that station's callsign, which permanently

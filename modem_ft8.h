@@ -36,6 +36,12 @@ void ft8_autocq_stop();
 // resume normally on its own next opportunity.
 void ft8_suspend();
 void ft8_resume();
+// Logs a QSO whose closing "73" was still repeating (ft8_qso_log_pending,
+// modem_ft8.c) if one is pending, using whatever CALL/exchange fields are
+// still valid right now -- a no-op otherwise. Must be called before any
+// call_wipe() that could otherwise silently discard it; see abort_tx()
+// (sbitx_daemon.c) for the real case this exists for.
+void ft8_finalize_pending_qso();
 // TEMPORARY, task #25 SIC validation only -- remove once done.
 int ft8_decode_file(const char *path);
 
