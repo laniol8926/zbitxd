@@ -842,8 +842,14 @@ input[type="checkbox"] {
    height:auto + flex:1 fills whatever height #pan_and_ft8list_row's
    own align-items:stretch gives the column (which matches
    #pan_adapter's real height automatically) -- no fixed number to
-   re-guess if that changes later. .sbitx-list-box below still scrolls
-   internally on a busy band regardless of how tall this ends up. */
+   re-guess if that changes later. min-height:0 is required alongside
+   flex:1 for that to actually hold once the list has enough entries to
+   want to grow past it -- real report: without it, a flex item's
+   min-height defaults to auto (its own content's size), which won
+   over the stretched height and pushed the whole page taller/scrolling
+   instead of letting .sbitx-list-box's own overflow:auto scroll
+   internally the way it was meant to (see #ft8_list_column's own
+   comment -- same fix needed one level out too). */
 .sbitx-list-container {
 	display: inline-flex;
 	flex-direction: column;
@@ -851,6 +857,7 @@ input[type="checkbox"] {
 	font-size: 10pt;
 	height: auto;
 	flex: 1;
+	min-height: 0;
 	width: 320px;
 	border: none;
 }
@@ -1083,10 +1090,37 @@ input[type="checkbox"] {
 	   handler already correctly flip this to flex at the right time
 	   (see index.html), same as every other mode-panel. */
 	display: none;
-	flex-flow: row wrap;
+	/* Real bug, confirmed live via CDP (2026-08-22): was `row wrap`.
+	   Band Activity/CQ Panel/RX Frequency's list never got its own
+	   scrollbar -- the whole page grew and scrolled instead once a
+	   panel had enough decodes. Root cause, verified by direct
+	   measurement, not just reasoning: `align-items:stretch` in a
+	   *wrapping* flex container only stretches items to fill their
+	   flex LINE -- but the line's own cross size is computed first,
+	   from the tallest item's unclamped natural content size, same as
+	   if stretch weren't in play at all. Since only one
+	   .sbitx-list-container is ever visible at a time (solo case), that
+	   single line's height came out however tall the decode list had
+	   grown to, and *then* got "stretched" to match that already-
+	   oversized line -- min-height:0 on the item never had anything
+	   smaller to stretch it down TO. `nowrap` forces genuine single-
+	   line behavior, where stretch clamps the item to the container's
+	   *actual* height regardless of content, which is what finally lets
+	   .sbitx-list-box's own overflow:auto take over and scroll
+	   internally. Confirmed CQ+RX (the two-panel "expanded" case) still
+	   sit side by side under nowrap -- each is calc(50% - 8px), which
+	   was never close to needing to wrap in the first place. */
+	flex-flow: row nowrap;
 	flex: 0 0 38%;
 	width: auto;
 	min-width: 0;
+	/* Real report: without this, a flex item's min-height defaults to
+	   auto (its own content's natural size) instead of the height
+	   align-items:stretch is trying to give it. Necessary but --
+	   turned out -- not sufficient on its own; see the nowrap comment
+	   above for the other half of this fix. Same fix applied to
+	   .sbitx-list-container itself, one level in. */
+	min-height: 0;
 }
 @media (max-width: 900px) {
 	#wsjtx-cq { order: 1; }

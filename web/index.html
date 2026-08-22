@@ -1170,6 +1170,7 @@ function resize_ui(){
 	var maincontrols_h = el("maincontrols").offsetHeight;
 	if (maincontrols_h > 0)
 		el("main").style.marginTop = maincontrols_h + "px";
+	sync_pan_row_height();
 }
 
 // Static 0-3000Hz frequency scale, drawn once and only redrawn on
@@ -1340,6 +1341,61 @@ function spectrum_update(update){
 // (resize_ui(), mode_set()), since a canvas's drawing surface resets
 // to blank whenever its width/height attributes are set, even to the
 // same pixel dimensions it already had.
+// Real report, live, root-caused via direct CDP measurement (not just
+// reasoning -- two earlier attempts here that looked correct on paper
+// both turned out wrong in practice): Band Activity/CQ Panel/RX
+// Frequency's own list (.sbitx-list-box, overflow:auto) never actually
+// showed its own scrollbar -- the whole page grew and scrolled instead
+// as decodes accumulated, on both the wide (row) and narrow (stacked
+// column) layouts.
+//
+// Wide/side-by-side case: #pan_and_ft8list_row is flex-direction:row,
+// so #ft8_list_column's height is set by align-items:stretch off the
+// row's own cross size -- but the row itself has no explicit height
+// anywhere in CSS, so it has nothing definite to stretch against
+// (content-driven sizing all the way up, including however long the
+// decode list has grown). #pan_adapter's own height, by contrast, IS
+// real and definite by this point (its canvases already got their
+// final heights) -- reading it and applying it to the row gives the
+// whole chain a genuine anchor (plus #ft8_list_column's own CSS
+// nowrap fix -- see its rule's comment -- for align-items:stretch to
+// actually clamp to that anchor instead of sizing its line to content).
+// Measuring #pan_adapter's height must happen with #ft8_list_column's
+// own height temporarily pinned to 0 first -- #pan_adapter is *also*
+// stretched by the same row, so with #ft8_list_column still at its
+// old (potentially huge, content-driven) height, #pan_adapter reads
+// that same inflated number right back, poisoning the whole
+// measurement into feeding back the bug it's supposed to fix.
+//
+// Narrow/stacked case (<900px, media query flips the row to
+// flex-direction:column): height there is the row's *main* axis, so
+// #ft8_list_column's size is governed by its own flex-grow/shrink
+// (both 0) instead of stretch -- pinning the row's height does nothing
+// useful here, #ft8_list_column needs its own explicit height instead,
+// computed as whatever vertical space is actually left below its own
+// top (already correctly reflects wherever it lands visually, waterfall
+// above it via order:-1, regardless of DOM order).
+function sync_pan_row_height(){
+	var row = el("pan_and_ft8list_row");
+	var col = el("ft8_list_column");
+	var side_by_side = window.innerWidth >= 900; // same breakpoint as style.css's own media query
+
+	var prev_col_height = col.style.height;
+	col.style.height = "0px";
+	row.style.height = "";
+	var pan_h = el("pan_adapter").offsetHeight;
+	col.style.height = prev_col_height;
+
+	if (side_by_side){
+		row.style.height = pan_h > 0 ? (pan_h + "px") : "";
+		col.style.height = "";
+	} else {
+		row.style.height = "";
+		var avail = window.innerHeight - col.getBoundingClientRect().top - 8;
+		col.style.height = avail > 50 ? (avail + "px") : "";
+	}
+}
+
 function sync_wf_overlay_size(){
 	var wf = el("waterfall");
 	var ov = el("waterfall_overlay");
@@ -4442,6 +4498,7 @@ function mode_set(new_mode){
 	set_canvas_width(el("spectrum"), pan_adapter_width);
 	if (last_wf_row != null)
 		spectrum_update(last_wf_row);
+	sync_pan_row_height();
 //	if (window[new_mode+"_open"] == undefined)
 //		return;
 //	window[new_mode + "_open"]();
