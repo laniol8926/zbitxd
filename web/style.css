@@ -203,6 +203,16 @@ input[type="checkbox"] {
 
 #tx_meters {
 	position: absolute;
+	/* Explicit anchor -- see #pan_adapter's own comment on why relying on
+	   the browser's "static position" fallback (no top/left at all) broke
+	   once the surrounding layout moved #pan_adapter around the page.
+	   0/0 covers #spectrum exactly, matching #tx_meters' own hardcoded
+	   200x60 vs. #spectrum's 60px height (#spectrum is normally wider,
+	   200px covers its left portion where the meters need to be seen --
+	   unchanged from before, this is only pinning the position that was
+	   previously left to chance). */
+	top: 0;
+	left: 0;
 	background-color: #ff471a;
 	padding: 10px;
 	width: 200px;
@@ -799,6 +809,23 @@ input[type="checkbox"] {
 	   guards against for its own content. */
 	flex: 1;
 	min-width: 0;
+	/* Real report, live (2026-08-23): "the entire spectrum display went
+	   black" during TX -- #tx_meters (the Watts/SWR readout, direct
+	   child here, meant to cover #spectrum during TX -- see its own CSS
+	   comment) is position:absolute with no top/left, which resolves
+	   against the nearest *positioned* ancestor. #pan_adapter never had
+	   one, so it fell back to browser "static position" placement --
+	   wherever it would have sat in normal flow, a placement that's only
+	   as reliable as the surrounding layout staying still. Tonight's
+	   #pan_and_ft8list_row restructuring moved #pan_adapter itself
+	   around the page, and #tx_meters' fallback position never tracked
+	   that move -- so instead of covering #spectrum with the meters
+	   readout, it just showed #spectrum's own plain black background
+	   with nothing drawn to it (frozen/not updated during TX, same as
+	   the waterfall). Anchoring #tx_meters to *this* element directly
+	   (see its own now-explicit top/left) fixes it regardless of
+	   wherever the surrounding row layout puts #pan_adapter as a whole. */
+	position: relative;
 }
 
 
