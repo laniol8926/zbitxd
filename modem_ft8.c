@@ -1192,8 +1192,35 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 			// CQ's server-only auto-response path relies purely on this
 			// ordering. Swapped so CALL is set before the client ever
 			// sees the text that depends on it.
-			if (my_call_found)
-				ft8_process(buf, FTX_CONTINUE_QSO);
+			//
+			// Real report, live (2026-08-23): once CALL-set-before-push was
+			// fixed, a *different* real bug surfaced -- every incoming
+			// message actually directed at us (signal reports, RR73) went
+			// missing from RX Frequency, while unrelated band traffic and
+			// our own TX echoes displayed fine. Root cause: ft8_process()
+			// calls ft8_message_tokenize(), which uses strtok(message, " \r\n")
+			// -- a destructive, in-place tokenizer that punches a NUL byte
+			// into the buffer at every delimiter it crosses. buf here is
+			// the *same* buffer write_console_semantic() uses right below,
+			// so by the time it runs, buf (read from its start) had already
+			// been shredded down to just its first token (the timestamp) --
+			// a ~7-char stub, comfortably under the client's own >30-char
+			// filter (update_data(), index.html), so it silently vanished
+			// there. Confirmed live: KP2B/KE2ALP/K0TT/K0JV all logged
+			// correctly (the QSO state machine reads the separately-
+			// tokenized m1/m2/m3 globals, never this buf), yet none of
+			// their reports ever reached RX Frequency. Only messages
+			// directed at us hit this at all (my_call_found gates the
+			// ft8_process() call), which is exactly why unrelated traffic
+			// was unaffected. Fix: hand ft8_process() a private copy so its
+			// internal strtok() can't touch the buffer write_console_
+			// semantic() still needs.
+			if (my_call_found) {
+				char buf_copy[sizeof(buf)];
+				strncpy(buf_copy, buf, sizeof(buf_copy));
+				buf_copy[sizeof(buf_copy) - 1] = 0;
+				ft8_process(buf_copy, FTX_CONTINUE_QSO);
+			}
 			write_console_semantic(buf, sem, sem_i);
 			n_decodes++;
         }
