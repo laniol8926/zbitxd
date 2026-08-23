@@ -3032,6 +3032,11 @@ void do_control_action(char *cmd){
 		//empty the text buffer
 		modem_abort();
 		tx_off();
+		// Same class of bug already fixed in abort_tx()/ft8_on_start_qso()
+		// -- ESC is another abort/cancel action a user could reflexively
+		// hit while a closing "73" was still repeating in the background,
+		// and would otherwise silently discard that already-complete QSO.
+		ft8_finalize_pending_qso();
 		call_wipe();
 		field_set("TEXT", "");
 		modem_abort();
