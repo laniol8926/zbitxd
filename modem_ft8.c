@@ -2086,29 +2086,27 @@ void ft8_process(char *message, ftx_operation operation){
 		// up by ft8_poll() once ft8_repeat naturally reaches 0, i.e. once
 		// this single-shot "73" has actually finished transmitting.
 		ft8_qso_log_pending = true;
-		// Real report (earlier): courtesy "73" used to be single-shot
-		// only (no repeat), so if it never reached the other station,
-		// they were left waiting on a "73" that would never arrive.
-		// ft8_tx_3f() above already applies the full FT8_REPEAT count on
-		// its own (same as any other reply) -- no override needed here.
-		//
-		// Previously capped to a single transmission (ft8_repeat = 1)
-		// after a real report: "I am continuing to send the ... 73
-		// message after the qso had been logged. It's caught in a loop"
-		// -- confirmed live, had to manually abort every time. That
-		// symptom was really a side effect of enter_qso()/call_wipe()
-		// running immediately (right where this comment block used to
-		// sit) while the repeats kept going for a while *after* --
-		// logged, yet still transmitting, looked exactly like stuck/
-		// looping. Now that logging is genuinely deferred (see
-		// ft8_qso_log_pending above) until the repeats actually finish
-		// (or get cut short by ft8_abort() in the "73"-received branch
-		// above, the moment their own confirmation arrives), that
-		// mismatch is gone -- restoring the full count is safe again,
-		// and is what the user actually wants: RX Frequency stays
-		// visible for the operator to see for as long as the closing
-		// "73" is still potentially going back and forth, not just its
-		// first transmission.
+		// Real report, live (2026-08-23), user's own protocol insight:
+		// a real closing "73" was earlier restored to the full FT8_REPEAT
+		// count (see this branch's own git history), reasoning that RX
+		// Frequency should stay visible for as long as the closing "73"
+		// might still be going back and forth. In practice this made
+		// nearly *every* QSO tie up the UI for the full repeat window
+		// (up to several minutes): WSJT-X and similar software commonly
+		// treat sending RR73/RRR as "already logged, moving on" on the
+		// *other* station's end -- confirmed live, repeatedly, stations
+		// calling CQ again within seconds of sending us RR73 -- so our
+		// own "stop early once their real 73 is heard" condition rarely
+		// if ever fires, and the full repeat count runs to completion
+		// every time. User's own call: send our courtesy "73" once, log,
+		// and move on -- "after that it becomes the other station's
+		// choice to log the QSO or not". Capped back to a single
+		// transmission; ft8_qso_log_pending (see its own comment) still
+		// defers the actual log until that one transmission genuinely
+		// finishes, so this doesn't reintroduce the original "switches
+		// before I've even started sending" bug -- it just shrinks the
+		// window from several minutes back down to one ~15s slot.
+		ft8_repeat = 1;
 		// Auto CQ: our courtesy "73" above still needs to actually go
 		// out first -- resume gets picked up once all of its repeats
 		// finish and ft8_repeat naturally reaches 0 (see ft8_poll()).
