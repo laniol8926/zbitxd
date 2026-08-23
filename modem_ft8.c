@@ -1884,12 +1884,33 @@ void ft8_on_start_qso(char *message){
 
 void ft8_on_signal_report(){
 	set_call_field(m2);
+	// Real bug, live (2026-08-23), confirmed via journal trace of a real
+	// stuck exchange: this used to unconditionally send a fresh reply
+	// every single time this function ran, with no check for whether the
+	// incoming message was a genuine new report or just a duplicate
+	// decode of one we'd already replied to (the other station repeating
+	// because they haven't heard our own reply yet -- completely normal,
+	// same reason our own replies here go through ft8_tx_3f()'s repeat
+	// mechanism). Each duplicate re-triggered a *fresh* RR73/report send,
+	// resetting our own repeat sequence before it could ever finish --
+	// neither side's repeat ever won the race, so the exchange never
+	// closed on its own. Confirmed live: DL5BWG and us traded R-22/RR73
+	// back and forth for over a minute while a completely different
+	// station (K5AHL) got silently ignored ("ignoring stale-exchange
+	// message") the whole time, since CALL stayed locked to DL5BWG.
+	// Skipping when RECV already matches what we're about to set it to
+	// -- a real new report always changes RECV, so this only ever
+	// catches genuine duplicates of an exchange step already handled.
 	if (m3[0] == 'R'){
 		//skip the 'R'
+		if (!strcmp(field_str("RECV"), m3 + 1))
+			return;
 		field_set("RECV", m3+1);
 		ft8_tx_3f(call, mycall, "RR73");
 	}
 	else{
+		if (!strcmp(field_str("RECV"), m3))
+			return;
 		field_set("RECV", m3);
 		// in case ft8_on_start_qso() was not called: ensure that we send some numeric signal report
 		if (!field_str("SENT")[0]) {
