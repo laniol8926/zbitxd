@@ -1807,6 +1807,20 @@ static void set_reply_tx1st(int msg_second)
 void ft8_on_start_qso(char *message){
 	modem_abort();
 	tx_off();
+	// Real report, live (2026-08-23): starting a brand-new exchange
+	// (manual click or auto-answer alike -- see this function's own call
+	// sites) while a *previous* exchange's closing "73" was still
+	// repeating (ft8_qso_log_pending, full FT8_REPEAT count now applies
+	// -- see that flag's own comment) wiped CALL/SENT/RECV here before
+	// that pending log ever got a chance to fire, the same way abort_tx()
+	// and the Auto CQ give-up path already needed fixing for. Confirmed
+	// live: RR73 from one station, closing "73" queued and still
+	// repeating, operator moves on to answer a different station calling
+	// -- the first station's real, complete QSO was silently discarded.
+	// modem_abort()/tx_off() above already stop the old repeat sequence
+	// cleanly; this just needs to log it before reusing CALL for the new
+	// one.
+	ft8_finalize_pending_qso();
 	call_wipe();
 	set_reply_tx1st(msg_time % 100);
 	set_field_int("rx_pitch", rx_pitch);
