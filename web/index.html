@@ -3349,7 +3349,22 @@ function logger_abort(event){
 // immediately stop transmitting i can just click on the red box and
 // the transmission stops."
 function tx_enabled_indicator_clicked(){
-	if (!cq_active){
+	// Real report, live (2026-08-23): clicked TX Enabled specifically to
+	// disarm a running Auto CQ session -- instead, "TX enabled
+	// re-enabled itself" and a QSO started anyway. Root cause: this used
+	// to gate purely on cq_active (mirrors the server's own moment-to-
+	// moment TXACTIVE, which is *supposed* to flicker false in the brief
+	// gaps between individual CQ transmissions -- see ft8_is_repeating()'s
+	// own comment, modem_ft8.c -- that's expected, not a bug on its own).
+	// A click landing in exactly one of those gaps read as "idle, arm a
+	// fresh session" instead of "already running, stop it" -- silently
+	// re-confirming the very session the operator was trying to cancel.
+	// autocq_client_running/autoans_running are session-level flags (set
+	// once when a whole Auto CQ/Auto Answer run starts, cleared only when
+	// it genuinely ends) that don't flicker between individual
+	// transmissions the way cq_active does -- checking them too means a
+	// click during an armed session's gap still correctly aborts it.
+	if (!cq_active && !autocq_client_running && !autoans_running){
 		// Auto CQ arm: clicking TX Enabled while idle with Auto CQ
 		// selected queues the first CQ call and starts the
 		// repeat-until-answered-or-aborted loop -- see
