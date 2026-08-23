@@ -3180,8 +3180,24 @@ function FT8_new_message(text, style){
 	var current_call = el("CALL") ? el("CALL").value.toUpperCase() : "";
 	var other_party = ft8_message_other_party(text, mycallsign);
 	var belongs_to_active_exchange = current_call && other_party === current_call;
-	if (belongs_to_active_exchange){
+	// Auto CQ: while calling CQ with nobody answering yet (no real
+	// exchange started, current_call still empty), also show our own
+	// outgoing CQ transmission in RX Frequency -- otherwise there was
+	// no confirmation anywhere that a transmission had actually gone
+	// out. User's own ask, live: "I am transmitting and it should show
+	// up there." Deliberately kept separate from belongs_to_active_
+	// exchange below (not folded into it) so it can't trigger the
+	// QSO_LOCK send just after -- locking the server's candidate search
+	// to our own TX frequency before anyone has even answered would
+	// narrow Auto CQ's own listening instead of helping it. The instant
+	// someone answers and CALL gets set, belongs_to_active_exchange
+	// itself takes over and this stops applying on its own.
+	var own_cq_while_idle = !current_call && style === "TX"
+		&& FT8_message_is_cq(text) && ft8_cq_message_callsign(text) === mycallsign;
+	if (belongs_to_active_exchange || own_cq_while_idle){
 		FT8_list_append("wsjtx-rx", text, style);
+	}
+	if (belongs_to_active_exchange){
 		// Real task #25 ask: narrow the server's own candidate search to
 		// this station's frequency while the QSO continues, so a weak
 		// reply from them can't lose a heap slot to unrelated band
@@ -3373,7 +3389,17 @@ function tx_enabled_indicator_clicked(){
 			autocq_client_running = true;
 			websocket_send("AUTOCQSTART");
 			qso_in_progress = true;
-			set_band_activity_hidden(true);
+			// Real report, live (2026-08-23): forcing Band Activity hidden
+			// right here, before anyone has even answered, left the whole
+			// panel area blank while Auto CQ repeated our own CQ -- "I am
+			// transmitting and it should show up there." Our own outgoing
+			// CQ only ever displays in Band Activity (FT8_new_message()
+			// appends every TX line there), so hiding it left nothing to
+			// show at all until a real exchange started. No hide call
+			// needed here: update_rx_panel_visibility()'s own has_content
+			// transition (see its own comment) already correctly hides
+			// Band Activity/CQ Panel the instant RX Frequency actually
+			// gets real content -- this just stopped jumping the gun.
 			return;
 		}
 		// Auto Answer arm: same deliberate manual-intervention
@@ -3384,7 +3410,8 @@ function tx_enabled_indicator_clicked(){
 			autoans_last_attempted_call = null;
 			autoans_pick_and_answer();
 			qso_in_progress = true;
-			set_band_activity_hidden(true);
+			// Same fix as Auto CQ above -- let the real content transition
+			// in update_rx_panel_visibility() drive this instead.
 			return;
 		}
 		// No-op otherwise (manual mode selected): TX Enabled has
@@ -5032,7 +5059,21 @@ function set_band_activity_hidden(hide){
 	// -- real bug otherwise: hide can be true purely from the manual
 	// Band Activity checkbox/preference, with no QSO happening at all
 	// (see qso_in_progress's own comment above for the full story).
-	var simplify_hide = qso_in_progress && simplify_during_qso_enabled;
+	//
+	// Real report, live (2026-08-23): with Auto CQ armed but nobody
+	// answering yet, the whole panel area went blank -- Band Activity
+	// force-hidden (hide=true), CQ Panel *also* hidden by this simplify
+	// shortcut, and RX Frequency empty (no exchange has actually
+	// started). Root cause: arming Auto CQ/Auto Answer sets
+	// qso_in_progress = true immediately, before any real exchange
+	// exists, so this shortcut fired on that alone -- CQ Panel is only
+	// genuinely "irrelevant" once RX Frequency actually has content to
+	// replace it with. Added that check directly: a manual click already
+	// populates RX Frequency (FT8_list_append()) before calling this, so
+	// that path is unaffected; Auto CQ/Auto Answer now correctly leave
+	// CQ Panel visible until a real reply actually lands there.
+	var rx_has_content = el("wsjtx-rx").querySelector("ol").firstElementChild !== null;
+	var simplify_hide = qso_in_progress && simplify_during_qso_enabled && rx_has_content;
 	el("wsjtx-cq").style.display = (hide && !simplify_hide) ? "" : "none";
 
 	// Widths/expanded-vs-solo state for whichever panels ended up
