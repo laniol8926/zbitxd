@@ -1170,10 +1170,31 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 			// set length of the last span (no next span, but null terminator in text)
 			if (span_i > 0)
 				sem[sem_i - 1].length = strlen(text + spans.offsets[span_i - 1]);
-			write_console_semantic(buf, sem, sem_i);
-
+			// Real report, live (2026-08-23): during Auto CQ, RX Frequency
+			// stayed empty for the message that actually triggered the
+			// auto-answer -- only showed content once the *other*
+			// station's next message arrived. Root cause: ft8_process()
+			// (which, for Auto CQ's own "someone answered my CQ" branch,
+			// sets CALL server-side for the very first time this
+			// exchange) used to run *after* write_console_semantic()
+			// pushed this same decoded text to the client. The client's
+			// own RX-Frequency gate (FT8_new_message(), web/index.html)
+			// requires #CALL to already match before appending anything
+			// -- but #CALL's field update and this console text arrive
+			// as two independent websocket messages, and the client
+			// processes them in the order they were sent. Console text
+			// first meant the client checked #CALL before the server had
+			// even decided to set it, missing the one message that
+			// should have opened the panel. A manual click or Auto
+			// Answer's own FT8_check path never hit this (see
+			// FT8_new_message()'s own comment: both already append
+			// directly, sidestepping the race entirely) -- only Auto
+			// CQ's server-only auto-response path relies purely on this
+			// ordering. Swapped so CALL is set before the client ever
+			// sees the text that depends on it.
 			if (my_call_found)
 				ft8_process(buf, FTX_CONTINUE_QSO);
+			write_console_semantic(buf, sem, sem_i);
 			n_decodes++;
         }
     }
