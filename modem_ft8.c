@@ -2141,6 +2141,16 @@ void ft8_process(char *message, ftx_operation operation){
 	//this maybe arriving after we have cleared the log
 	//we don't check it against any fields of the logger
 	if (!strcmp(m3, "RR73") || !strcmp(m3, "RRR")){
+		// Real report, live (2026-08-23), screenshot confirmed: the other
+		// station repeating RR73/RRR because they hadn't yet heard our
+		// first courtesy "73" re-triggered a *second* courtesy "73" --
+		// this branch had no dedup at all, unlike ft8_on_signal_report()
+		// just above (see its own comment, fixed in 127079d for the exact
+		// same class of ping-pong at an earlier exchange stage). Same
+		// fix: skip if we've already answered this exact stage.
+		if (!strcmp(field_str("RECV"), m3))
+			return;
+		field_set("RECV", m3);
 		ft8_tx_3f(m2, mycall, "73");
 		// Real report, live (2026-08-22): enter_qso()/call_wipe() used to
 		// run right here, synchronously with *queueing* the closing "73"
