@@ -3051,15 +3051,25 @@ function update_rx_panel_visibility(){
 	// Panel happened to already be visible (Band Activity hidden) right
 	// before a QSO started, it just stayed visible, now sitting directly
 	// on top of the newly-shown RX Frequency panel -- confirmed live,
-	// both genuinely overlapping and unreadable together. Enforcing
-	// exclusivity directly here, at the source of truth for "is RX
-	// Frequency actually showing something right now", is more robust
-	// than depending on qso_in_progress being freshly re-checked at the
-	// right moment elsewhere.
-	if (has_content){
+	// both genuinely overlapping and unreadable together.
+	//
+	// Real regression, caught immediately live: the first version of
+	// this fix force-hid both panels every time has_content was true --
+	// this function reruns on every new RX Frequency decode, so during a
+	// stuck/looping exchange (see ft8_on_signal_report()'s own fix,
+	// modem_ft8.c) it kept re-fighting the operator's own manual "Hide
+	// Band Activity" checkbox toggle, exactly the moment that manual
+	// workaround (checking Band Activity to spot a second caller) was
+	// most needed -- "unchecking the hide band activity box stopped
+	// working". Only enforce this on the real false->true transition
+	// (a QSO genuinely just starting), not on every subsequent call
+	// while it stays true -- an explicit later checkbox change is a
+	// deliberate operator choice, not something to keep overriding.
+	if (has_content && !wsjtx_rx_had_content){
 		el("wsjtx-activity").style.display = "none";
 		el("wsjtx-cq").style.display = "none";
 	}
+	wsjtx_rx_had_content = has_content;
 	update_ft8_panel_layout();
 	// Real task #25 ask: release the server's frequency-locked candidate
 	// search once there's genuinely no in-progress exchange left to
@@ -4958,6 +4968,11 @@ $("#AUTOCQ_CHECK, #AUTOANS_CHECK").on("change", ft8_auto_checkbox_changed);
 // at the 3 genuine QSO-end triggers (abort, QSO logged, TXACTIVE
 // 1->0) -- see set_band_activity_hidden()'s own call sites for both.
 var qso_in_progress = false;
+// Tracks RX Frequency's own content state across calls, purely so
+// update_rx_panel_visibility() can tell a genuine false->true transition
+// (a QSO just starting) apart from "still has content, called again for
+// some other reason" -- see that function's own comment.
+var wsjtx_rx_had_content = false;
 var simplify_during_qso_enabled = true;
 
 // Band Activity is purely informational -- CQ Panel and RX Frequency
