@@ -636,6 +636,18 @@ input[type="checkbox"] {
 		width: auto;
 		max-width: none;
 	}
+	/* Same fix, same real report shape, for the grid map: "I cannot
+	   resize the window to get to where I can move or resize the map"
+	   -- #gridmap's fixed left:80px + width:700px (style.css's own
+	   #gridmap rule) pushed its right edge, and the native resize
+	   handle that lives there, off the visible screen on a narrow
+	   phone. */
+	#gridmap {
+		left: 5px;
+		right: 5px;
+		width: auto;
+		max-width: none;
+	}
 }
 
 .connect-panel-intro {
@@ -750,15 +762,53 @@ input[type="checkbox"] {
 	   the page's script, causing a brief flash on every page load */
 	display: none;
 	/* draggable (see panel_drag.js-equivalent code in index.html,
-	   .sbitx-panel-title is the drag handle) + natively resizable --
-	   some panels (settings/connect) can otherwise land off-screen or
-	   too tall for a small/portrait viewport with no way to reach
-	   controls further down; letting the user reposition/resize fixes
-	   that for any screen size without guessing pixel values per device */
-	resize: both;
+	   .sbitx-panel-title is the drag handle) + resizable -- some panels
+	   (settings/connect) can otherwise land off-screen or too tall for
+	   a small/portrait viewport with no way to reach controls further
+	   down; letting the user reposition/resize fixes that for any
+	   screen size without guessing pixel values per device.
+	   Real report, live (2026-08-24), grid map panel: "i can move it
+	   on the cell phone but i can't resize it" -- native CSS
+	   resize:both has no real touch-interaction support on mobile
+	   browsers at all (a long-standing, well-known CSS limitation, not
+	   specific to this app or this panel), so this affected every
+	   .sbitx-panel on a phone, not just the map -- it just hadn't been
+	   noticed on the others yet. resize:none here; a real .panel-
+	   resize-handle element (own rule below) + matching mouse/touch
+	   JS in init_draggable_panels(), same pattern already proven for
+	   dragging via .sbitx-panel-title, replaces it for every panel. */
+	resize: none;
 	overflow: auto;
 	min-width: 260px;
 	min-height: 150px;
+}
+
+.panel-resize-handle {
+	position: absolute;
+	right: 0;
+	bottom: 0;
+	width: 22px;
+	height: 22px;
+	cursor: nwse-resize;
+	/* Real corner grip, drawn with a gradient rather than an image/font
+	   icon -- three diagonal white stripes fading from the bottom-right
+	   corner, the same visual language browsers already use for their
+	   own native resize handles, so this reads as "grab here" without
+	   needing any asset. touch-action:none stops the browser's own
+	   scroll/zoom gesture handling from stealing touchmove before our
+	   own listener (below) sees it -- confirmed necessary live, without
+	   it a touch-drag on this handle scrolled the page instead of
+	   resizing the panel. */
+	background: linear-gradient(135deg,
+		transparent 0%, transparent 40%,
+		#888 40%, #888 46%,
+		transparent 46%, transparent 60%,
+		#888 60%, #888 66%,
+		transparent 66%, transparent 80%,
+		#888 80%, #888 86%,
+		transparent 86%, transparent 100%);
+	touch-action: none;
+	z-index: 1;
 }
 
 .sbitx-panel-title {
@@ -982,6 +1032,56 @@ input[type="checkbox"] {
 }
 .panel-toggle-label input {
 	vertical-align: middle;
+}
+
+/* Grid map panel, restored 2026-08-24 -- user's own ask, revised after
+   a first fixed-overlay version trapped the toolbar (and its own Close
+   checkbox) underneath it on a narrow/portrait viewport with no way to
+   dismiss it. .sbitx-panel (base rule above) already provides
+   draggable/resizable/closeable floating-window behavior identical to
+   Settings/Connect/Logbook -- this rule just gives it its own default
+   geometry, same pattern as #settings_panel/#connect_panel below. A
+   real window the user can move/resize/close like any other panel,
+   never a full-bleed overlay blocking the rest of the app. Sized
+   larger than the other panels by default since a map benefits from
+   more screen space than a settings form; init_draggable_panels()
+   still remembers whatever the user drags/resizes it to afterward.
+   The FT8 decode/QSO pipeline underneath keeps running exactly as
+   before regardless of whether this is open (see the panel's own
+   comment, index.html) -- nothing about opening/closing/resizing it
+   touches that. */
+#gridmap {
+	position: fixed;
+	left: 80px;
+	top: 40px;
+	width: 700px;
+	height: 500px;
+	max-width: 95vw;
+	max-height: 90vh;
+	border: solid 1px white;
+	background-color: black;
+	z-index: 1;
+	/* Real report, live (2026-08-24): "the whole window blinking on
+	   and off" -- console showed console.log("redraw") (a debug
+	   leftover in gridmap.js, fires on every gmDrawScaledCanvas() call)
+	   repeated 100+ times in a row, confirming a genuine ResizeObserver
+	   feedback loop, not just a one-off glitch. Root cause: this ID
+	   still inherited overflow:auto from .sbitx-panel -- if the panel's
+	   own scrollbar ever toggled in/out by even a fraction of a pixel
+	   (as an indirect side effect of gridmap_fit_content() sizing
+	   #gridmap_content, index.html), that changes this element's own
+	   clientWidth/clientHeight and re-fires the very ResizeObserver
+	   watching it, which resizes the content again, which can toggle
+	   the scrollbar again -- an actual infinite ping-pong. All the
+	   real scrolling this app needs happens inside #gridmap_content
+	   (its own overflow:auto, below) -- the outer panel itself never
+	   needs to scroll, so removing any possibility of its own
+	   scrollbar appearing removes the feedback path entirely.
+	   resize:both (inherited) still works fine with overflow:hidden. */
+	overflow: hidden;
+}
+#gridmap_content {
+	overflow: auto;
 }
 
 /* Reboot/Shutdown/CMD/SET + Hide Band Activity, relocated here (user's

@@ -48,7 +48,7 @@
 	     file's line changed, by hand, same as any other deploy. -->
     <script src="pcm-player.js?v=1"></script>
 	<script src="proj4.js?v=1"></script>
-    <script src="gridmap.js?v=1"></script>
+    <script src="gridmap.js?v=4"></script>
 	<link rel="stylesheet" href="style.css?v=1">
   </head>
   <body>
@@ -442,9 +442,31 @@
      of how tall the panel column ends up. -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div class="panel-toolbar-row">
-				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label" title="Hide Band Activity"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Band</label><label class="panel-toggle-label" title="Hide Waterfall"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> WF</label><label class="panel-toggle-label" title="Hide Worked (stations already logged on this band/mode)"><input type="checkbox" id="HIDE_WORKED_CHECK" /> B4</label>
+				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label" title="Hide Band Activity"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Band</label><label class="panel-toggle-label" title="Hide Waterfall"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> WF</label><label class="panel-toggle-label" title="Hide Worked (stations already logged on this band/mode)"><input type="checkbox" id="HIDE_WORKED_CHECK" /> B4</label><label class="panel-toggle-label" title="Show Grid Map"><input type="checkbox" id="SHOW_GRIDMAP_CHECK" /> Map</label>
 			</div>
-			<!-- <div id="gridmap"></div> -->
+			<!-- User's own ask (2026-08-24): brought back from ~/Downloads/sbitx/web/'s
+			     newer gridmap.js (Mercator projection, pan/zoom, Logged/Seen/Unlogged/
+			     Round toggles -- ~100 more lines than this fork's own, unused copy).
+			     A real .sbitx-panel (same draggable/resizable/closeable floating-
+			     window mechanism as Settings/Connect/Logbook, init_draggable_panels()
+			     in index.html) rather than a fixed overlay -- user's own ask, after
+			     a first fixed-overlay version couldn't be closed on a narrow/portrait
+			     viewport once it covered the toolbar. Toggled by the Map checkbox
+			     above (see set_gridmap_shown() below) -- purely a display/geometry
+			     toggle, never touches GRIDMAP.gridIdLogged()/gridIdNotLogged()/
+			     gridIdJustLogged() (already called live from the decode/logging paths
+			     below, entirely independent of this panel's visibility) or anything in
+			     the FT8 decode/QSO pipeline, so opening/closing/resizing the map never
+			     pauses or otherwise affects real FT8 activity underneath it.
+			     GRIDMAP.init() targets #gridmap_content, a child of this panel, not
+			     the panel itself -- gmBuildHtml() (gridmap.js) replaces its container's
+			     whole inline style attribute, which would otherwise fight the
+			     panel's own position/size styling that init_draggable_panels() and
+			     the resize handling below set on #gridmap directly. -->
+			<div id="gridmap" class="sbitx-panel">
+				<span class="sbitx-panel-title">Grid Map <button class="sbitx-btn-back" data-for="panel_bar">&#x2716; Close</button></span>
+				<div id="gridmap_content"></div>
+			</div>
 			<div id="FT8_controls">
 				<!-- Real gap, confirmed live: several existing JS references
 				     (el("CALL")/$("#CALL"), logger_wipe(), etc.) already
@@ -464,6 +486,16 @@
 				     data to compare against, matching what ft8_process()
 				     itself already tracks server-side. -->
 				<input type="hidden" id="CALL" value=""/>
+				<!-- Same gap, same fix, found while adding the QSO-line map
+				     feature (2026-08-24): logger_enter_qso() already read
+				     el("EXCH").value (the other station's grid, server-side
+				     field_str("EXCH")) but no id="EXCH" element existed
+				     either -- would have thrown if that dead CW-logger-era
+				     function were ever actually reachable again. Added for
+				     the same reason #CALL was: a real new feature
+				     (gridmap_update_qso_line(), below) needs live client-side
+				     access to the current exchange's grid. -->
+				<input type="hidden" id="EXCH" value=""/>
 			</div>
 			<!-- end of FT8_controls -->
 		</div>
@@ -688,11 +720,362 @@ function update_noise_floor(update){
 var last_wf_row = null;
 var wf_scroll_timer = null;
 
-/* oz7bx gridmap -- container div commented out above; GRIDMAP.init()
-   would throw on a null container (its own code assumes one exists),
-   which would abort this whole top-level <script> block since this
-   isn't inside a function/try-catch -- must stay commented out too */
-// GRIDMAP.init(document.getElementById("gridmap"), 700, 360);
+// oz7bx gridmap, restored (2026-08-24) -- targets #gridmap_content
+// (see the panel markup's own comment for why, not #gridmap itself).
+// w/h here are just a placeholder for this first, not-yet-visible
+// paint -- gridmap_fit_content() (below) is what actually keeps the
+// canvas sized correctly from here on.
+GRIDMAP.init(document.getElementById("gridmap_content"), 520, 360);
+
+// Per-band grid tracking, user's own ask (2026-08-24): "verify that
+// the data that will be displayed is o[n] the band i am tune to" --
+// none of gridmap.js's own data sources were band-scoped at all.
+// "Logged" came from grids.txt, built server-side from a flat
+// `SELECT exch_recv, COUNT(*) FROM logbook GROUP BY exch_recv` with no
+// band filter (logbook_get_grids(), logbook.c) -- every grid ever
+// worked, any band, ever. "Seen"/"Unlogged"/"Just Logged" came from
+// deco_to_span()/the "Logged: ..." handler firing on every decode
+// regardless of the radio's current band. Rather than add band
+// filtering to the SQL query and a new server endpoint, this is done
+// entirely client-side: the client already computes band-from-
+// frequency for the existing "Hide Worked" feature (freq_to_band(),
+// worked_set in logbook_update()) and already receives the *full*
+// historical logbook (including freq per row) via the same 'QSO' bulk-
+// push every other row-driven client feature already relies on -- no
+// new server-side code needed. gridmap.js's own gmLoadGridIds()
+// (grids.txt fetch) is disabled below for the same reason: this
+// replaces it entirely, band-scoped, and the two would otherwise fight
+// (grids.txt's unfiltered set re-populating gridsLogged out from under
+// this the moment that network fetch resolved).
+//
+// User's own explicit simplification: "i would never change bands
+// while the map is open" -- so this only needs to keep whichever
+// band's data is *currently* being fed to GRIDMAP in sync with
+// el("BAND").value at the moment each grid arrives/whenever the band
+// changes, not handle a live re-filter mid-view.
+var gridmap_logged_by_band = {};     // band -> Set of grids ever logged (from the full historical 'QSO' stream)
+var gridmap_seen_by_band = {};       // band -> Set of grids decoded this session, not (yet) logged
+var gridmap_just_logged_by_band = {}; // band -> Set of grids logged this session specifically
+var gridmap_current_band = null;
+
+// "the lines between stations calling each other", user's own follow-
+// up ask (2026-08-24) -- extends the QSO-line feature to every QSO
+// visible in decoded traffic, not just my own. grid_by_callsign_by_band
+// remembers whichever grid each callsign has most recently revealed
+// (from their own "CQ CALL GRID" or a directed "TO FROM GRID"), per
+// band; third_party_by_band remembers confirmed *pairs* (both sides'
+// grids known, seen directed at each other) -- these are deliberately
+// separate: most callsigns with a known grid never get confirmed as
+// talking to each other at all, so "has a known grid" alone isn't
+// "is a QSO worth drawing a line for".
+
+var gridmap_grid_by_callsign_by_band = {}; // band -> Map(callsign -> grid)
+var gridmap_third_party_by_band = {};      // band -> Map("CALLA,CALLB" -> {callA, gridA, callB, gridB})
+
+function gridmap_band_set(map, band){
+	if (!map[band])
+		map[band] = new Set();
+	return map[band];
+}
+
+function gridmap_band_map(map, band){
+	if (!map[band])
+		map[band] = new Map();
+	return map[band];
+}
+
+// General-purpose version of ft8_message_other_party() -- that one
+// only ever returns a result when *I* am one of the two callsigns.
+// This returns all the tilde-relative fields regardless, needed here
+// since third-party traffic (by definition) never involves me at all.
+// Same tilde-finding/deco_strip() logic, just not restricted to my own
+// callsign.
+function ft8_message_fields(text){
+	var token_list = text.match(/\S+/g);
+	if (!token_list || token_list.length < 6 || token_list.length > 9)
+		return null;
+	var tilde_pos = -1;
+	for (var i = 3; i < token_list.length; ++i)
+		if (token_list[i] == '~'){
+			tilde_pos = i;
+			break;
+		}
+	if (tilde_pos < 0)
+		return null;
+	var fields = [];
+	for (var j = tilde_pos + 1; j < token_list.length; ++j)
+		fields.push(deco_strip(token_list[j]).toUpperCase());
+	return fields;
+}
+
+// GRIDMAP.isValidGridId() is a pure character-class check (2 letters
+// A-R + 2 digits) -- it exists to validate an already-known-to-be-a-
+// grid string, not to distinguish a real grid from a same-shaped
+// protocol word. "RR73" (Roger-Roger-73, a QSO-ending confirmation)
+// happens to fit that exact pattern (R,R are both valid A-R letters;
+// 7,3 are valid digits) and was getting misfiled as a real location --
+// e.g. "WA0RUF VE2AO RR73" wrongly recording VE2AO's "grid" as RR73,
+// drawing a bogus line out near the pole. The server already guards
+// against exactly this (modem_ft8.c ft8_on_start_qso():
+// strncmp(m3,"RR",2)!=0 before accepting m3/m4 as a grid) -- mirror
+// that same exclusion here for third-party fields parsed independently
+// client-side.
+function ft8_field_is_grid(field){
+	return field && GRIDMAP.isValidGridId(field) && field.substring(0, 2) !== "RR";
+}
+
+// A callsign wrapped in <...> is either a legitimate nonstandard/
+// hashed-callsign placeholder (compound calls like N1UL/2 don't fit
+// FT8's compact 28-bit field -- only prefix notation like 2/N1UL does,
+// so the modem falls back to a session-local hash) or a genuine mis-
+// decode the modem couldn't resolve at all. Either way it's not a
+// stable identifier: it will essentially never recur as a real match
+// for a CQ/exchange pair, and if it's a mis-decode the *other* fields
+// on that same line (including any grid) can't be trusted either.
+// Skip any message involving one rather than polluting the per-band
+// callsign->grid map with an untrackable or unreliable entry.
+function ft8_callsign_looks_real(call){
+	return call && call.indexOf("<") < 0 && call.indexOf(">") < 0;
+}
+
+// Parses one decoded line for third-party grid-exchange evidence and
+// updates the per-band memory accordingly -- called for every genuine
+// incoming decode (FT8_new_message(), style=="RX"), regardless of
+// whether it's relevant to my own exchange (own_cq_while_idle/
+// gridmap_update_qso_line already cover that separately). Cheap: a
+// handful of Map lookups per call, no different in cost from the
+// per-token grid tracking deco_to_span() already does for every decode
+// too.
+function gridmap_track_third_party(text, mycallsign){
+	var band = el("BAND") ? el("BAND").value : null;
+	if (!band)
+		return;
+	var fields = ft8_message_fields(text);
+	if (!fields || fields.length < 2)
+		return;
+	var grid_map = gridmap_band_map(gridmap_grid_by_callsign_by_band, band);
+	var call, grid;
+	if (fields[0] === "CQ"){
+		// "CQ CALL GRID" (fields[1]/[2]) or "CQ DX/POTA/etc CALL GRID"
+		// (fields[2]/[3]) -- same shape distinction ft8_on_start_qso()
+		// (modem_ft8.c) uses server-side: a 4th field present means the
+		// 2nd field was a modifier, not the callsign.
+		if (fields.length >= 4){
+			call = fields[2];
+			grid = fields[3];
+		} else {
+			call = fields[1];
+			grid = fields[2];
+		}
+		if (call === mycallsign)
+			return; // my own CQ -- not third-party, and already tracked separately
+		if (!ft8_callsign_looks_real(call))
+			return;
+		if (ft8_field_is_grid(grid)){
+			// Diagnostic step (user's own ask): label every callsign at
+			// its own grid, so the underlying callsign<->grid data can be
+			// visually cross-checked against Band Activity's own raw
+			// decodes before debugging the QSO lines any further. Only
+			// on a genuine new/changed mapping (not every repeat decode
+			// of the same CQ) and only for the band actually on screen.
+			if (grid_map.get(call) !== grid){
+				grid_map.set(call, grid);
+				if (band === gridmap_current_band){
+					GRIDMAP.labelCallsign(grid, call);
+					GRIDMAP.redraw();
+				}
+			}
+		}
+		return;
+	}
+	// Directed message: fields[0]=to, fields[1]=from, fields[2]=exchange
+	// (report/grid/RR73/73/etc). Not relevant here if I'm either side --
+	// that's my own exchange, handled entirely separately.
+	var to_call = fields[0], from_call = fields[1], exch = fields[2];
+	if (to_call === mycallsign || from_call === mycallsign)
+		return;
+	if (!ft8_callsign_looks_real(to_call) || !ft8_callsign_looks_real(from_call))
+		return;
+	if (ft8_field_is_grid(exch) && grid_map.get(from_call) !== exch){
+		grid_map.set(from_call, exch);
+		if (band === gridmap_current_band){
+			GRIDMAP.labelCallsign(exch, from_call);
+			GRIDMAP.redraw();
+		}
+	}
+	var to_grid = grid_map.get(to_call);
+	var from_grid = grid_map.get(from_call);
+	if (!to_grid || !from_grid)
+		return; // one side's grid still unknown -- nothing to draw yet
+	var key = to_call < from_call ? (to_call + "," + from_call) : (from_call + "," + to_call);
+	// from_call is the sender of *this* message -- remembered per pair
+	// so a band switch later restores the last-known direction too, not
+	// just the grids (see gmTrackExchange()'s own comment, gridmap.js).
+	gridmap_band_map(gridmap_third_party_by_band, band).set(key,
+		{callA: to_call, gridA: to_grid, callB: from_call, gridB: from_grid, fromCall: from_call});
+	if (band === gridmap_current_band)
+		GRIDMAP.trackExchange(to_call, to_grid, from_call, from_grid, from_call);
+}
+
+// Records a grid into the given per-band accumulator only -- callers
+// are responsible for also feeding it to GRIDMAP live themselves (via
+// the same GRIDMAP.gridId*() call the original unfiltered code always
+// made directly) when band matches gridmap_current_band, since each
+// call site's own "which band is this grid actually on" source differs
+// (el("BAND") for a live decode, the row's own freq-derived band for a
+// historical/live 'QSO' push).
+function gridmap_record(map, band, grid_id){
+	if (!band || !grid_id)
+		return;
+	gridmap_band_set(map, band).add(grid_id);
+}
+
+// Clears whatever GRIDMAP is currently showing and re-feeds it with
+// only the given band's own accumulated data -- called whenever the
+// radio's current band changes (or first gets known), so the map
+// never mixes bands regardless of what was decoded/logged earlier in
+// the session on a different one.
+function gridmap_apply_band(band){
+	gridmap_current_band = band;
+	GRIDMAP.clearSeen();
+	if (!band)
+		return;
+	gridmap_band_set(gridmap_logged_by_band, band).forEach(function(g){ GRIDMAP.gridIdLogged(g); });
+	gridmap_band_set(gridmap_seen_by_band, band).forEach(function(g){ GRIDMAP.gridIdNotLogged(g); });
+	gridmap_band_set(gridmap_just_logged_by_band, band).forEach(function(g){ GRIDMAP.gridIdJustLogged(g); });
+	// Third-party pairs -- same re-feed pattern as the grid sets just
+	// above. Note: re-feeding resets each pair's lastSeen (GRIDMAP.
+	// trackExchange()) to "now", so a pair that actually went stale
+	// *before* this band was last active would incorrectly get a fresh
+	// TTL countdown on switching back to it -- accepted low-priority
+	// inaccuracy given the user's own explicit simplification ("i would
+	// never change bands while the map is open"), not worth the extra
+	// bookkeeping to avoid.
+	gridmap_band_map(gridmap_third_party_by_band, band).forEach(function(entry){
+		GRIDMAP.trackExchange(entry.callA, entry.gridA, entry.callB, entry.gridB, entry.fromCall);
+	});
+}
+
+// QSO line + animated direction arrow, user's own ask (2026-08-24,
+// inspired by FT8AW's map): a line from my own grid to whoever's
+// currently being worked, with an arrowhead animating in whichever
+// direction the transmission is actually going. Reads the current
+// state fresh every call rather than tracking a diff itself -- called
+// from every place that state can change (the 'CALL'/'EXCH' field
+// pushes below, and switch_to_tx()/switch_to_rx()) since GRIDMAP.
+// setQsoLine() is already cheap/idempotent to call redundantly (see
+// its own comment). MYGRID is a real, already-existing settings field
+// (the operator's own grid, Settings panel) -- EXCH is the one new
+// piece, added just above (#EXCH) for exactly this.
+function gridmap_update_qso_line(){
+	var my_grid = el("MYGRID") ? el("MYGRID").value.toUpperCase() : "";
+	var their_call = el("CALL") ? el("CALL").value : "";
+	var their_grid = el("EXCH") ? el("EXCH").value.toUpperCase() : "";
+	if (!their_call || !GRIDMAP.isValidGridId(their_grid) || !GRIDMAP.isValidGridId(my_grid)){
+		GRIDMAP.clearQsoLine();
+		return;
+	}
+	GRIDMAP.setQsoLine(my_grid, their_grid, in_tx);
+}
+
+// Sizes #gridmap_content to fill whatever's left of the panel below
+// its title bar, then resizes the map canvas to match -- user's own
+// report, first version: "looks good on this browser but doesn't fill
+// the window". #gridmap_content can't just be a normal in-flow sibling
+// filling remaining height on its own: .sbitx-panel-title is
+// float:right (style.css), so nothing here stretches it automatically
+// the way a real flex/grid layout would. Measures the title bar's own
+// real rendered height rather than guessing a fixed number -- same
+// reasoning already used elsewhere in this app (resize_ui(),
+// sync_pan_row_height()) for exactly this kind of "don't hardcode what
+// you can measure" sizing.
+// Real report, live (2026-08-24): "the whole window blinking on and
+// off" -- console showed console.log("redraw") (gridmap.js's own
+// debug leftover, fires on every gmDrawScaledCanvas() call) repeated
+// 100+ times in a row, confirming a genuine ResizeObserver feedback
+// loop between this function and the observer below, not just a
+// one-off glitch. Primary fix was CSS (#gridmap's own inherited
+// overflow:auto letting its scrollbar toggle in/out and change its
+// own clientWidth/Height -- see style.css's own comment); this
+// last_w/last_h guard is a second, independent line of defense --
+// skip re-sizing entirely if the computed size hasn't actually
+// changed, regardless of what triggered this call, so even an
+// unrelated future cause of spurious ResizeObserver fires can't turn
+// into the same runaway loop again.
+var gridmap_last_w = 0, gridmap_last_h = 0;
+function gridmap_fit_content(){
+	var panel = el("gridmap");
+	var title = panel.querySelector(".sbitx-panel-title");
+	var content = el("gridmap_content");
+	var avail_w = panel.clientWidth;
+	var avail_h = panel.clientHeight - (title ? title.getBoundingClientRect().height : 0);
+	if (avail_w <= 0 || avail_h <= 0)
+		return;
+	if (avail_w === gridmap_last_w && avail_h === gridmap_last_h)
+		return;
+	gridmap_last_w = avail_w;
+	gridmap_last_h = avail_h;
+	content.style.width = avail_w + "px";
+	content.style.height = avail_h + "px";
+	// gmBuildHtml() (gridmap.js) appends the slider/buttons row as a
+	// *second* child right after the canvas, inside this same
+	// container -- sizing the canvas to the entire avail_h would leave
+	// no room for that row, overflowing #gridmap_content (its own
+	// overflow:auto, which is fine/intended -- unlike the outer panel,
+	// this one is meant to scroll if it ever needs to). Measures that
+	// row's own real rendered height (content.lastElementChild --
+	// gmBuildHtml()'s own append order is always canvasDiv then
+	// sliderDiv) and reserves it, same "measure, don't guess" reasoning
+	// as the title bar above.
+	var controls = content.lastElementChild;
+	var controls_h = (controls && controls !== content.firstElementChild)
+		? controls.getBoundingClientRect().height : 0;
+	var canvas_h = avail_h - controls_h;
+	if (canvas_h <= 0)
+		return;
+	GRIDMAP.resize(avail_w, canvas_h);
+}
+// ResizeObserver (not a window resize listener) is what actually
+// catches the native CSS resize:both drag on .sbitx-panel firing no
+// DOM event of its own -- same reasoning already established for
+// save_panel_geometry()'s own observer in init_draggable_panels(),
+// just a second, independent observer here since that one only
+// persists geometry, it doesn't know anything about resizing a canvas
+// inside. Observes #gridmap itself (the panel actually being resized),
+// not #gridmap_content (whose size is a *result* of this function, not
+// an independent trigger for it -- observing it too would self-fire).
+new ResizeObserver(gridmap_fit_content).observe(el("gridmap"));
+
+// Opening/closing follows the same open_panel()/close_panel()
+// convention every other .sbitx-panel uses (Settings/Connect/Logbook)
+// -- gridmap_open()/gridmap_close() are its window[panel+"_open"/
+// "_close"] hooks, called automatically by those either from the
+// checkbox below or from the panel's own title-bar close click, so
+// the checkbox and the panel's actual open state can never drift out
+// of sync regardless of which one the user actually uses to close it.
+function gridmap_open(){
+	el("SHOW_GRIDMAP_CHECK").checked = true;
+	// Wasn't visible until just now (clientWidth/Height stayed 0, the
+	// ResizeObserver above never fired), so needs one explicit fit here.
+	gridmap_fit_content();
+	// User's own ask (2026-08-24): open on a full "whole world fits the
+	// canvas" view every time, not wherever a stale pan/zoom from a
+	// previous open happened to leave off -- zoom in from there.
+	GRIDMAP.fitToCanvas();
+}
+function gridmap_close(){
+	el("SHOW_GRIDMAP_CHECK").checked = false;
+}
+$("#SHOW_GRIDMAP_CHECK").on("change", function(){
+	if (this.checked)
+		open_panel("gridmap");
+	else {
+		el("gridmap").style.display = "none";
+		// gridmap_close() isn't reached via close_panel() on this path
+		// (no title-bar click happened) -- keep it in sync here too.
+		gridmap_close();
+	}
+});
 
 /* a few helper functions */
 function el(element_id){
@@ -2151,6 +2534,74 @@ function init_draggable_panels(){
 				moved = false;
 			}
 		}, true);
+
+		// Real report, live (2026-08-24), grid map panel: "i can move
+		// it on the cell phone but i can't resize it". Native CSS
+		// resize:both (this panel's own base rule used to set it) has
+		// no real touch support on mobile browsers -- a well-known CSS
+		// limitation, not specific to this app, so it silently affected
+		// every .sbitx-panel on a phone, not just the map. Same
+		// mouse+touch pattern as the drag handling just above, just
+		// resizing width/height from the corner instead of moving
+		// left/top. min-width/min-height read from .sbitx-panel's own
+		// CSS (260/150) via computed style rather than duplicating
+		// those numbers here, so the two stay in sync if that CSS ever
+		// changes.
+		var handle = document.createElement("div");
+		handle.className = "panel-resize-handle";
+		panel.appendChild(handle);
+
+		var resizing = false;
+		var rstart_x, rstart_y, rstart_w, rstart_h;
+		var min_w = parseFloat(getComputedStyle(panel).minWidth) || 260;
+		var min_h = parseFloat(getComputedStyle(panel).minHeight) || 150;
+
+		function resize_start(x, y){
+			var r = panel.getBoundingClientRect();
+			// Same pin-explicit-left/top reasoning as drag_start() --
+			// a panel still positioned via CSS (e.g. the narrow-
+			// viewport media query's right:5px) would otherwise fight
+			// a width-only resize growing it the wrong direction.
+			panel.style.left = r.left + "px";
+			panel.style.top = r.top + "px";
+			panel.style.right = "auto";
+			rstart_x = x; rstart_y = y;
+			rstart_w = r.width; rstart_h = r.height;
+			resizing = true;
+		}
+		function resize_move(x, y){
+			if (!resizing)
+				return;
+			var w = rstart_w + (x - rstart_x);
+			var h = rstart_h + (y - rstart_y);
+			panel.style.width = Math.max(min_w, w) + "px";
+			panel.style.height = Math.max(min_h, h) + "px";
+		}
+		function resize_end(){
+			if (!resizing)
+				return;
+			resizing = false;
+			save_panel_geometry(panel);
+		}
+		handle.addEventListener("mousedown", function(e){
+			resize_start(e.clientX, e.clientY);
+			e.preventDefault();
+			e.stopPropagation();
+		});
+		document.addEventListener("mousemove", function(e){ resize_move(e.clientX, e.clientY); });
+		document.addEventListener("mouseup", resize_end);
+		handle.addEventListener("touchstart", function(e){
+			var t = e.touches[0];
+			resize_start(t.clientX, t.clientY);
+			e.stopPropagation();
+		});
+		document.addEventListener("touchmove", function(e){
+			if (!resizing)
+				return;
+			var t = e.touches[0];
+			resize_move(t.clientX, t.clientY);
+		}, {passive: true});
+		document.addEventListener("touchend", resize_end);
 	});
 }
 
@@ -2332,12 +2783,15 @@ function switch_to_tx(){
 	log("setting in_tx true");
 	$("#tx_meters").show();
 	in_tx = true;
+	// QSO line direction (see gridmap_update_qso_line()'s own comment)
+	gridmap_update_qso_line();
 }
 
 function switch_to_rx(){
 	$("#tx_meters").hide();
 	log("setting in_tx false");
 	in_tx = false;
+	gridmap_update_qso_line();
 }
 
 /* wsjtx functionality */
@@ -2394,22 +2848,39 @@ function deco_get_style(text) {
 	return 0;
 }
 
+// Real report, live (2026-08-24): "verify that the data that will be
+// displayed is o[n] the band i am tune to" -- these GRIDMAP.* calls
+// used to fire for every decode regardless of band. Recorded into the
+// per-band accumulator either way (so it's already there if the
+// operator comes back to this band later), but only actually fed to
+// GRIDMAP live when it matches the band currently being displayed --
+// see gridmap_apply_band()'s own comment. el("BAND") is authoritative
+// for "what band is this decode on" (kept live-synced from the radio,
+// see the FREQ case); gridmap_current_band is what GRIDMAP is actually
+// showing right now -- normally identical (the FREQ case updates both
+// together) but compared separately rather than assumed, in case a
+// decode is mid-flight right as the band changes.
 function deco_to_span(text) {
 	let jclass = "";
+	var deco_band = el("BAND") ? el("BAND").value : null;
 	switch (deco_get_style(text)) {
 		case FF_CALLER:
 			jclass = "ft8-new-caller";
 			break;
 		case FF_GRID:
 			jclass = "ft8-new-grid";
-			GRIDMAP.gridIdNotLogged(text.substring(2));
-			break;	
+			gridmap_record(gridmap_seen_by_band, deco_band, text.substring(2));
+			if (deco_band && deco_band === gridmap_current_band)
+				GRIDMAP.gridIdNotLogged(text.substring(2));
+			break;
 		case FF_MYCALL:
 			jclass = "wsjtx-mycallsign";
 			break;
 		default:
 			if (GRIDMAP.isValidGridId(text.substring(2))) {
-				GRIDMAP.gridIdLogged(text.substring(2));
+				gridmap_record(gridmap_logged_by_band, deco_band, text.substring(2));
+				if (deco_band && deco_band === gridmap_current_band)
+					GRIDMAP.gridIdLogged(text.substring(2));
 			}
 		    jclass = "ft8-old-grid";
 			break;
@@ -2428,22 +2899,32 @@ function deco_get_style(text) {
     }
     return 0;
 }
+// This is the effective deco_to_span() -- a later function declaration
+// with the same name silently overrides the earlier one in JS, so only
+// this copy actually runs (pre-existing duplication in this file, not
+// introduced here; kept in sync with the same band-scoping change as
+// its own comment above for consistency of the visible source).
 function deco_to_span(text) {
     let jclass = "";
+    var deco_band = el("BAND") ? el("BAND").value : null;
     switch (deco_get_style(text)) {
 	case STYLE_CALLER:
 	    jclass = "ft8-new-caller";
 	    break;
 	case STYLE_GRID:
 	    jclass = "ft8-new-grid";
-	    GRIDMAP.gridIdNotLogged(text.substring(2));
+	    gridmap_record(gridmap_seen_by_band, deco_band, text.substring(2));
+	    if (deco_band && deco_band === gridmap_current_band)
+		GRIDMAP.gridIdNotLogged(text.substring(2));
 	    break;
 	case STYLE_MYCALL:
 	    jclass = "wsjtx-mycallsign";
 	    break;
 	default:
 	    if (GRIDMAP.isValidGridId(text.substring(2))) {
-		GRIDMAP.gridIdLogged(text.substring(2));
+		gridmap_record(gridmap_logged_by_band, deco_band, text.substring(2));
+		if (deco_band && deco_band === gridmap_current_band)
+		    GRIDMAP.gridIdLogged(text.substring(2));
 	    }
 	    jclass = "ft8-old-grid";
 	    break;
@@ -3167,6 +3648,11 @@ function FT8_new_message(text, style){
 			autoans_pick_and_answer();
 	}
 	var mycallsign = $("#MYCALLSIGN").val().toUpperCase();
+	// Third-party QSO lines (gridmap_track_third_party()'s own comment)
+	// -- style=="RX" only, same reasoning as the CQ Panel check above:
+	// "TX"/"Q" are my own transmission, never third-party traffic.
+	if (style == "RX")
+		gridmap_track_third_party(text, mycallsign);
 	// Real report, live -- two rounds. First: a stale exchange (a station
 	// still resending RR73/RRR because our closing 73 never reached
 	// them) kept decoding while a fresh CQ got answered from a different
@@ -3732,6 +4218,37 @@ function logbook_update(args){
 	if (wk_band && token[8])
 		worked_set.add(token[8].toUpperCase() + "|" + token[1].toUpperCase() + "|" + wk_band);
 
+	// Feed the grid map's per-band "Logged" set -- see gridmap_apply_
+	// band()'s own comment. token[10] is exch_recv (the grid), same
+	// column order as token[8] above. This runs for every row of the
+	// full historical bulk-load too (logbook_watch_armed's own initial
+	// pass, not just new live QSOs), which is exactly what's needed to
+	// correctly populate "Logged" for whichever band happens to be
+	// current without a separate server round-trip.
+	if (wk_band && token[10] && GRIDMAP.isValidGridId(token[10])){
+		gridmap_record(gridmap_logged_by_band, wk_band, token[10]);
+		if (wk_band === gridmap_current_band)
+			GRIDMAP.gridIdLogged(token[10]);
+		// User's own ask (2026-08-24): also seed the callsign->grid map
+		// third-party line tracking depends on (gridmap_track_third_party()
+		// in gridmap_grid_by_callsign_by_band) -- a station already worked
+		// before has its real grid sitting right here in the logbook, no
+		// reason to wait on freshly re-decoding their CQ/grid-reply again
+		// this session before a box/line for them can appear. Same grid
+		// value already validated by isValidGridId() just above.
+		var worked_call = token[8] ? token[8].toUpperCase() : "";
+		if (worked_call){
+			var worked_grid_map = gridmap_band_map(gridmap_grid_by_callsign_by_band, wk_band);
+			if (worked_grid_map.get(worked_call) !== token[10]){
+				worked_grid_map.set(worked_call, token[10]);
+				if (wk_band === gridmap_current_band){
+					GRIDMAP.labelCallsign(token[10], worked_call);
+					GRIDMAP.redraw();
+				}
+			}
+		}
+	}
+
 	// A QSO just got logged -- user's own ask: unhide Band Activity
 	// again. logbook_watch_armed guards against the initial bulk load;
 	// comparing against the *old* logbook_top_row_id (before the update
@@ -4226,7 +4743,13 @@ function update_data(text){
 			// "Logged: F4VTG -05-JO65 -14-JN12\n;"
 			if (s.startsWith("Logged:")) { // String ends width \n
 				s = s.substring(s.length-5,s.length-1);
-				GRIDMAP.gridIdJustLogged(s);
+				// Band-scoped -- see gridmap_apply_band()'s own comment.
+				// A QSO that just logged is on whatever band the radio
+				// is on right now.
+				var just_logged_band = el("BAND") ? el("BAND").value : null;
+				gridmap_record(gridmap_just_logged_by_band, just_logged_band, s);
+				if (just_logged_band && just_logged_band === gridmap_current_band)
+					GRIDMAP.gridIdJustLogged(s);
 			}
 		}
 	}
@@ -4759,6 +5282,15 @@ function response_handler(response){
 			var actual_band = freq_to_band(parseInt(args));
 			if (actual_band && el("BAND").value != actual_band)
 				el("BAND").value = actual_band;
+			// Grid map band scoping (see gridmap_apply_band()'s own
+			// comment) -- kept in sync here rather than only when the
+			// map is open, same reasoning as the live GRIDMAP feed
+			// calls already running continuously in the background:
+			// correct data is ready the instant the panel opens,
+			// regardless of whether it happened to be open when the
+			// band last changed.
+			if (actual_band && actual_band !== gridmap_current_band)
+				gridmap_apply_band(actual_band);
 			draw_dial();
 			break;
 		case 'macros_list':
@@ -4988,6 +5520,14 @@ function response_handler(response){
 						e.classList.toggle("connect-status-ok", args == "Synced");
 					else if (cmd == "FT8_TX1ST")
 						e.textContent = (args == "ON") ? "EVEN" : "ODD";
+					// QSO line (gridmap_update_qso_line()'s own comment) --
+					// after e.value = args just above, not before, so this
+					// reads CALL/EXCH's real new value, not the stale one.
+					// EXCH doesn't have its own case above (CALL does, for
+					// the RX Frequency clear -- unrelated to this) so this
+					// is the one place both actually land.
+					else if (cmd == "CALL" || cmd == "EXCH")
+						gridmap_update_qso_line();
 				}
 
 			}
