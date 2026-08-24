@@ -55,6 +55,23 @@ static int ft8_tx_nsamples = 0;
 // interleaved with stretches of near-zero mid-message).
 static pthread_mutex_t ft8_tx_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int ft8_do_decode = 0;
+// Real report, live (2026-08-23), user's own screenshots (Band
+// Activity/CQ Panel showing e.g. "WV2B K4MFC EM73" and "CQ KD4KKF
+// EM63" each appearing twice, same embedded slot timestamp, same SNR
+// -- a genuine duplicate, not two different real transmissions):
+// ft8_rx()'s decode trigger below re-checks every ~500ms for the
+// entire 13-15s tail of a slot, and a real decode pass can legitimately
+// take 1.6-3s (SIC/AP passes) -- longer than that 500ms gate. A second
+// ft8_rx() call landing before the first decode (and its natural
+// buffer reset at the *next* slot's slot_time<500) finishes re-armed
+// ft8_do_decode again, so ft8_thread_function() ran a second decode
+// pass over the *same* audio a couple seconds later.
+// decoded_hashtable in sbitx_ft8_decode() is local to each call (reset
+// fresh every time), so it gives zero protection across two separate
+// calls like this -- only within one. Tracks which slot (by its own
+// ft8_rx_buff_start_ms, which only changes on a genuine new slot) has
+// already been triggered, so a slot can only ever queue one decode.
+static int ft8_decode_triggered_for_ms = -1;
 static int ft8_do_tx = 0;
 static int ft8_pitch = 0;
 // number of repetitions left for the current message, counting down from the user setting
@@ -92,6 +109,18 @@ static bool ft8_autocq_resume_pending = false;
 // comment -- has actually finished transmitting), not the instant it's
 // merely queued.
 static bool ft8_qso_log_pending = false;
+
+// Real regression, caught live (2026-08-23) right after first adding
+// the RRR/RR73 dedup fix below: reusing RECV to detect a repeated
+// RRR/RR73 clobbered it with the literal string "RRR"/"RR73" -- RECV
+// is also the *real* received-signal-report field logbook_add() writes
+// out, so the logged QSO's RST ended up as "RRR" instead of the actual
+// numeric report from earlier in the exchange. Tracks the callsign
+// we've already sent a courtesy "73" to instead, entirely separate
+// from RECV. Reset in set_call_field() (called at the start of every
+// genuinely new exchange, cold-call or otherwise) so a later, real
+// exchange with the same station isn't incorrectly blocked.
+static char ft8_courtesy_73_sent_to[16] = "";
 
 static const int kMin_score = 10; // Minimum sync score threshold for candidates
 // Matched to ft8_lib's own reference demo tool (ft8_lib/demo/decode_ft8.c
@@ -1499,8 +1528,22 @@ void ft8_rx(int32_t *samples, int count) {
 	}
 
 	//we should have at least 6 or 12 seconds of samples to decode
-	if (ft8_rx_buff_index >= 13 * min_secs && slot_time > slot_time_decode) {
+	// ft8_decode_triggered_for_ms guard: see its own comment (real
+	// duplicate-decode bug, live). This whole condition stays true for
+	// the entire 13-15s tail of a slot, and this function gets called
+	// repeatedly (every ~500ms, the gate above) throughout that window
+	// -- without this guard, a decode pass still running past a later
+	// ~500ms re-check (routinely 1.6-3s, SIC/AP passes) got a second,
+	// redundant ft8_do_decode = 1 before its own natural buffer reset
+	// (slot_time<500, next slot) ever happened, running the same audio
+	// through sbitx_ft8_decode() twice -- confirmed live: every decode
+	// from that slot shown twice in Band Activity/CQ Panel, same
+	// embedded timestamp, moments apart. Only trigger once per genuinely
+	// new slot (identified by its own buffer-start timestamp).
+	if (ft8_rx_buff_index >= 13 * min_secs && slot_time > slot_time_decode
+			&& ft8_decode_triggered_for_ms != ft8_rx_buff_start_ms) {
 		ft8_do_decode = 1;
+		ft8_decode_triggered_for_ms = ft8_rx_buff_start_ms;
 //~ printf("ft8_rx decoding trigger index %d, clock %d, slot_time %d\n", ft8_rx_buff_index, wallclock_day_ms % 60000, slot_time);
 	}
 }
@@ -1820,6 +1863,10 @@ void set_call_field(const char *s) {
 	char call[16];
 	strncpy(call, s, sizeof(call));
 	field_set("CALL", trim_brackets(call));
+	// New exchange starting (or being rebound) -- see
+	// ft8_courtesy_73_sent_to's own comment: this must clear so a later,
+	// genuinely new exchange with this same station isn't blocked.
+	ft8_courtesy_73_sent_to[0] = 0;
 }
 
 /*!
@@ -2147,10 +2194,16 @@ void ft8_process(char *message, ftx_operation operation){
 		// this branch had no dedup at all, unlike ft8_on_signal_report()
 		// just above (see its own comment, fixed in 127079d for the exact
 		// same class of ping-pong at an earlier exchange stage). Same
-		// fix: skip if we've already answered this exact stage.
-		if (!strcmp(field_str("RECV"), m3))
+		// idea, but tracked in ft8_courtesy_73_sent_to instead of RECV
+		// this time -- see its own comment for why reusing RECV here (an
+		// earlier version of this fix) was a real regression: it
+		// clobbered the actual received-signal-report value that gets
+		// logged, so the QSO's logged RST came out as the literal string
+		// "RRR" instead of a real report.
+		if (!strcmp(ft8_courtesy_73_sent_to, call))
 			return;
-		field_set("RECV", m3);
+		strncpy(ft8_courtesy_73_sent_to, call, sizeof(ft8_courtesy_73_sent_to) - 1);
+		ft8_courtesy_73_sent_to[sizeof(ft8_courtesy_73_sent_to) - 1] = 0;
 		ft8_tx_3f(m2, mycall, "73");
 		// Real report, live (2026-08-22): enter_qso()/call_wipe() used to
 		// run right here, synchronously with *queueing* the closing "73"
