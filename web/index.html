@@ -3724,7 +3724,23 @@ function logbook_update(args){
 	// comparing against the *old* logbook_top_row_id (before the update
 	// just below) is what actually distinguishes "new" from "already
 	// seen" here.
-	if (logbook_watch_armed && Number(qso_id) > logbook_top_row_id){
+	//
+	// Real report, live (2026-08-24): with Auto CQ armed, logging a QSO
+	// showed CQ Panel *and* RX Frequency at once -- "since I am in auto
+	// CQ mode only the RX Frequency panel should have displayed because
+	// I am transmitting." Root cause: this ran unconditionally on every
+	// log, restoring Band Activity/CQ Panel the instant RX Frequency
+	// emptied (the just-finished exchange getting cleared) -- with zero
+	// awareness that Auto CQ was about to immediately resume
+	// transmitting and repopulate RX Frequency again itself (see
+	// own_cq_while_idle in FT8_new_message()). Same gate the TXACTIVE
+	// 1->0 restore path already uses for this exact reason -- skip the
+	// restore entirely while Auto CQ/Auto Answer is still armed and
+	// about to keep going; RX Frequency's own has_content transition in
+	// update_rx_panel_visibility() already handles hiding these two
+	// correctly once real content (ours or a new caller's) arrives.
+	if (logbook_watch_armed && Number(qso_id) > logbook_top_row_id
+			&& !autocq_client_running && !autoans_running){
 		qso_in_progress = false;
 		set_band_activity_hidden(band_activity_manual_pref);
 	}
@@ -4681,9 +4697,19 @@ function response_handler(response){
 			break;
 		case 'QSO':
 			logbook_update(args);
-			// token[8] is callsign_recv -- see logbook_update()'s own
-			// comment on the column order.
-			FT8_rx_clear(args.split("|")[8]);
+			// Real report, live (2026-08-24): with Auto CQ resuming right
+			// after logging (own_cq_while_idle in FT8_new_message()), RX
+			// Frequency's *own* leftover pre-exchange CQ transmission
+			// line(s) -- sent before this station ever answered -- stayed
+			// in the panel, since they don't contain the just-worked
+			// callsign at all. Clearing scoped to just that one callsign
+			// (the original FT8_rx_clear(callsign)) left them sitting
+			// there: "when the panel redisplays it has the previously
+			// called CQ's in the panel." RX Frequency only ever shows one
+			// thing at a time (the current exchange, or our own idle CQ) --
+			// once a QSO logs, everything in it is stale regardless of
+			// which callsign it mentions, so a full clear is correct here.
+			FT8_rx_clear();
 			break;
 		case 'TEXT':
 			log("text: [ " + args + "]");
