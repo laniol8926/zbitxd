@@ -3089,8 +3089,21 @@ function update_rx_panel_visibility(){
 		// apply the real standing state now that it's caught up. Harmless,
 		// idempotent no-op the many times RX Frequency was already empty
 		// when TXACTIVE flipped and this fires a moment later anyway.
-		if (!qso_in_progress)
-			set_band_activity_hidden(band_activity_manual_pref);
+		//
+		// Real report, live (2026-08-24): the qso_in_progress gate above
+		// used to block this whenever Auto CQ/Auto Answer was armed --
+		// qso_in_progress now stays true for the entire armed session (see
+		// own_cq_while_idle, 0340bb9), not just "mid-exchange right now",
+		// so it no longer means what this gate assumed. Confirmed live:
+		// after Auto Answer gave up on a station (retries exhausted), RX
+		// Frequency correctly emptied but CQ Panel never came back to show
+		// the candidates it was about to pick from -- "the cq panel failed
+		// to display after 'i gave up'." RX Frequency having no content is
+		// reason enough on its own to show Band Activity/CQ Panel again,
+		// armed automation or not -- if a new exchange starts moments
+		// later, the has_content transition above already correctly
+		// re-hides these, so restoring unconditionally here is harmless.
+		set_band_activity_hidden(band_activity_manual_pref);
 	}
 }
 
@@ -4911,6 +4924,28 @@ function response_handler(response){
 		case 'MODE':
 			mode_set(args);
 			//There is no break statement here, MODE continues to default case
+		case 'CALL':
+			// Real report, live (2026-08-24): Auto Answer's reply
+			// exhausting its retries with no response (a genuine give-up,
+			// not a QSO ending successfully) never cleared RX Frequency
+			// at all -- only the 'QSO' case (an actual logged QSO) did.
+			// Server-side call_wipe() (sbitx_daemon.c) now runs for this
+			// dead-end too (see its own modem_ft8.c comment) and clears
+			// CALL there, but nothing client-side was listening for
+			// that. User's own report: RX Frequency just kept showing
+			// the failed attempt's stale content indefinitely instead of
+			// clearing so CQ Panel could show a fresh target next.
+			// call_wipe() runs at *every* genuine "this exchange is
+			// over" boundary, success or give-up alike -- CALL
+			// transitioning to empty is exactly the right, general
+			// signal to clear on, not something needing a separate
+			// give-up-specific message. Only on a real transition (was
+			// non-empty), not every already-empty push. A 'MODE' push
+			// falling through here is harmless -- args is a mode string,
+			// never empty, so the !args check just never matches.
+			if (!args && el("CALL") && el("CALL").value)
+				FT8_rx_clear();
+			//There is no break statement here, CALL continues to default case
 		default:
 			e = el(cmd);
 			if (e){
