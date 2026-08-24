@@ -54,6 +54,25 @@ static int ft8_tx_nsamples = 0;
 // contents mid-transmission (confirmed on real hardware: tone samples
 // interleaved with stretches of near-zero mid-message).
 static pthread_mutex_t ft8_tx_state_mutex = PTHREAD_MUTEX_INITIALIZER;
+// Real gap, live (2026-08-24), user's own question surfaced it: the FT8
+// exchange state (m1/m2/m3/m4 via ft8_message_tokenize()'s strtok() --
+// itself non-reentrant -- call, the CALL field, ft8_repeat, etc.) is
+// shared, file-static mutable state, read and written from *two*
+// threads with nothing synchronizing them: the dedicated FT8 decode
+// thread (sbitx_ft8_decode() -> ft8_process(), for a message it
+// auto-detects addressed to us -- e.g. a station's reply landing right
+// as we're giving up on them) and the main thread (ft8_poll(), every
+// ~100ms per modems.c, *and* pre_ft8_check()/cmd_exec() -> ft8_process(),
+// reached via ui_tick() draining queued client commands -- e.g. Auto
+// Answer's own "FT8_check" for a freshly-picked target). ft8_tx_state_
+// mutex above only ever covered TX audio buffer state, nothing about
+// the exchange itself. Two of these landing at the same real moment
+// could genuinely interleave and corrupt each other's state -- not a
+// clean "one wins," but potential garbage for both. Both ft8_process()
+// (thin wrapper around the real ft8_process_impl(), see its own
+// comment) and ft8_poll() take this for their entire body so the two
+// threads can never run either one concurrently.
+static pthread_mutex_t ft8_process_mutex = PTHREAD_MUTEX_INITIALIZER;
 static int ft8_do_decode = 0;
 // Real report, live (2026-08-23), user's own screenshots (Band
 // Activity/CQ Panel showing e.g. "WV2B K4MFC EM73" and "CQ KD4KKF
@@ -109,6 +128,23 @@ static bool ft8_autocq_resume_pending = false;
 // comment -- has actually finished transmitting), not the instant it's
 // merely queued.
 static bool ft8_qso_log_pending = false;
+
+// Real report, live (2026-08-24), same bridge-the-gap pattern as
+// ft8_qso_log_pending right above -- and the exact same class of bug
+// that flag was invented to fix, just in a different spot: ft8_poll()'s
+// "an in-QSO reply ran out of retries" give-up branch used to call
+// ft8_finalize_pending_qso()/call_wipe() *immediately*, in the same
+// instant it queues the last (already-exhausted) retry's own
+// transmission -- not once that transmission has actually gone out.
+// CALL going empty now client-side clears RX Frequency (see the 'CALL'
+// case in web/index.html) -- so this early call_wipe() cleared the
+// panel *before* the final retry had even transmitted. User's own
+// report: "the clear of the rx frequency panel happened when the
+// counter got to zero but before the actual transmission occurred."
+// Set here instead, consumed by ft8_poll() once ft8_repeat naturally
+// reaches 0 on a *later* poll (i.e. once tx_is_on's own early return
+// confirms we're not still mid-transmission).
+static bool ft8_give_up_pending = false;
 
 // Real regression, caught live (2026-08-23) right after first adding
 // the RRR/RR73 dedup fix below: reusing RECV to detect a repeated
@@ -1548,7 +1584,7 @@ void ft8_rx(int32_t *samples, int count) {
 	}
 }
 
-void ft8_poll(int tx_is_on){
+static void ft8_poll_impl(int tx_is_on){
 	// ft8_suspend() already forced tx_off() synchronously, so this is
 	// really only guarding the "start something new" branch further
 	// down -- but checked first regardless, unconditionally, so nothing
@@ -1578,8 +1614,10 @@ void ft8_poll(int tx_is_on){
 	// sent with Auto CQ *not* running (ft8_autocq_resume_pending always
 	// false then) would return above before ever reaching the block below
 	// that actually consumes it -- the deferred log/call-wipe would just
-	// never happen.
-	if (!ft8_repeat && !ft8_autocq_resume_pending && !ft8_qso_log_pending)
+	// never happen. ft8_give_up_pending needs the same treatment -- see
+	// its own comment.
+	if (!ft8_repeat && !ft8_autocq_resume_pending && !ft8_qso_log_pending
+			&& !ft8_give_up_pending)
 		return;
 
 	// See ft8_qso_log_pending's own comment: the courtesy "73" queued in
@@ -1591,6 +1629,18 @@ void ft8_poll(int tx_is_on){
 		ft8_qso_log_pending = false;
 		enter_qso();
 		call_wipe();
+	}
+
+	// See ft8_give_up_pending's own comment: the exhausted reply queued
+	// in the give-up branch below has now actually finished
+	// transmitting -- clear the exchange now, not when it was merely
+	// queued.
+	if (!ft8_repeat && ft8_give_up_pending){
+		ft8_give_up_pending = false;
+		ft8_finalize_pending_qso();
+		call_wipe();
+		if (ft8_autocq_running)
+			ft8_autocq_resume_pending = true;
 	}
 
 	// Auto CQ: the QSO that just finished (ft8_process()'s "73"/"RR73"
@@ -1688,8 +1738,8 @@ void ft8_poll(int tx_is_on){
 			//    Schedule the same resume ft8_process() schedules on a
 			//    genuine QSO completion, so this dead-end doesn't
 			//    silently strand Auto CQ idle forever either.
-			if (ft8_autocq_running && ft8_repeat <= 0){
-				if (is_cq)
+			if (ft8_repeat <= 0){
+				if (is_cq){
 					// Give up -- nobody answered after FT8_REPEAT tries.
 					// Deliberately leaves #ft8_auto/the checkbox alone
 					// (user's own call): only the armed/running state and
@@ -1697,7 +1747,12 @@ void ft8_poll(int tx_is_on){
 					// below once this last burst finishes transmitting.
 					// A bare click on TX Enabled re-arms and starts a
 					// fresh round -- no need to touch the checkbox again.
-					ft8_autocq_stop();
+					// Only Auto CQ itself has an armed/running state to
+					// stop -- a manual single CQ call has nothing to do
+					// here.
+					if (ft8_autocq_running)
+						ft8_autocq_stop();
+				}
 				else {
 					// Real bug, confirmed live: this dead-end (an in-QSO
 					// reply -- e.g. our own answer to someone else's CQ --
@@ -1730,9 +1785,32 @@ void ft8_poll(int tx_is_on){
 					// otherwise silently discard a real, complete QSO the
 					// same way abort_tx() used to. See
 					// ft8_finalize_pending_qso()'s own comment.
-					ft8_finalize_pending_qso();
-					call_wipe();
-					ft8_autocq_resume_pending = true;
+					//
+					// Real report, live (2026-08-24): this whole block used
+					// to be gated on ft8_autocq_running, so Auto Answer
+					// running *without* Auto CQ also armed never reached
+					// call_wipe() here at all -- confirmed live: "when the
+					// repeat counter got to zero i continued to call the
+					// same station... another station selection did not
+					// occur." CALL staying stale here is the same class of
+					// bug already fixed above for Auto CQ's own version of
+					// this dead-end, just needed regardless of which
+					// automation (if any) is actually running -- a manual
+					// answer that goes unanswered needs its CALL cleared
+					// too, or the *next* genuine caller (auto-answered or
+					// manually clicked) can't be recognized either.
+					//
+					// Real report, live (2026-08-24), same session: this used
+					// to call ft8_finalize_pending_qso()/call_wipe() right
+					// here -- but ft8_repeat has *just* been decremented to 0
+					// for the retry this same pass is still queuing (see
+					// ftx_start_tx() a few lines up); it hasn't actually
+					// transmitted yet. CALL going empty now clears RX
+					// Frequency client-side, so this cleared the panel before
+					// the final retry had even gone out. Deferred instead
+					// (see ft8_give_up_pending's own comment), same pattern
+					// as ft8_qso_log_pending right above it.
+					ft8_give_up_pending = true;
 				}
 			}
 			// Live countdown for the operator -- broadcast every time
@@ -1760,6 +1838,16 @@ void ft8_poll(int tx_is_on){
 			}
 		}
 	}
+}
+
+// See ft8_process_mutex's own comment -- ft8_poll() (main thread, every
+// ~100ms) reads/writes the exact same shared exchange state ft8_process()
+// does, from a different thread than the one ft8_process() already
+// protects itself against. Thin wrapper, same pattern.
+void ft8_poll(int tx_is_on){
+	pthread_mutex_lock(&ft8_process_mutex);
+	ft8_poll_impl(tx_is_on);
+	pthread_mutex_unlock(&ft8_process_mutex);
 }
 
 float ft8_next_sample(){
@@ -2074,7 +2162,7 @@ static void ft8_set_rx_pitch_field(int pitch){
 	field_set("PITCH", pitch_str);
 }
 
-void ft8_process(char *message, ftx_operation operation){
+static void ft8_process_impl(char *message, ftx_operation operation){
 	char buff[100], reply_message[100], *p;
 	int auto_respond = 0;
 
@@ -2258,6 +2346,12 @@ void ft8_process(char *message, ftx_operation operation){
 	}
 }
 
+void ft8_process(char *message, ftx_operation operation){
+	pthread_mutex_lock(&ft8_process_mutex);
+	ft8_process_impl(message, operation);
+	pthread_mutex_unlock(&ft8_process_mutex);
+}
+
 void ft8_init(){
 	ft8_rx_buff_index = 0;
 	ft8_tx_buff_index = 0;
@@ -2321,6 +2415,13 @@ void ft8_resume(){
 // still goes through with the still-valid fields, instead of being
 // silently lost to whichever runs first.
 void ft8_finalize_pending_qso(){
+	// A new exchange taking over (every real caller of this function)
+	// is about to call_wipe() its own way regardless -- if a give-up
+	// was still waiting on its own final retry to actually transmit
+	// (see ft8_give_up_pending's own comment), that's now moot: just
+	// drop it rather than leaving it to misfire later against whatever
+	// exchange happens to be running the next time ft8_repeat hits 0.
+	ft8_give_up_pending = false;
 	if (!ft8_qso_log_pending)
 		return;
 	ft8_qso_log_pending = false;
