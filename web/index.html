@@ -4943,7 +4943,27 @@ function response_handler(response){
 			// non-empty), not every already-empty push. A 'MODE' push
 			// falling through here is harmless -- args is a mode string,
 			// never empty, so the !args check just never matches.
-			if (!args && el("CALL") && el("CALL").value)
+			//
+			// Real report, live (2026-08-24), confirmed via console DIAG:
+			// this only ever checked for a transition to *empty* -- but a
+			// give-up immediately followed by Auto Answer picking a new
+			// target coalesces into a *single* field push, server-side
+			// (call_wipe() setting CALL="" then set_call_field() setting
+			// it straight to the new station, both within the same tick,
+			// before any push happens). The client only ever sees CALL
+			// jump directly from the old station to the new one --
+			// confirmed live: "DIAG case CALL: args='KJ5PTH'
+			// old_value='OA4ENG'" -- so the empty state this was watching
+			// for is never actually observable here. Broadened to any
+			// change away from a real value, not just to empty: RX
+			// Frequency's current content belongs to old_value's exchange
+			// either way, so it's just as stale the instant CALL moves on
+			// to something else. Guarded on the *old* value being real
+			// (not this push's own value) so a manual click starting a
+			// fresh exchange from idle (old_value already "") doesn't
+			// wipe out FT8_message_chosen()'s own direct append.
+			var old_call_value = el("CALL") ? el("CALL").value : "";
+			if (old_call_value && args !== old_call_value)
 				FT8_rx_clear();
 			//There is no break statement here, CALL continues to default case
 		default:
