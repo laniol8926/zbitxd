@@ -40,7 +40,16 @@ const GRIDMAP = (function gridmap() {
   const ky = projection.forward([0, 85])[1];  // y-coordinate at (0�, 85�) in meters
 
   const scaleMin = 25;
-  const scaleMax = 200;
+  // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- 200% (the
+  // slider's old max, shown as "2.00") wasn't tight enough to separate
+  // nearby grid boxes for close-range daytime groundwave contacts
+  // (40M especially). Grid box positions come from real lat/lon math
+  // (gmGridIdToPoint()/gmGridToWorldPoint()), not from the base map
+  // image's own pixel detail, so zooming in this far still places them
+  // correctly -- the underlying photo just looks softer/blockier at
+  // the high end since it's a fixed 2068x2060 source image, same as
+  // enlarging any photo past its native resolution.
+  const scaleMax = 800;
   const scaleStep = 5;
   var scaleCur = 25; // Changed to 30% initial size
 
