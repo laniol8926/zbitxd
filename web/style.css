@@ -1576,7 +1576,19 @@ body {
 	position: fixed;
 	top: 0;
 	background: black;
-	z-index: 1;
+	/* Real report, live (2026-08-25): #maincontrols's own explicit
+	   z-index (position:fixed + z-index always creates a new stacking
+	   context) trapped every child popup -- including an open
+	   .linear-dropdown slider (e.g. RPT) -- inside this one box's
+	   single z-index:1 layer. Bumping the dropdown's own z-index had no
+	   effect: the real competition is this whole box vs #tx_meters
+	   (#pan_adapter, no z-index of its own, so it just wins on later
+	   DOM order at the shared z-index:1 level) -- so #maincontrols
+	   itself needs to win that comparison, not its children. Kept below
+	   the genuinely modal-level .app-dropdown/#keypad_panel (1000) and
+	   #restore-btn (99).
+	*/
+	z-index: 50;
 	/* see #sidebar's comment -- avoids a flash of the main window before
 	   show_login() runs */
 	display: none;
@@ -1655,7 +1667,14 @@ body {
 	position: absolute;
 	width: 50px;
 	height: 100px;
-	z-index: 1;
+	/* Real report, live (2026-08-25): #tx_meters (the SWR/RF output
+	   popup shown during TX) shares this same z-index:1, so during a
+	   transmission it could win the paint order and cover most of an
+	   open slider dropdown (e.g. RPT) -- exactly when the operator most
+	   wants to see/adjust it (mid-CQ-repeat). A control the operator
+	   explicitly clicked open should never be obscured by an unrelated
+	   status overlay. */
+	z-index: 10;
 	opacity: 1;
 	background-color: black;
 }
@@ -1825,6 +1844,22 @@ body {
 .tx-enabled-indicator.tx-active {
 	background: linear-gradient(to bottom, #ff4444, #b30000);
 	cursor: pointer;
+}
+/* Real report, live (2026-08-25): TX Enabled stays solid red for the
+   whole armed/Auto CQ session (per the comment above), not just the
+   literal instant audio is actually going out -- "there's really no
+   way to tell the radio is actually transmitting" once #tx_meters
+   (the SWR/RF popup, hidden per the operator's own ask -- it was
+   buggy and unreliable) stopped showing. Tied directly to in_tx
+   (switch_to_tx()/switch_to_rx()) rather than the coarser armed state
+   -- a bright pulse layered on top of the existing red, distinct at a
+   glance from plain "armed but idle right now". */
+.tx-enabled-indicator.tx-live {
+	animation: tx-live-pulse 0.6s ease-in-out infinite alternate;
+}
+@keyframes tx-live-pulse {
+	from { box-shadow: 0 0 2px 0px #ffee00; }
+	to   { box-shadow: 0 0 12px 4px #ffee00; }
 }
 
 /* Suspend -- always clickable (unlike TX Enabled, which only does

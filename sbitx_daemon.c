@@ -3715,13 +3715,35 @@ void cmd_exec(char *cmd){
 			} else {
 						//this is an extract from focus_field()
 						//it shifts the focus to the updated field
-						//without toggling/jumping the value 
+						//without toggling/jumping the value
 						struct field *prev_hover = f_hover;
 						struct field *prev_focus = f_focus;
 						f_focus = NULL;
 						f_focus = f_hover = f;
 						focus_since = millis();
 						update_field(f_hover);
+						// Real report, live (2026-08-25): "I waited until the
+						// counter got to 1 and then adjusted the number of
+						// repeats from 3 to 6 ... it did not adjust to 6" --
+						// then, on the very next repeat, Auto CQ gave up and
+						// unchecked itself. Root cause: ft8_repeat (the
+						// in-flight countdown) only ever gets re-read from
+						// this setting at the *start* of a fresh transmission
+						// (ft8_tx()/ft8_tx_3f()) or an explicit click on the
+						// countdown badge (ft8_repeat_reset()) -- changing
+						// the setting mid-round left the OLD countdown
+						// ticking down unaffected, so it still hit 0 on
+						// schedule and gave up (ft8_poll_impl(), modem_ft8.c)
+						// exactly as if the setting had never changed at all.
+						// Applying the same live-refresh a badge click
+						// already does, automatically, the instant the
+						// setting itself changes -- not just on request --
+						// means a mid-round change actually extends (or
+						// shortens) the round in progress, matching what the
+						// operator just asked for instead of silently being
+						// ignored until the next fresh CQ/reply.
+						if (!strcmp(exec, "FT8_REPEAT"))
+							ft8_repeat_reset();
 			}
 		}
 	}

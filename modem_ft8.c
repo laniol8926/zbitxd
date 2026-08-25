@@ -2537,6 +2537,12 @@ int ft8_is_repeating(){
 // letting it hit zero and give up on this CQ call/reply/Auto CQ round).
 // Deliberately a no-op while idle (ft8_repeat already 0, nothing being
 // repeated to extend) rather than resurrecting a finished round.
+//
+// Also called automatically from cmd_exec() (sbitx_daemon.c) any time
+// FT8_REPEAT itself changes -- otherwise an in-flight countdown just
+// kept ticking down toward its old total regardless of a live setting
+// change, giving up (and Auto CQ disarming itself) exactly on schedule
+// as if the change had never happened.
 void ft8_repeat_reset(){
 	if (ft8_repeat <= 0)
 		return;

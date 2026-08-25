@@ -260,13 +260,13 @@ const GRIDMAP = (function gridmap() {
       // 1.5px), explicitly as a temporary debugging aid, not a final
       // design choice -- "we can adjust the colors and width later".
       onsCtx.strokeStyle = "black";
-      onsCtx.lineWidth = 3;
+      onsCtx.lineWidth = 1.5; // user's own ask (2026-08-25): half of the original 3px
       onsCtx.beginPath();
       onsCtx.moveTo(pA[0], pA[1]);
       onsCtx.lineTo(pB[0], pB[1]);
       onsCtx.stroke();
       onsCtx.strokeStyle = "gold";
-      onsCtx.lineWidth = 1.5;
+      onsCtx.lineWidth = 0.75; // half of the original 1.5px
       onsCtx.stroke();
 
       // from/to: whichever point sent the last known message for this
@@ -335,13 +335,13 @@ const GRIDMAP = (function gridmap() {
     // a logic bug) 6px/3px.
     onsCtx.save();
     onsCtx.strokeStyle = "black";
-    onsCtx.lineWidth = 3;
+    onsCtx.lineWidth = 1.5; // user's own ask (2026-08-25): half of the original 3px
     onsCtx.beginPath();
     onsCtx.moveTo(myScreen[0], myScreen[1]);
     onsCtx.lineTo(theirScreen[0], theirScreen[1]);
     onsCtx.stroke();
     onsCtx.strokeStyle = "gold";
-    onsCtx.lineWidth = 1.5;
+    onsCtx.lineWidth = 0.75; // half of the original 1.5px
     onsCtx.stroke();
 
     // qsoLineForward: true while transmitting (arrow travels my->their),
@@ -857,7 +857,17 @@ const GRIDMAP = (function gridmap() {
   function gmFitToCanvas() {
     if (!ofsCanvas.width || !ofsCanvas.height || fixedWidth <= 0 || fixedHeight <= 0)
       return;
-    var fit = 100 * Math.max(fixedWidth / ofsCanvas.width, fixedHeight / ofsCanvas.height);
+    // Real report, live (2026-08-25): the exact cover-fit scale leaves
+    // *zero* pan slack on whichever axis is the tighter fit -- for this
+    // nearly-square map image in a wider-than-tall panel, that's width,
+    // so panning worked vertically but not horizontally at all right
+    // after opening. A small extra margin keeps the map fully filling
+    // the panel (the whole point of the cover fit) while leaving real
+    // room to shift the view left/right or up/down without having to
+    // zoom in manually first -- e.g. recentering off the default
+    // Atlantic-ish view toward the US or toward EU depending on which
+    // side of the band is actually active tonight.
+    var fit = 1.15 * 100 * Math.max(fixedWidth / ofsCanvas.width, fixedHeight / ofsCanvas.height);
     fit = Math.max(scaleMin, Math.min(scaleMax, fit));
     scaleCur = fit;
     var fScale = fit / 100;

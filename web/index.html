@@ -48,7 +48,7 @@
 	     file's line changed, by hand, same as any other deploy. -->
     <script src="pcm-player.js?v=1"></script>
 	<script src="proj4.js?v=1"></script>
-    <script src="gridmap.js?v=4"></script>
+    <script src="gridmap.js?v=6"></script>
 	<link rel="stylesheet" href="style.css?v=1">
   </head>
   <body>
@@ -69,7 +69,7 @@
 			title="Keys the transmitter with a steady tone -- click again to stop">Tune</button>
 		<div class="linear" id="linear_DRIVE" title="Adjust Transmitter RF Output">
     	<div class="linear-label">RF</div>
-    	<input type="number" id="DRIVE" min="1" max="100" class="linear-value" />
+    	<input type="number" id="DRIVE" min="1" max="100" class="linear-value" readonly />
      	<div class="linear-dropdown">
       	<input type="range" class="linear-slider"
         	id="slider_DRIVE" max="100" min="0" step="5" value="10" />
@@ -106,14 +106,14 @@
 			<div class="sbitxv3-selection ft8-txslot-value" id="FT8_TX1ST" tabindex="0">EVEN</div>
 		</div><div class="linear" id="linear_TX_PITCH">
     		<div class="linear-label">TX TONE</div>
-    			<input type="number" id="TX_PITCH" min="10" max="4000" class="linear-value" />
+    			<input type="number" id="TX_PITCH" min="10" max="4000" class="linear-value" readonly />
      		<div class="linear-dropdown">
       			<input type="range" class="linear-slider"
         			id="slider_TX_PITCH" max="4000" min="10" step="10" value="1900" />
 				</div>
 			</div><div class="linear" id="linear_FT8_REPEAT" title="Set the Number Of Repeat Transmissions">
     			<div class="linear-label">RPT</div>
-    			<input type="number" id="FT8_REPEAT" min="1" max="10" class="linear-value" />
+    			<input type="number" id="FT8_REPEAT" min="1" max="10" class="linear-value" readonly />
     			<span class="ft8-repeat-count" id="FT8_REPEATCNT_DISPLAY" title="Click to reset the repeat countdown"></span>
      		<div class="linear-dropdown">
       		<input type="range" class="linear-slider"
@@ -557,28 +557,28 @@
 			<div id="cw_settings">
 				<div class="linear" id="linear_WPM">
     			<div class="linear-label">WPM</div>
-    			<input type="number" id="WPM" min="0" max="100" class="linear-value" />
+    			<input type="number" id="WPM" min="0" max="100" class="linear-value" readonly />
      			<div class="linear-dropdown">
       			<input type="range" class="linear-slider"
         			id="slider_WPM" max="40" min="5" step="1" value="13" />
 					</div>
 				</div><div class="linear" id="linear_PITCH">
     			<div class="linear-label">PITCH</div>
-    			<input type="number" id="PITCH" min="0" max="100" class="linear-value" />
+    			<input type="number" id="PITCH" min="0" max="100" class="linear-value" readonly />
      			<div class="linear-dropdown">
       			<input type="range" class="linear-slider"
         			id="slider_PITCH" max="3000" min="50" step="10" value="600" />
 					</div>
 				</div><div class="linear" id="linear_CW_DELAY">
     			<div class="linear-label">DELAY</div>
-    			<input type="number" id="CW_DELAY" min="50" max="1000" class="linear-value" />
+    			<input type="number" id="CW_DELAY" min="50" max="1000" class="linear-value" readonly />
      			<div class="linear-dropdown">
       			<input type="range" class="linear-slider"
         			id="slider_PITCH" max="1000" min="50" step="50" value="600" />
 					</div>
 				</div><div class="linear" id="linear_SIDETONE">
     			<div class="linear-label">TX VOL</div>
-    			<input type="number" id="SIDETONE" min="0" max="100" class="linear-value" />
+    			<input type="number" id="SIDETONE" min="0" max="100" class="linear-value" readonly />
      			<div class="linear-dropdown">
       			<input type="range" class="linear-slider"
         			id="slider_SIDETONE" max="100" min="0" step="5" value="600" />
@@ -601,7 +601,7 @@
 	<div id="Voice_ui" class="sbitx-panel mode-panel">
     <div class="linear" id="linear_MIC">
     	<div class="linear-label">MIC</div>
-    	<input type="number" id="MIC" min="0" max="100" class="linear-value" />
+    	<input type="number" id="MIC" min="0" max="100" class="linear-value" readonly />
      	<div class="linear-dropdown">
       	<input type="range" class="linear-slider"
         	id="slider_MIC" max="100" min="0" step="1" value="13" />
@@ -2835,8 +2835,19 @@ function sbitx_list_select(event){
 
 function switch_to_tx(){
 	log("setting in_tx true");
-	$("#tx_meters").show();
+	// User's own ask (2026-08-25): "just hide that popup it doesn't work
+	// anyway" -- covered the RPT slider dropdown during TX (a real,
+	// separately-diagnosed stacking-context bug, #maincontrols vs
+	// #pan_adapter/#tx_meters) and wasn't giving useful readings besides.
+	// Not deleting #tx_meters/its CSS/switch_to_rx()'s hide() -- just no
+	// longer ever shown.
 	in_tx = true;
+	// Real follow-up, live: with the popup gone, "there's really no way
+	// to tell the radio is actually transmitting" -- TX Enabled's own
+	// red only means armed, not literally-transmitting-this-instant (see
+	// .tx-live's own CSS comment). el() rather than jQuery, matching
+	// this function's own existing style.
+	el("tx_enabled_indicator").classList.add("tx-live");
 	// QSO line direction (see gridmap_update_qso_line()'s own comment)
 	gridmap_update_qso_line();
 }
@@ -2845,6 +2856,7 @@ function switch_to_rx(){
 	$("#tx_meters").hide();
 	log("setting in_tx false");
 	in_tx = false;
+	el("tx_enabled_indicator").classList.remove("tx-live");
 	gridmap_update_qso_line();
 }
 
@@ -3976,6 +3988,7 @@ function tx_enabled_indicator_clicked(){
 	// optimistic local update for instant feedback -- the server's own
 	// TXACTIVE field push will confirm/correct this shortly after
 	el("tx_enabled_indicator").classList.remove("tx-active");
+	el("tx_enabled_indicator").classList.remove("tx-live");
 	// Cancelled via TX Enabled -- user's own ask: unhide Band Activity
 	// again once whatever was happening (Auto CQ, Auto Answer, or a
 	// manual QSO) gets cancelled this way. Restores the real standing
@@ -5440,6 +5453,24 @@ function response_handler(response){
 			// exact same restore, and had no path to it at all before.
 			if (was_cq_active && !cq_active){
 				qso_in_progress = false;
+				// Real report, live (2026-08-25): "I am not transmitting...
+				// the RX Frequency panel should have been hidden and the CQ
+				// panel displayed" -- own_cq_while_idle (FT8_new_message())
+				// appends our own outgoing CQ to RX Frequency while Auto CQ
+				// waits for a reply, but nothing ever cleared it again once
+				// that particular attempt ended with no answer -- it just
+				// sat there forever, permanently keeping has_content true
+				// and blocking every restore path below (both this one and
+				// update_rx_panel_visibility()'s own matching check). A
+				// genuine TXACTIVE 1->0 with no real exchange under way
+				// (CALL still empty) means whatever's in RX Frequency can
+				// only be that leftover own-CQ echo, never a real reply
+				// still landing -- safe to clear it here, unlike the real
+				// exchange case just below which must NOT be touched (see
+				// its own comment: the final "73" may not have been
+				// decoded/appended yet).
+				if (!el("CALL") || !el("CALL").value)
+					FT8_rx_clear();
 				// Real report, live -- user's own diagnosis, confirmed
 				// correct: right after logging a QSO, both Band Activity
 				// and RX Frequency showed at once, briefly. Root cause:
