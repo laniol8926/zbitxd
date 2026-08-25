@@ -48,7 +48,7 @@
 	     file's line changed, by hand, same as any other deploy. -->
     <script src="pcm-player.js?v=1"></script>
 	<script src="proj4.js?v=1"></script>
-    <script src="gridmap.js?v=6"></script>
+    <script src="gridmap.js?v=10"></script>
 	<link rel="stylesheet" href="style.css?v=4">
   </head>
   <body>
@@ -790,6 +790,13 @@ var gridmap_third_party_by_band = {};      // band -> Map("CALLA,CALLB" -> {call
 // about more than once no matter how many times its CQ/exchange decodes.
 var gridmap_lookup_requested = new Set();
 
+// Callsigns already given a forced box+label (GRIDMAP.ensureGridShown()/
+// labelCallsign()) via a third-party line -- session-lifetime, avoids
+// redoing the same draw calls on every repeat decode of an ongoing
+// exchange (gridmap_track_third_party() runs on every relevant decode,
+// not just the first).
+var gridmap_shown_calls = new Set();
+
 function gridmap_band_set(map, band){
 	if (!map[band])
 		map[band] = new Set();
@@ -910,9 +917,16 @@ function gridmap_track_third_party(text, mycallsign){
 			// decodes before debugging the QSO lines any further. Only
 			// on a genuine new/changed mapping (not every repeat decode
 			// of the same CQ) and only for the band actually on screen.
+			// User's own ask (2026-08-25): only label a callsign whose
+			// own grid actually has a box drawn -- this label call was
+			// never tied to that (a CQ decode alone never touches the
+			// Logged/Seen/Unlogged box tracking at all), so a dense band
+			// filled labels in with no box under them. hasVisibleBox()
+			// (gridmap.js) mirrors the exact same toggle+set checks the
+			// box-drawing functions gate themselves on.
 			if (grid_map.get(call) !== grid){
 				grid_map.set(call, grid);
-				if (band === gridmap_current_band){
+				if (band === gridmap_current_band && GRIDMAP.hasVisibleBox(grid)){
 					GRIDMAP.labelCallsign(grid, call);
 					GRIDMAP.redraw();
 				}
@@ -936,7 +950,8 @@ function gridmap_track_third_party(text, mycallsign){
 		return;
 	if (ft8_field_is_grid(exch) && grid_map.get(from_call) !== exch){
 		grid_map.set(from_call, exch);
-		if (band === gridmap_current_band){
+		// Same box-gating as the CQ branch above.
+		if (band === gridmap_current_band && GRIDMAP.hasVisibleBox(exch)){
 			GRIDMAP.labelCallsign(exch, from_call);
 			GRIDMAP.redraw();
 		}
@@ -959,8 +974,24 @@ function gridmap_track_third_party(text, mycallsign){
 	// just the grids (see gmTrackExchange()'s own comment, gridmap.js).
 	gridmap_band_map(gridmap_third_party_by_band, band).set(key,
 		{callA: to_call, gridA: to_grid, callB: from_call, gridB: from_grid, fromCall: from_call});
-	if (band === gridmap_current_band)
+	if (band === gridmap_current_band){
+		// User's own ask (2026-08-25): a third-party line is only ever
+		// drawn once both sides' grids are already confirmed (the check
+		// just above -- including via the server's persistent directory
+		// if needed) -- solid enough data to just show a box+label for
+		// whichever side the separate Logged/Seen/Unlogged tracking
+		// never happened to touch, rather than leave the line's own
+		// endpoint looking unexplained.
+		[[to_call, to_grid], [from_call, from_grid]].forEach(function(pair){
+			if (gridmap_shown_calls.has(pair[0]))
+				return;
+			gridmap_shown_calls.add(pair[0]);
+			GRIDMAP.ensureGridShown(pair[1]);
+			GRIDMAP.labelCallsign(pair[1], pair[0]);
+		});
 		GRIDMAP.trackExchange(to_call, to_grid, from_call, from_grid, from_call);
+		GRIDMAP.redraw();
+	}
 }
 
 // Records a grid into the given per-band accumulator only -- callers
@@ -986,9 +1017,15 @@ function gridmap_apply_band(band){
 	GRIDMAP.clearSeen();
 	if (!band)
 		return;
-	gridmap_band_set(gridmap_logged_by_band, band).forEach(function(g){ GRIDMAP.gridIdLogged(g); });
+	// User's own ask (2026-08-25): Logged toggle is gone (gone dead
+	// weight, same as logbook_update()'s own now-commented-out feed --
+	// see its comment) -- gridIdLogged() only ever drew a box under the
+	// permanently-off Seen toggle.
+	// gridmap_band_set(gridmap_logged_by_band, band).forEach(function(g){ GRIDMAP.gridIdLogged(g); });
 	gridmap_band_set(gridmap_seen_by_band, band).forEach(function(g){ GRIDMAP.gridIdNotLogged(g); });
-	gridmap_band_set(gridmap_just_logged_by_band, band).forEach(function(g){ GRIDMAP.gridIdJustLogged(g); });
+	// Same cleanup, "just logged" (red box) side -- see the "Logged"
+	// line just above.
+	// gridmap_band_set(gridmap_just_logged_by_band, band).forEach(function(g){ GRIDMAP.gridIdJustLogged(g); });
 	// Third-party pairs -- same re-feed pattern as the grid sets just
 	// above. Note: re-feeding resets each pair's lastSeen (GRIDMAP.
 	// trackExchange()) to "now", so a pair that actually went stale
@@ -3074,11 +3111,13 @@ function deco_to_span(text) {
 			jclass = "wsjtx-mycallsign";
 			break;
 		default:
-			if (GRIDMAP.isValidGridId(text.substring(2))) {
-				gridmap_record(gridmap_logged_by_band, deco_band, text.substring(2));
-				if (deco_band && deco_band === gridmap_current_band)
-					GRIDMAP.gridIdLogged(text.substring(2));
-			}
+			// User's own ask (2026-08-25): Logged toggle is gone -- see
+			// gridmap_apply_band()'s own comment, same cleanup.
+			// if (GRIDMAP.isValidGridId(text.substring(2))) {
+			// 	gridmap_record(gridmap_logged_by_band, deco_band, text.substring(2));
+			// 	if (deco_band && deco_band === gridmap_current_band)
+			// 		GRIDMAP.gridIdLogged(text.substring(2));
+			// }
 		    jclass = "ft8-old-grid";
 			break;
 	}
@@ -3118,11 +3157,13 @@ function deco_to_span(text) {
 	    jclass = "wsjtx-mycallsign";
 	    break;
 	default:
-	    if (GRIDMAP.isValidGridId(text.substring(2))) {
-		gridmap_record(gridmap_logged_by_band, deco_band, text.substring(2));
-		if (deco_band && deco_band === gridmap_current_band)
-		    GRIDMAP.gridIdLogged(text.substring(2));
-	    }
+	    // User's own ask (2026-08-25): Logged toggle is gone -- see
+	    // gridmap_apply_band()'s own comment, same cleanup.
+	    // if (GRIDMAP.isValidGridId(text.substring(2))) {
+	    // 	gridmap_record(gridmap_logged_by_band, deco_band, text.substring(2));
+	    // 	if (deco_band && deco_band === gridmap_current_band)
+	    // 	    GRIDMAP.gridIdLogged(text.substring(2));
+	    // }
 	    jclass = "ft8-old-grid";
 	    break;
     }
@@ -4416,17 +4457,19 @@ function logbook_update(args){
 	if (wk_band && token[8])
 		worked_set.add(token[8].toUpperCase() + "|" + token[1].toUpperCase() + "|" + wk_band);
 
-	// Feed the grid map's per-band "Logged" set -- see gridmap_apply_
-	// band()'s own comment. token[10] is exch_recv (the grid), same
-	// column order as token[8] above. This runs for every row of the
-	// full historical bulk-load too (logbook_watch_armed's own initial
-	// pass, not just new live QSOs), which is exactly what's needed to
-	// correctly populate "Logged" for whichever band happens to be
-	// current without a separate server round-trip.
+	// User's own ask (2026-08-25): the Logged/Seen/Unlogged toggles are
+	// gone (real-time display, not a worked-station history browser --
+	// gridmap.js's own comment on the same date), so feeding this
+	// per-band "Logged" lookup from the logbook is dead weight now --
+	// gridIdLogged() only ever drew a box under the (now permanently
+	// off) Seen toggle in the first place. Commented out rather than
+	// deleted in case the toggles ever come back.
+	// if (wk_band && token[10] && GRIDMAP.isValidGridId(token[10])){
+	// 	gridmap_record(gridmap_logged_by_band, wk_band, token[10]);
+	// 	if (wk_band === gridmap_current_band)
+	// 		GRIDMAP.gridIdLogged(token[10]);
+	// }
 	if (wk_band && token[10] && GRIDMAP.isValidGridId(token[10])){
-		gridmap_record(gridmap_logged_by_band, wk_band, token[10]);
-		if (wk_band === gridmap_current_band)
-			GRIDMAP.gridIdLogged(token[10]);
 		// User's own ask (2026-08-24): also seed the callsign->grid map
 		// third-party line tracking depends on (gridmap_track_third_party(),
 		// gridmap_grid_by_callsign) -- a station already worked before has
@@ -4440,7 +4483,13 @@ function logbook_update(args){
 		if (worked_call){
 			if (gridmap_grid_by_callsign.get(worked_call) !== token[10]){
 				gridmap_grid_by_callsign.set(worked_call, token[10]);
+				// Force-show rather than gate on hasVisibleBox() -- same
+				// reasoning as gridmap_track_third_party()'s pairs (see
+				// its own comment): a worked station's grid straight from
+				// the logbook is solid enough data to just display,
+				// independent of the now-gone Logged/Seen toggles.
 				if (wk_band === gridmap_current_band){
+					GRIDMAP.ensureGridShown(token[10]);
 					GRIDMAP.labelCallsign(token[10], worked_call);
 					GRIDMAP.redraw();
 				}
@@ -4940,16 +4989,20 @@ function update_data(text){
 			// popup notification.
 			// Extract qso grid from message e.g.
 			// "Logged: F4VTG -05-JO65 -14-JN12\n;"
-			if (s.startsWith("Logged:")) { // String ends width \n
-				s = s.substring(s.length-5,s.length-1);
-				// Band-scoped -- see gridmap_apply_band()'s own comment.
-				// A QSO that just logged is on whatever band the radio
-				// is on right now.
-				var just_logged_band = el("BAND") ? el("BAND").value : null;
-				gridmap_record(gridmap_just_logged_by_band, just_logged_band, s);
-				if (just_logged_band && just_logged_band === gridmap_current_band)
-					GRIDMAP.gridIdJustLogged(s);
-			}
+			// User's own ask (2026-08-25): this whole block only ever
+			// fed the grid map's "Seen -> just logged" (red box) state,
+			// gated on the Logged/Seen/Unlogged toggles -- gone now (see
+			// gridmap_apply_band()'s own comment, same cleanup).
+			// if (s.startsWith("Logged:")) { // String ends width \n
+			// 	s = s.substring(s.length-5,s.length-1);
+			// 	// Band-scoped -- see gridmap_apply_band()'s own comment.
+			// 	// A QSO that just logged is on whatever band the radio
+			// 	// is on right now.
+			// 	var just_logged_band = el("BAND") ? el("BAND").value : null;
+			// 	gridmap_record(gridmap_just_logged_by_band, just_logged_band, s);
+			// 	if (just_logged_band && just_logged_band === gridmap_current_band)
+			// 		GRIDMAP.gridIdJustLogged(s);
+			// }
 		}
 	}
 	else
@@ -5462,7 +5515,10 @@ function response_handler(response){
 				// own the next time gridmap_track_third_party() sees a
 				// directed exchange involving it -- no need to reconstruct
 				// the original triggering message here.
-				if (gridmap_current_band){
+				// Same box-gating as gridmap_track_third_party() -- a
+				// server-side lookup resolves the grid but never touches
+				// the Logged/Seen/Unlogged box tracking on its own.
+				if (gridmap_current_band && GRIDMAP.hasVisibleBox(g_grid)){
 					GRIDMAP.labelCallsign(g_grid, g_call);
 					GRIDMAP.redraw();
 				}

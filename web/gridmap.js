@@ -54,7 +54,19 @@ const GRIDMAP = (function gridmap() {
   const gridsSeenJustLogged = new Set();
   let showGridsSeen = false;
   let showGridsUnlogged = true;
- 
+
+  // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- a third-party
+  // line (gmDrawThirdPartyLines()) is only ever drawn once BOTH
+  // endpoint grids are already confirmed (index.html only calls
+  // trackExchange() after resolving both, via the persistent
+  // callsign->grid directory if needed) -- solid enough data to just
+  // show, not hide the line over. Kept as its own set, independent of
+  // the Logged/Seen/Unlogged toggles (gmHasVisibleBox() below always
+  // counts it), so a grid we know about this way is never gated behind
+  // a filter that was really about a completely different question
+  // (has this station been worked).
+  const gridsForceShown = new Set();
+
   const btnGridsUnLogged = document.createElement("button");
 
   const btnShowRoundDots = document.createElement("button");
@@ -158,15 +170,23 @@ const GRIDMAP = (function gridmap() {
     slider.style = "width: 120px;";
     sliderDiv.appendChild(zoomSpan);
     sliderDiv.appendChild(slider);
+    // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- this map is a
+    // real-time display of what's happening right now, not a tool for
+    // browsing worked-station history, so filtering by logged/seen/
+    // unlogged status doesn't fit it (echoes the user's own framing
+    // from a couple days earlier: "seeing on a map where someone is
+    // that i worked a week ago means nothing"). Left as dead code
+    // rather than deleted -- gmGridIdLogged()/NotLogged()/JustLogged()
+    // still use the underlying showGridsLogged/Seen/Unlogged flags to
+    // decide whether to draw, so simply not attaching these three
+    // buttons freezes the current defaults (Unlogged on, Logged/Seen
+    // off) as permanent behavior without touching any of that logic.
     btnGridsLogged.innerText = "Logged";
     btnGridsLogged.title = "Show all logged grids";
-    sliderDiv.appendChild(btnGridsLogged);
     btnGridsSeen.innerText = "Seen";
     btnGridsSeen.title = "Show all grids seen during this session";
-    sliderDiv.appendChild(btnGridsSeen);
     btnGridsUnLogged.innerText ="Unlogged";
     btnGridsUnLogged.title = "Show all unlogged grids seen during this session";
-    sliderDiv.appendChild(btnGridsUnLogged);
     setBtnsStateEnable(false);
     sliderDiv.appendChild(infoDiv);
     infoDiv.appendChild(infoSpan);
@@ -662,6 +682,50 @@ const GRIDMAP = (function gridmap() {
     }
   }
 
+  // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- callsign
+  // density on the map got cluttered with labels for stations whose
+  // own grid square never actually got a box drawn (index.html calls
+  // labelCallsign() from several places -- CQ/directed-message
+  // decodes, the persistent server-side lookup response -- none of
+  // which are tied to whether gridIdLogged()/NotLogged()/JustLogged()
+  // ever ran for that same grid, or whether the matching Logged/Seen/
+  // Unlogged toggle is even on). Mirrors the exact same three
+  // conditions those functions themselves gate their own gmShowGridId()
+  // call on, so "would a box actually be visible for this grid right
+  // now" and "did a box actually get drawn" never disagree.
+  function gmHasVisibleBox(gridId) {
+    if (gridsForceShown.has(gridId))
+      return true;
+    if (showGridsUnlogged && gridsSeenNotLogged.has(gridId))
+      return true;
+    if (showGridsSeen && (gridsSeenLogged.has(gridId) || gridsSeenJustLogged.has(gridId)))
+      return true;
+    if (showGridsLogged && gridsLogged.has(gridId))
+      return true;
+    return false;
+  }
+
+  // User's own ask (2026-08-25): see gridsForceShown's own comment
+  // above. Idempotent -- safe to call on every repeat decode of the
+  // same pair, not just the first time.
+  function gmEnsureGridShown(gridId) {
+    if (gridsForceShown.has(gridId))
+      return;
+    gridsForceShown.add(gridId);
+    gmShowGridId(gridId, "rgb(247, 247, 38)");
+    gmDelayedRefresh();
+  }
+
+  // Called from reloadGridMap() unconditionally (not gated by any
+  // Logged/Seen/Unlogged toggle, same as gmHasVisibleBox() treats this
+  // set) -- without this, a full reload (any toggle click) would wipe
+  // every force-shown box from the canvas and never bring it back.
+  function gmMarkForceShownGridIds() {
+    gridsForceShown.forEach(function (gridId) {
+      gmShowGridId(gridId, "rgb(247, 247, 38)");
+    });
+  }
+
   function clickShowRoundDots() {
     use_square_dots = !use_square_dots;
     setBtnsStateEnable(false);
@@ -756,6 +820,7 @@ const GRIDMAP = (function gridmap() {
     if (showGridsUnlogged) {
       gmMarkUnloggedGridIds();
     }
+    gmMarkForceShownGridIds();
     gmDrawScaledCanvas(scaleCur);
     setBtnsStateEnable(true);
   }
@@ -1036,5 +1101,7 @@ const GRIDMAP = (function gridmap() {
     gridIdLogged: gmGridIdLogged,
     gridIdNotLogged: gmGridIdNotLogged,
     gridIdJustLogged: gmGridIdJustLogged,
+    hasVisibleBox: gmHasVisibleBox,
+    ensureGridShown: gmEnsureGridShown,
   };
 })();
