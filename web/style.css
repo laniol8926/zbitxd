@@ -595,6 +595,21 @@ input[type="checkbox"] {
 	width: 600px;
 	max-width: 95vw;
 	max-height: 90vh;
+	/* Real report, live (2026-08-25): resizing this panel worked
+	   everywhere, but its own resize grip icon rendered "inside the
+	   scroll bar" -- .sbitx-panel's base overflow:auto means THIS
+	   panel scrolls itself once its content (a long band-frequency
+	   table + help text) exceeds max-height, and the native scrollbar
+	   that produces sits right where the resize handles' own true
+	   corner is. #gridmap never had this because it scrolls only an
+	   INNER content div, never itself (overflow:hidden here). Same
+	   fix: overflow:visible on the outer panel (never scrolls itself
+	   any more) + an explicit starting height, .sbitx-panel-body
+	   (index.html, wraps everything except the title) does the actual
+	   scrolling instead, at the panel's true inner edge, clear of the
+	   resize handles. */
+	overflow: visible;
+	height: 640px;
 }
 
 #connect_panel {
@@ -611,6 +626,9 @@ input[type="checkbox"] {
 	width: 600px;
 	max-width: 95vw;
 	max-height: 90vh;
+	/* Same fix, same real report -- see #settings_panel's own comment. */
+	overflow: visible;
+	height: 560px;
 }
 
 /* On a narrow phone-portrait viewport, the fixed 110px left offset
@@ -783,22 +801,46 @@ input[type="checkbox"] {
 	min-height: 150px;
 }
 
+/* User's own ask (2026-08-25): resize from any side/corner and drag
+   from anywhere on the title bar, matching an ordinary desktop window
+   -- not just the single bottom-right corner grip this used to be
+   limited to. 8 handles (4 edges + 4 corners).
+   Real report, live (2026-08-25): the first version of this positioned
+   handles absolute (0-offsets, relative to the panel's own box) --
+   worked for #gridmap (fixed height, its own content scrolls in a
+   separate inner div) but on any panel that scrolls ITSELF (Settings/
+   Connect/Console, .sbitx-panel's own overflow:auto -- content taller
+   than the panel), an absolute bottom/right:0 child anchors to the
+   bottom of the full SCROLLABLE content, not the visible clipped
+   viewport of it -- confirmed live ("the grip icon is still there
+   inside the scrollable panel", reachable by scrolling down to it,
+   not sitting at the panel's actual visible corner). Fixed by making
+   handles position:fixed (viewport coordinates) and computing their
+   exact left/top/width/height in JS from the panel's own
+   getBoundingClientRect() (init_draggable_panels(), index.html) --
+   that rect is always the panel's true visible box regardless of its
+   own internal scroll position, so this sidesteps the anchoring
+   problem entirely instead of trying to out-guess overflow/scrolling
+   in CSS. z-index above #maincontrols (50) -- a floating panel's
+   resize border should be reachable even where it overlaps the
+   toolbar, same as a real OS window. */
 .panel-resize-handle {
-	position: absolute;
-	right: 0;
-	bottom: 0;
-	width: 22px;
-	height: 22px;
-	cursor: nwse-resize;
+	position: fixed;
+	touch-action: none;
+	z-index: 60;
+}
+.panel-resize-handle-n, .panel-resize-handle-s { cursor: ns-resize; }
+.panel-resize-handle-e, .panel-resize-handle-w { cursor: ew-resize; }
+.panel-resize-handle-ne, .panel-resize-handle-sw { cursor: nesw-resize; }
+.panel-resize-handle-nw, .panel-resize-handle-se { cursor: nwse-resize; }
+.panel-resize-handle-se {
 	/* Real corner grip, drawn with a gradient rather than an image/font
 	   icon -- three diagonal white stripes fading from the bottom-right
 	   corner, the same visual language browsers already use for their
 	   own native resize handles, so this reads as "grab here" without
-	   needing any asset. touch-action:none stops the browser's own
-	   scroll/zoom gesture handling from stealing touchmove before our
-	   own listener (below) sees it -- confirmed necessary live, without
-	   it a touch-drag on this handle scrolled the page instead of
-	   resizing the panel. */
+	   needing any asset. Kept only on this one corner (the original,
+	   most-discoverable spot) -- the other 7 handles are invisible,
+	   cursor-only, same as a normal OS window's edge borders. */
 	background: linear-gradient(135deg,
 		transparent 0%, transparent 40%,
 		#888 40%, #888 46%,
@@ -807,18 +849,43 @@ input[type="checkbox"] {
 		transparent 66%, transparent 80%,
 		#888 80%, #888 86%,
 		transparent 86%, transparent 100%);
-	touch-action: none;
-	z-index: 1;
 }
 
 .sbitx-panel-title {
-	float: right;
-	display: inline-block;
+	/* Was float:right, sized to its own content (just the Close button
+	   on most panels) -- meant only that small button was ever grabbable
+	   to drag, not the rest of the bar. display:flex + width:100% makes
+	   this a real full-width title bar; any text (e.g. #gridmap's "Grid
+	   Map") sits at the natural flex-start on the left, and
+	   .sbitx-btn-back's own margin-left:auto below pushes Close to the
+	   right regardless of whether there's text before it. */
+	display: flex;
+	align-items: center;
+	width: 100%;
+	box-sizing: border-box;
 	background-color: black;
 	font-size: 14pt;
 	cursor: move;
 	user-select: none;
 	padding: 4px 6px;
+}
+.sbitx-panel-title .sbitx-btn-back {
+	margin-left: auto;
+}
+
+/* Settings/Connect's own scrollable content, kept separate from the
+   outer .sbitx-panel -- see #settings_panel's own comment (this rule's
+   counterpart) for why. top is set in JS (init_draggable_panels(),
+   index.html), from the title bar's own real measured height, rather
+   than guessed here -- exact regardless of font/padding, and never
+   goes stale if either ever changes. */
+.sbitx-panel-body {
+	position: absolute;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	overflow-y: auto;
+	box-sizing: border-box;
 }
 
 /* Same tactile treatment as .recorder-btn above -- border added (had
