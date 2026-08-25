@@ -199,13 +199,60 @@ bool logbook_grid_exists(char *id) {
 	return exists;
 }
 
-int logbook_prev_log(const char *callsign, char *result){
+// Moved up from further down in this file (originally right before
+// export_adif(), its other user) -- logbook_prev_log() below now needs
+// it too, and C needs it declared before first use.
+struct band_name {
+	char *name;
+	int from, to;
+} bands[] = {
+	{"160M", 1800, 2000},
+	{"80M", 3500, 4000},
+	{"60M", 5000, 5500},
+	{"40M", 7000, 7300},
+	{"30M", 10000, 10150},
+	{"20M", 14000, 14350},
+	{"17M", 18000, 18200},
+	{"15M", 21000, 21450},
+	{"12M", 24800, 25000},
+	{"10M", 28000, 29700},
+};
+
+// Real report, live (2026-08-25): "i called KA1MXL again... no
+// transmit" -- worked before, but never on the band actually in use
+// (confirmed: "not on 30M" via the logbook). pre_ft8_check()'s dupe-
+// confirmation gate (a deliberate safety step: a first click on an
+// already-worked station doesn't transmit, a second confirming click
+// does) used to call this with just the callsign, matching *any* prior
+// QSO on *any* band/mode -- inconsistent with FT8_already_worked()
+// (web/index.html), which already deliberately scopes "worked before"
+// to the current band+mode ("working the same station again on a
+// different band or mode is a legitimate new contact"). Scoped the
+// same way here now: cur_freq_khz is looked up against bands[] (same
+// table/logic export_adif() already uses) to bound the query to the
+// current band; band-less callers (or a frequency outside every known
+// band) fall back to the old unscoped match rather than silently
+// hiding a real prior contact.
+int logbook_prev_log(const char *callsign, char *result, long cur_freq_khz, const char *mode){
 	char statement[1000], param[2000];
 	sqlite3_stmt *stmt;
+	long band_from = -1, band_to = -1;
 
-	sprintf(statement, "select * from logbook where "
-		"callsign_recv=\"%s\" ORDER BY id DESC",
-		callsign);
+	for (int j = 0; j < sizeof(bands)/sizeof(struct band_name); j++)
+		if (bands[j].from <= cur_freq_khz && cur_freq_khz <= bands[j].to){
+			band_from = bands[j].from;
+			band_to = bands[j].to;
+			break;
+		}
+
+	if (band_from >= 0 && mode && mode[0])
+		sprintf(statement, "select * from logbook where "
+			"callsign_recv=\"%s\" AND freq BETWEEN %ld AND %ld AND mode=\"%s\" ORDER BY id DESC",
+			callsign, band_from, band_to, mode);
+	else
+		sprintf(statement, "select * from logbook where "
+			"callsign_recv=\"%s\" ORDER BY id DESC",
+			callsign);
 	strcpy(result, callsign);
 	strcat(result, ": ");
 	int res = sqlite3_prepare_v2(db, statement, -1, &stmt, NULL);
@@ -549,22 +596,6 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 // as the grid squares above: confirmed live, comments also came in
 // missing on a real cqrlog import.
 const static char *adif_names[]={"ID","MODE","FREQ","QSO_DATE","TIME_ON","OPERATOR","RST_SENT","MY_GRIDSQUARE","CALL","RST_RCVD","GRIDSQUARE","STX","COMMENT","TX_PWR"};
-
-struct band_name {
-	char *name;
-	int from, to;
-} bands[] = {
-	{"160M", 1800, 2000},
-	{"80M", 3500, 4000},
-	{"60M", 5000, 5500},
-	{"40M", 7000, 7300},
-	{"30M", 10000, 10150},
-	{"20M", 14000, 14350},
-	{"17M", 18000, 18200},
-	{"15M", 21000, 21450},
-	{"12M", 24800, 25000},
-	{"10M", 28000, 29700},
-};
 
 static void strip_chr(char *str, const char to_remove){
     int i, j, len;

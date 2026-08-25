@@ -3348,7 +3348,8 @@ void pre_ft8_check(char* message) {
 	//printf("pre_ft8_check: message='%s'\n", message);
 	if (get_ft8_callsign(message, other_callsign) >= 0) {
 		//strcpy(result,"FT8_check_res ");
-		int cnt = logbook_prev_log(other_callsign, result);
+		long cur_freq_khz = atol(get_field("r1:freq")->value) / 1000;
+		int cnt = logbook_prev_log(other_callsign, result, cur_freq_khz, field_str("MODE"));
 		char *p =strchr(message, '~');
 		if (p) {
 			strcat(result, p-1);
