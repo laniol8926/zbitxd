@@ -895,3 +895,78 @@ void band_freq_list(char *out, size_t out_size){
 	sqlite3_finalize(stmt);
 	out[used] = 0;
 }
+
+// Persistent callsign->grid directory, backing the web UI's Grid Map.
+// Same self-healing CREATE TABLE IF NOT EXISTS story as
+// band_freq_ensure_table() just above -- an already-deployed sbitx.db
+// picks this up on next restart, no fresh-install-only path needed.
+// Bulk-seeded once from the FCC ULS database (scripts/seed_callsign_grid.py,
+// writing directly via the sqlite3 CLI, source='uls') and kept fresh by
+// every live FT8 CQ decode (modem_ft8.c, via callsign_grid_set() below,
+// source='decode') -- see this feature's own design note for why CQ only:
+// the CQ message is the one unambiguous case where a station is
+// self-broadcasting its own grid to nobody in particular.
+void callsign_grid_ensure_table(void){
+	char *err_msg;
+
+	if (db == NULL)
+		logbook_open();
+
+	sqlite3_exec(db,
+		"CREATE TABLE IF NOT EXISTS callsign_grid ("
+		"callsign TEXT PRIMARY KEY NOT NULL,"
+		"grid TEXT NOT NULL,"
+		"source TEXT NOT NULL DEFAULT 'decode',"
+		"updated_at INTEGER NOT NULL DEFAULT 0);", 0, 0, &err_msg);
+}
+
+// Last-write-wins by design: a live decode overwriting a ULS-seeded
+// mailing-address-derived grid with the station's own self-reported CQ
+// grid is strictly more accurate, and a station that's moved or been
+// reissued should update too. Always stamps source='decode' -- the
+// seed script's own writes go directly via the sqlite3 CLI, never
+// through this function, so there's no need for a source parameter.
+void callsign_grid_set(const char *callsign, const char *grid){
+	sqlite3_stmt *stmt;
+
+	if (db == NULL)
+		logbook_open();
+
+	if (sqlite3_prepare_v2(db,
+			"INSERT INTO callsign_grid (callsign, grid, source, updated_at) VALUES(?,?,'decode',?)"
+			" ON CONFLICT(callsign) DO UPDATE SET grid=excluded.grid, source='decode', updated_at=excluded.updated_at;",
+			-1, &stmt, NULL) != SQLITE_OK)
+		return;
+	sqlite3_bind_text(stmt, 1, callsign, -1, SQLITE_STATIC);
+	sqlite3_bind_text(stmt, 2, grid, -1, SQLITE_STATIC);
+	sqlite3_bind_int64(stmt, 3, (sqlite3_int64)time(NULL));
+	sqlite3_step(stmt);
+	sqlite3_finalize(stmt);
+}
+
+// Returns true and fills out (caller-owned, out_size >= 5) if this
+// callsign's grid is already known -- either bulk-seeded or previously
+// decoded. Used by webserver.c's on-demand gridlookup= handler.
+bool callsign_grid_get(const char *callsign, char *out, size_t out_size){
+	sqlite3_stmt *stmt;
+	bool found = false;
+
+	if (db == NULL)
+		logbook_open();
+
+	if (sqlite3_prepare_v2(db,
+			"SELECT grid FROM callsign_grid WHERE callsign=?;",
+			-1, &stmt, NULL) != SQLITE_OK)
+		return false;
+	sqlite3_bind_text(stmt, 1, callsign, -1, SQLITE_STATIC);
+	if (sqlite3_step(stmt) == SQLITE_ROW){
+		const unsigned char *g = sqlite3_column_text(stmt, 0);
+		if (g){
+			strncpy(out, (const char*)g, out_size - 1);
+			out[out_size - 1] = 0;
+			found = true;
+		}
+	}
+	sqlite3_finalize(stmt);
+	return found;
+}

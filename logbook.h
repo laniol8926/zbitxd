@@ -17,3 +17,6 @@ void logbook_ensure_columns(void);
 long band_freq_get(const char *band, const char *mode);
 void band_freq_set(const char *band, const char *mode, long freq);
 void band_freq_list(char *out, size_t out_size);
+void callsign_grid_ensure_table(void);
+void callsign_grid_set(const char *callsign, const char *grid);
+bool callsign_grid_get(const char *callsign, char *out, size_t out_size);

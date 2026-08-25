@@ -198,6 +198,27 @@ void get_bandfreqlist(struct mg_connection *c){
 	mg_ws_send(c, out, strlen(out), WEBSOCKET_OP_TEXT);
 }
 
+// On-demand callsign->grid lookup against the persistent directory
+// (logbook.c) -- the client only ever asks about a specific callsign
+// it's already seeing decoded and can't resolve itself (see
+// gridmap_maybe_request_grid(), web/index.html), never a bulk sync --
+// the directory can hold hundreds of thousands of ULS-seeded rows, far
+// too much to push wholesale. Always responds, even on a miss (no
+// trailing grid token) -- that's the client's signal the server has
+// authoritatively answered "unknown," so it can stop asking rather than
+// silently getting nothing back and re-requesting forever.
+static void get_grid(struct mg_connection *c, char *args){
+	char grid[8], out[64];
+	char *callsign = strtok(args, " \t\n");
+	if (!callsign)
+		return;
+	if (callsign_grid_get(callsign, grid, sizeof(grid)))
+		snprintf(out, sizeof(out), "GRID %s %s", callsign, grid);
+	else
+		snprintf(out, sizeof(out), "GRID %s", callsign);
+	web_respond(c, out);
+}
+
 char request[200];
 int request_index = 0;
 
@@ -265,6 +286,8 @@ static void web_despatcher(struct mg_connection *c, struct mg_ws_message *wm){
 		get_audiolist(c);
 	else if (!strcmp(field, "bandfreqlist"))
 		get_bandfreqlist(c);
+	else if (!strcmp(field, "gridlookup"))
+		get_grid(c, value);
 	else if (!strcmp(field, "refresh"))
 		get_updates(c, 1);
 	else{

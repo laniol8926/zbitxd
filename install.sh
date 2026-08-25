@@ -57,7 +57,7 @@ sudo apt update
 sudo apt install -y \
 	git libasound2-dev libfftw3-dev libsqlite3-dev libsystemd-dev sqlite3 \
 	build-essential autoconf automake libtool libusb-1.0-0-dev libltdl-dev \
-	libncurses-dev
+	libncurses-dev python3 curl
 
 echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
 echo "*** system time (FT8 needs it accurate)"
@@ -172,6 +172,29 @@ fi
 	make
 	sudo make install
 )
+
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+echo "*** Callsign->grid directory (one-time FCC ULS seed)"
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+# sbitx.db is guaranteed to exist by now (created by the Makefile's own
+# install target, data/create_db.sql, as part of the "sudo make install"
+# just above) but zbitxd itself hasn't been (re)started yet -- so this
+# writes with zero contention and doesn't need to worry about the
+# main-thread-only db-access rule that applies once the daemon is live
+# (see ft8_grid_queue's own comment, modem_ft8.c). Owned by the zbitxd
+# system user once the daemon's Makefile install step chown -R's
+# STATEDIR, same as every other file there -- but this script itself
+# refuses to run as root (see the check above), so the actual sqlite
+# write below needs sudo, same as systemctl further down.
+SBITX_DB="/var/lib/zbitxd/sbitx.db"
+sudo sqlite3 "$SBITX_DB" "CREATE TABLE IF NOT EXISTS callsign_grid (callsign TEXT PRIMARY KEY NOT NULL, grid TEXT NOT NULL, source TEXT NOT NULL DEFAULT 'decode', updated_at INTEGER NOT NULL DEFAULT 0);"
+EXISTING_ULS_ROWS=$(sudo sqlite3 "$SBITX_DB" "SELECT COUNT(*) FROM callsign_grid WHERE source='uls';")
+if [ "$EXISTING_ULS_ROWS" -gt 0 ]; then
+	echo "callsign_grid already seeded ($EXISTING_ULS_ROWS rows), skipping."
+else
+	sudo python3 "$ZBITXD_DIR/scripts/seed_callsign_grid.py" "$SBITX_DB"
+fi
+sudo chown zbitxd:zbitxd "$SBITX_DB"
 
 sudo systemctl daemon-reload
 sudo systemctl enable zbitxd

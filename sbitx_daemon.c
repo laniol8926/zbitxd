@@ -2741,6 +2741,13 @@ bool ui_tick(){
 
  	modem_poll(mode_id(f_mode->value), ticks);
 
+	// Drains callsign->grid pairs the FT8 decode thread has queued from
+	// live CQ decodes (see the queue's own comment, modem_ft8.c) --
+	// main-thread-only, since it's what actually writes to logbook.c's
+	// db handle. Unconditional every tick: draining a near-always-empty
+	// queue is a handful of mutex-guarded comparisons, negligible.
+	ft8_grid_queue_drain();
+
 /*
 	if (ticks % 20 == 0){
 	}
@@ -3834,6 +3841,11 @@ int main( int argc, char* argv[] ) {
 	// already-deployed database predates it, a no-op otherwise -- see
 	// logbook_ensure_columns()'s own comment.
 	logbook_ensure_columns();
+
+	// self-healing: creates the persistent callsign->grid directory
+	// backing the web UI's Grid Map if missing, a no-op otherwise -- see
+	// callsign_grid_ensure_table()'s own comment (logbook.c).
+	callsign_grid_ensure_table();
 
 	//the logger fields may have an unfinished qso details
 	call_wipe();

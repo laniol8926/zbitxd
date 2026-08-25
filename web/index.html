@@ -769,8 +769,22 @@ var gridmap_current_band = null;
 // talking to each other at all, so "has a known grid" alone isn't
 // "is a QSO worth drawing a line for".
 
-var gridmap_grid_by_callsign_by_band = {}; // band -> Map(callsign -> grid)
+// ZBITXD LOCAL CHANGE (2026-08-25): flat, not per-band -- a station's
+// physical grid doesn't depend on which band it happens to be
+// transmitting on right now, so band-scoping this specific map (as it
+// used to be) threw away real information: a grid learned while
+// watching 20m couldn't help resolve that same station heard later on
+// 40m. gridmap_third_party_by_band (which *pairs are currently active*)
+// stays band-scoped -- that legitimately depends on which band's live
+// traffic is being watched, unlike the underlying grid data.
+var gridmap_grid_by_callsign = new Map(); // callsign -> grid
 var gridmap_third_party_by_band = {};      // band -> Map("CALLA,CALLB" -> {callA, gridA, callB, gridB})
+
+// Callsigns already asked about via the server's persistent callsign->
+// grid directory (see gridmap_maybe_request_grid()) -- session-lifetime,
+// not per-band either, so a still-unresolved callsign is never asked
+// about more than once no matter how many times its CQ/exchange decodes.
+var gridmap_lookup_requested = new Set();
 
 function gridmap_band_set(map, band){
 	if (!map[band])
@@ -782,6 +796,20 @@ function gridmap_band_map(map, band){
 	if (!map[band])
 		map[band] = new Map();
 	return map[band];
+}
+
+// Persistent callsign->grid directory lookup (server-side, logbook.c's
+// callsign_grid table -- bulk-seeded from the FCC ULS database, plus
+// every live CQ decode) -- fires only for a callsign we're already
+// seeing decoded right now but can't resolve from what's already
+// known client-side, and at most once per callsign per session
+// (gridmap_lookup_requested). Response lands in response_handler()'s
+// case 'GRID': below.
+function gridmap_maybe_request_grid(call){
+	if (!ft8_callsign_looks_real(call) || gridmap_lookup_requested.has(call))
+		return;
+	gridmap_lookup_requested.add(call);
+	websocket_send("gridlookup=" + call);
 }
 
 // General-purpose version of ft8_message_other_party() -- that one
@@ -853,7 +881,7 @@ function gridmap_track_third_party(text, mycallsign){
 	var fields = ft8_message_fields(text);
 	if (!fields || fields.length < 2)
 		return;
-	var grid_map = gridmap_band_map(gridmap_grid_by_callsign_by_band, band);
+	var grid_map = gridmap_grid_by_callsign;
 	var call, grid;
 	if (fields[0] === "CQ"){
 		// "CQ CALL GRID" (fields[1]/[2]) or "CQ DX/POTA/etc CALL GRID"
@@ -885,6 +913,12 @@ function gridmap_track_third_party(text, mycallsign){
 					GRIDMAP.redraw();
 				}
 			}
+		} else if (!grid_map.has(call)){
+			// This particular CQ decode didn't carry a usable grid (rare,
+			// but e.g. a marginal decode) and we don't already know this
+			// station -- ask the server's persistent directory instead of
+			// just giving up until we happen to catch a cleaner CQ.
+			gridmap_maybe_request_grid(call);
 		}
 		return;
 	}
@@ -905,8 +939,16 @@ function gridmap_track_third_party(text, mycallsign){
 	}
 	var to_grid = grid_map.get(to_call);
 	var from_grid = grid_map.get(from_call);
-	if (!to_grid || !from_grid)
+	if (!to_grid || !from_grid){
+		// Whichever side is still unknown client-side might already be on
+		// file server-side (ULS seed, or a CQ we simply didn't catch) --
+		// ask, rather than only ever resolving from our own decodes.
+		if (!to_grid)
+			gridmap_maybe_request_grid(to_call);
+		if (!from_grid)
+			gridmap_maybe_request_grid(from_call);
 		return; // one side's grid still unknown -- nothing to draw yet
+	}
 	var key = to_call < from_call ? (to_call + "," + from_call) : (from_call + "," + to_call);
 	// from_call is the sender of *this* message -- remembered per pair
 	// so a band switch later restores the last-known direction too, not
@@ -2418,6 +2460,12 @@ function restore_panel_geometry(panel){
 		if (v)
 			panel.style[prop] = v;
 	});
+	// Same clamp drag_move() applies live -- a position saved before that
+	// fix existed (or from some other stale/bad state) would otherwise
+	// keep restoring the title bar off-screen forever, with nothing left
+	// below y=0 to grab and drag it back down.
+	if (parseFloat(panel.style.top) < 0)
+		panel.style.top = "0px";
 }
 
 function save_panel_geometry(panel){
@@ -2495,7 +2543,13 @@ function init_draggable_panels(){
 			if (Math.abs(dx) > 3 || Math.abs(dy) > 3)
 				moved = true;
 			panel.style.left = (start_left + dx) + "px";
-			panel.style.top = (start_top + dy) + "px";
+			// Real report, live (2026-08-25), cellphone: dragging the
+			// title bar too close to the top of the screen let it go
+			// fully off-screen under the mobile browser's own chrome
+			// (address bar) -- with nothing left below y=0 to grab, the
+			// panel was then stuck there, unreachable. Clamped to 0 so
+			// the drag handle can never leave the visible viewport.
+			panel.style.top = Math.max(0, start_top + dy) + "px";
 		}
 
 		function drag_end(){
@@ -4230,17 +4284,18 @@ function logbook_update(args){
 		if (wk_band === gridmap_current_band)
 			GRIDMAP.gridIdLogged(token[10]);
 		// User's own ask (2026-08-24): also seed the callsign->grid map
-		// third-party line tracking depends on (gridmap_track_third_party()
-		// in gridmap_grid_by_callsign_by_band) -- a station already worked
-		// before has its real grid sitting right here in the logbook, no
-		// reason to wait on freshly re-decoding their CQ/grid-reply again
-		// this session before a box/line for them can appear. Same grid
-		// value already validated by isValidGridId() just above.
+		// third-party line tracking depends on (gridmap_track_third_party(),
+		// gridmap_grid_by_callsign) -- a station already worked before has
+		// its real grid sitting right here in the logbook, no reason to
+		// wait on freshly re-decoding their CQ again this session before a
+		// box/line for them can appear. Same grid value already validated
+		// by isValidGridId() just above. Flat map (2026-08-25) -- a
+		// station's grid doesn't depend on which band this particular
+		// logged QSO happened to be on.
 		var worked_call = token[8] ? token[8].toUpperCase() : "";
 		if (worked_call){
-			var worked_grid_map = gridmap_band_map(gridmap_grid_by_callsign_by_band, wk_band);
-			if (worked_grid_map.get(worked_call) !== token[10]){
-				worked_grid_map.set(worked_call, token[10]);
+			if (gridmap_grid_by_callsign.get(worked_call) !== token[10]){
+				gridmap_grid_by_callsign.set(worked_call, token[10]);
 				if (wk_band === gridmap_current_band){
 					GRIDMAP.labelCallsign(token[10], worked_call);
 					GRIDMAP.redraw();
@@ -5246,6 +5301,28 @@ function response_handler(response){
 			// once a QSO logs, everything in it is stale regardless of
 			// which callsign it mentions, so a full clear is correct here.
 			FT8_rx_clear();
+			break;
+		case 'GRID':
+			// Response to gridmap_maybe_request_grid()'s "gridlookup=" --
+			// "GRID <call> <grid>" on a hit, bare "GRID <call>" on a
+			// confirmed miss (nothing further to do for a miss;
+			// gridmap_lookup_requested already prevents asking again).
+			var grid_parts = args.split(' ');
+			var g_call = grid_parts[0], g_grid = grid_parts[1];
+			if (g_grid && GRIDMAP.isValidGridId(g_grid)){
+				gridmap_grid_by_callsign.set(g_call, g_grid);
+				// The lookup was only ever triggered by a decode that just
+				// happened on the currently-viewed band, so it's correct to
+				// draw immediately rather than wait for a subsequent decode.
+				// Any pair still waiting on this callsign completes on its
+				// own the next time gridmap_track_third_party() sees a
+				// directed exchange involving it -- no need to reconstruct
+				// the original triggering message here.
+				if (gridmap_current_band){
+					GRIDMAP.labelCallsign(g_grid, g_call);
+					GRIDMAP.redraw();
+				}
+			}
 			break;
 		case 'TEXT':
 			log("text: [ " + args + "]");

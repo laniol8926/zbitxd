@@ -52,3 +52,8 @@ int ft8_decode_file(const char *path);
 // unlocked (search the whole band, the default/normal behavior). See
 // its own definition in modem_ft8.c for the margin used.
 void ft8_set_qso_lock(float freq_hz);
+
+// Drains the FT8-decode-thread -> main-thread callsign->grid queue,
+// writing each entry to the persistent directory (logbook.c). Main
+// thread only -- see the queue's own comment in modem_ft8.c.
+void ft8_grid_queue_drain(void);

@@ -90,6 +90,59 @@ static int ft8_do_decode = 0;
 // calls like this -- only within one. Tracks which slot (by its own
 // ft8_rx_buff_start_ms, which only changes on a genuine new slot) has
 // already been triggered, so a slot can only ever queue one decode.
+// Callsign->grid directory hand-off (see this block's use in
+// sbitx_ft8_decode(), and callsign_grid_ensure_table()'s own comment,
+// logbook.c) -- same mutex-protected-queue pattern as ft8_process_mutex
+// above, for the same reason: logbook.c's db handle has no existing
+// precedent for cross-thread access, and this codebase already hit a
+// real cross-thread race in this exact subsystem once before. Pushed
+// from the FT8 decode thread, drained (and only there does the actual
+// sqlite write happen, via callsign_grid_set()) from the main thread's
+// own ui_tick(). Capacity comfortably above kMax_decoded_messages (50)
+// -- a full decode pass can't produce more CQ-with-grid candidates than
+// that in one slot.
+#define FT8_GRID_QUEUE_CAP 64
+struct ft8_grid_queue_entry { char callsign[16]; char grid[8]; };
+static struct ft8_grid_queue_entry ft8_grid_queue[FT8_GRID_QUEUE_CAP];
+static int ft8_grid_queue_head = 0, ft8_grid_queue_count = 0;
+static pthread_mutex_t ft8_grid_queue_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+// FT8 decode thread only. Never blocks waiting on the main thread --
+// silently drops on overflow rather than stalling decoding; a dropped
+// grid just gets re-queued the next time that station calls CQ.
+static void ft8_grid_queue_push(const char *callsign, int callsign_len, const char *grid){
+	pthread_mutex_lock(&ft8_grid_queue_mutex);
+	if (ft8_grid_queue_count < FT8_GRID_QUEUE_CAP){
+		int idx = (ft8_grid_queue_head + ft8_grid_queue_count) % FT8_GRID_QUEUE_CAP;
+		int n = callsign_len < (int)sizeof(ft8_grid_queue[idx].callsign) - 1 ?
+			callsign_len : (int)sizeof(ft8_grid_queue[idx].callsign) - 1;
+		memcpy(ft8_grid_queue[idx].callsign, callsign, n);
+		ft8_grid_queue[idx].callsign[n] = 0;
+		strncpy(ft8_grid_queue[idx].grid, grid, sizeof(ft8_grid_queue[idx].grid) - 1);
+		ft8_grid_queue[idx].grid[sizeof(ft8_grid_queue[idx].grid) - 1] = 0;
+		ft8_grid_queue_count++;
+	}
+	pthread_mutex_unlock(&ft8_grid_queue_mutex);
+}
+
+// Main thread only (ui_tick(), sbitx_daemon.c) -- the only thread ever
+// allowed to touch logbook.c's db handle.
+void ft8_grid_queue_drain(void){
+	while (1){
+		struct ft8_grid_queue_entry e;
+		pthread_mutex_lock(&ft8_grid_queue_mutex);
+		if (ft8_grid_queue_count == 0){
+			pthread_mutex_unlock(&ft8_grid_queue_mutex);
+			break;
+		}
+		e = ft8_grid_queue[ft8_grid_queue_head];
+		ft8_grid_queue_head = (ft8_grid_queue_head + 1) % FT8_GRID_QUEUE_CAP;
+		ft8_grid_queue_count--;
+		pthread_mutex_unlock(&ft8_grid_queue_mutex);
+		callsign_grid_set(e.callsign, e.grid);
+	}
+}
+
 static int ft8_decode_triggered_for_ms = -1;
 static int ft8_do_tx = 0;
 static int ft8_pitch = 0;
@@ -1235,6 +1288,49 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 			// set length of the last span (no next span, but null terminator in text)
 			if (span_i > 0)
 				sem[sem_i - 1].length = strlen(text + spans.offsets[span_i - 1]);
+
+			// Callsign->grid directory feed (persistent, see
+			// callsign_grid_ensure_table()'s own comment, logbook.c) --
+			// protocol-level, not a rendered-text heuristic: unpackgrid()
+			// (ft8_lib/ft8/message.c) only ever sets types[2]==FTX_FIELD_GRID
+			// for a genuine decoded 4-char grid, never for RR73/RRR/73 (those
+			// get FTX_FIELD_TOKEN) or a signal report (FTX_FIELD_RST) -- can't
+			// alias the way a string-shape check (e.g. "RR73" incidentally
+			// matching a grid's own A-R/A-R/0-9/0-9 pattern) can. Deliberately
+			// scoped to CQ only (types[0] a token, not a real callsign -- a
+			// reply-to-CQ's types[0] is FTX_FIELD_CALL, the callee): the CQ is
+			// the one unambiguous case of a station broadcasting its own grid
+			// to nobody in particular. FT8 decoding runs on its own thread
+			// (ft8_thread_function) -- logbook.c's db handle is only ever
+			// touched from the main thread (no existing precedent for
+			// cross-thread sqlite access in this codebase, and this project
+			// already hit a real cross-thread race in this exact subsystem
+			// once before, see ft8_process_mutex's own comment above) -- so
+			// this only ever queues the candidate; ft8_grid_queue_drain()
+			// (main thread, ui_tick()) is what actually writes it.
+			if (span_i >= 3 && spans.offsets[2] >= 0 && spans.types[2] == FTX_FIELD_GRID &&
+					spans.offsets[1] >= 0 && spans.types[1] == FTX_FIELD_CALL &&
+					spans.offsets[0] >= 0 && spans.types[0] != FTX_FIELD_CALL &&
+					!strncmp(text + spans.offsets[0], "CQ", 2)) {
+				char *sender = text + spans.offsets[1];
+				char *sender_end = strchr(sender, ' ');
+				if (!sender_end)
+					sender_end = sender + strlen(sender);
+				if (*sender == '<')
+					++sender;
+				if (sender_end > sender && *(sender_end - 1) == '>')
+					--sender_end;
+				char *grid_txt = text + spans.offsets[2];
+				if (grid_txt[0] == 'R' && grid_txt[1] == ' ') // ir>0 case, unpackgrid()
+					grid_txt += 2;
+				int sender_len = (int)(sender_end - sender);
+				// "..." is lookup_callsign()'s literal unresolved-hash text
+				// (ft8_lib/ft8/message.c) -- not a real identifier, never
+				// write it to the directory.
+				bool sender_is_hash_miss = (sender_len == 3 && !strncmp(sender, "...", 3));
+				if (sender_len > 0 && sender_len < 16 && !sender_is_hash_miss)
+					ft8_grid_queue_push(sender, sender_len, grid_txt);
+			}
 			// Real report, live (2026-08-23): during Auto CQ, RX Frequency
 			// stayed empty for the message that actually triggered the
 			// auto-answer -- only showed content once the *other*
