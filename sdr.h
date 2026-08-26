@@ -257,6 +257,8 @@ int get_modem_pitch();
 int	get_wpm();
 
 FILE *wav_start_writing(const char* path);
+void wav_finish_writing(FILE *f);
+void wav_record(int32_t* samples, int count);
 
 // Standalone replacements for wiringPi's millis()/delay() (now removed
 // along with the rest of the zBitx-hardware-only GPIO/I2C code -- see

@@ -446,7 +446,18 @@
      of how tall the panel column ends up. -->
 		<div id="FT8_ui" class="sbitx-panel mode-panel">
 			<div class="panel-toolbar-row">
-				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button><label class="panel-toggle-label" title="Hide Band Activity"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Band</label><label class="panel-toggle-label" title="Hide Waterfall"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> WF</label><label class="panel-toggle-label" title="Hide Worked (stations already logged on this band/mode)"><input type="checkbox" id="HIDE_WORKED_CHECK" /> B4</label><label class="panel-toggle-label" title="Show Grid Map"><input type="checkbox" id="SHOW_GRIDMAP_CHECK" /> Map</label>
+				<button class="panel-toolbar-btn" id="console-open">CMD</button><button class="panel-toolbar-btn" id="settings-open">SET</button><button class="panel-toolbar-btn" id="btn-logbook-export">Export ADIF</button><button class="panel-toolbar-btn power-btn" id="reboot-open" title="Reboot the Pi">Reboot</button><button class="panel-toolbar-btn power-btn" id="shutdown-open" title="Shut down the Pi">Shutdown</button>
+				<!-- User's own ask (2026-08-26): ported from ~/Downloads/sbitx/web/'s
+				     own recorder panel (REC ON/OFF's WAV-capture bugs -- crash on a
+				     missing directory, unpatched header, wav_record() never wired
+				     in, "REC OFF" not actually reaching sdr_request() -- all fixed
+				     tonight, sbitx.c/sbitx_daemon.c/sound_generic.c) -- hidden by
+				     default (this isn't a control an operator needs day to day),
+				     but kept a single style attribute away from being usable again
+				     the next time a WAV capture is actually needed for decoder
+				     testing: delete the style="display:none" below to reveal it. -->
+				<button class="panel-toolbar-btn" id="recorder-open" style="display:none;" title="Record RX audio to a WAV file">REC</button>
+				<label class="panel-toggle-label" title="Hide Band Activity"><input type="checkbox" id="HIDE_BAND_ACTIVITY_CHECK" /> Band</label><label class="panel-toggle-label" title="Hide Waterfall"><input type="checkbox" id="HIDE_WATERFALL_CHECK" /> WF</label><label class="panel-toggle-label" title="Hide Worked (stations already logged on this band/mode)"><input type="checkbox" id="HIDE_WORKED_CHECK" /> B4</label><label class="panel-toggle-label" title="Show Grid Map"><input type="checkbox" id="SHOW_GRIDMAP_CHECK" /> Map</label>
 			</div>
 			<!-- User's own ask (2026-08-24): brought back from ~/Downloads/sbitx/web/'s
 			     newer gridmap.js (Mercator projection, pan/zoom, Logged/Seen/Unlogged/
@@ -616,14 +627,29 @@
 	</div>	
 <!-- console panel -->
 		<div id ="console_panel" class="sbitx-panel">
-			Terminal	
+			Terminal
 			<span class="sbitx-panel-title">
-				<button class="sbitx-btn-back" data-for="panel_bar">&#x2716; Close</button>  
+				<button class="sbitx-btn-back" data-for="panel_bar">&#x2716; Close</button>
 			</span>
 			<div id="console_window">
 			</div>
 			<div id="command_bar">
 				<input type="text" class="sbitx-text-input"  id="text_in" />
+			</div>
+		</div>
+
+		<!-- User's own ask (2026-08-26): ported from ~/Downloads/sbitx/web/'s
+		     own recorder panel -- see the REC toolbar button's own comment
+		     (FT8_ui, above) for why this exists and why it's normally
+		     hidden. Same .sbitx-panel/.sbitx-panel-title structure as
+		     Settings/Connect/the grid map, so it gets the same drag/
+		     resize/position-clamping for free via init_draggable_panels(). -->
+		<div id="recorder_panel" class="sbitx-panel">
+			<span class="sbitx-panel-title">Recorder <button class="sbitx-btn-back" data-for="panel_bar">&#x2716; Close</button></span>
+			<div class="settings-element">
+				<button class="logger-button" id="record_start">REC</button>
+				<button class="logger-button" id="record_stop">STOP</button>
+				<span id="record_duration">00:00</span>
 			</div>
 		</div>
 
@@ -4844,6 +4870,31 @@ function open_connect(){
 	websocket_send("audiolist");
 }
 
+// User's own ask (2026-08-26): ported from ~/Downloads/sbitx/web/'s own
+// recorder panel -- see the REC toolbar button's own comment (FT8_ui)
+// for why this exists and why it's normally hidden.
+function open_recorder(){
+	open_panel("recorder_panel");
+}
+function start_recorder(){
+	websocket_send("REC ON");
+}
+function stop_recorder(){
+	websocket_send("REC OFF");
+}
+var record_started = -1;
+function update_recorder(){
+	if (record_started == -1){
+		el("record_duration").innerHTML = "00:00";
+		return;
+	}
+	var seconds = Math.round(Date.now() / 1000) - record_started;
+	var minutes = Math.floor(seconds / 60);
+	seconds = seconds % 60;
+	el("record_duration").innerHTML = ("0" + minutes).slice(-2) + ":" + ("0" + seconds).slice(-2);
+}
+setInterval(update_recorder, 1000);
+
 function save_settings(){
 	websocket_send("MYCALLSIGN " + el("MYCALLSIGN").value);
 	websocket_send("MYGRID " + el("MYGRID").value);
@@ -5525,6 +5576,19 @@ function response_handler(response){
 				}
 			}
 			break;
+		// User's own ask (2026-08-26): the server already broadcasts the
+		// #record field's state on every tick while a recording is
+		// active (sbitx_daemon.c) -- this used to fall through to the
+		// generic "unhandled" logger below since nothing consumed it
+		// (confirmed live, tonight: "unhandled REC : ON"). Now drives
+		// the recorder panel's own duration display.
+		case 'REC':
+			if (args == "ON")
+				record_started = Math.round(Date.now() / 1000);
+			else
+				record_started = -1;
+			update_recorder();
+			break;
 		case 'TEXT':
 			log("text: [ " + args + "]");
 			el("text_pending").innerHTML = args;
@@ -6102,6 +6166,9 @@ $("#logbook-search").on("input", logbook_search);
 //settings buttons
 $("#settings-open").on("click", open_settings);
 $("#settings_save").on("click", save_settings);
+$("#recorder-open").on("click", open_recorder);
+$("#record_start").on("click", start_recorder);
+$("#record_stop").on("click", stop_recorder);
 $("#tune_toggle").on("click", toggle_tune);
 $("#reboot-open").on("click", reboot_clicked);
 $("#shutdown-open").on("click", shutdown_clicked);

@@ -18,6 +18,7 @@ The initial sync between the gui values, the core radio values, settings, et al 
 #include <stdint.h>
 #include <ctype.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/ioctl.h>
 #include <ncurses.h>
 #include <time.h>
@@ -3219,12 +3220,29 @@ void do_control_action(char *cmd){
 	}
 	else if (!strcmp(request, "REC ON")){
 		char fullpath[PATH_MAX];
+		char dirpath[PATH_MAX];
 
 		char *path = getenv("HOME");
 		time(&record_start);
 		struct tm *tmp = localtime(&record_start);
-		sprintf(fullpath, "%s/sbitx/audio/%04d%02d%02d-%02d%02d-%02d.wav", path, 
-			tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour, tmp->tm_min, tmp->tm_sec); 
+		// ZBITXD LOCAL CHANGE (2026-08-26): real crash, live -- zbitxd
+		// runs as its own dedicated system user (HOME=/var/lib/zbitxd),
+		// whose sbitx/audio/ subdirectory was never created by
+		// anything, ever. fopen() failing on a missing parent directory
+		// used to segfault the whole daemon (wav_start_writing()'s own
+		// comment, sbitx.c) -- fixed there too, but making sure the
+		// directory actually exists is the real fix; the null check is
+		// just defense in depth for whatever other reason a future
+		// fopen() here might fail. mkdir() failing because the
+		// directory already exists (the overwhelmingly common case
+		// after the first recording ever made) is expected, not an
+		// error -- nothing here needs to check its return value.
+		sprintf(dirpath, "%s/sbitx", path);
+		mkdir(dirpath, 0755);
+		sprintf(dirpath, "%s/sbitx/audio", path);
+		mkdir(dirpath, 0755);
+		sprintf(fullpath, "%s/sbitx/audio/%04d%02d%02d-%02d%02d-%02d.wav", path,
+			tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
 		char request[300], response[100];
 		sprintf(request, "record=%s", fullpath);
@@ -3233,7 +3251,23 @@ void do_control_action(char *cmd){
 		write_console(STYLE_LOG, request);
 	}
 	else if (!strcmp(request, "REC OFF")){
-		sdr_request("record", "off");
+		// ZBITXD LOCAL CHANGE (2026-08-26): real, long-standing bug --
+		// user's own report, tonight's REC ON/OFF test: the WAV file
+		// never grew past 0 bytes and its mtime never moved past its
+		// creation instant, even well after "REC OFF" was sent and
+		// logged as received. Root cause: sdr_request() (sbitx.c)
+		// requires a single "cmd=value" string (it does
+		// strchr(request,'=') and returns immediately, untouched, if
+		// there isn't one) -- this call passed "record" and "off" as
+		// two SEPARATE arguments instead, with "off" landing in the
+		// response *output* buffer parameter, never read as input at
+		// all. sdr_request() saw no '=' in "record" and returned before
+		// ever reaching its own record/off handling, so pf_record was
+		// never closed -- it just sat open and unflushed in the daemon
+		// for the rest of its life (or until the next REC ON silently
+		// leaked it the same way a double REC ON already does).
+		char response[100];
+		sdr_request("record=off", response);
 		write_console(STYLE_LOG, "Recording stopped\n");
 		record_start = 0;
 	}

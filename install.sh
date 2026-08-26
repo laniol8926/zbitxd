@@ -196,6 +196,64 @@ else
 fi
 sudo chown zbitxd:zbitxd "$SBITX_DB"
 
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+echo "*** ttyd (web terminal for the CMD button)"
+echo ">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>"
+# web/index.html's CMD button opens http://<host>:7681/ directly (ttyd
+# running "login", so it authenticates against the box's own real
+# accounts, not a separate credential) -- not packaged for Debian/
+# Raspbian at all (confirmed live: empty apt-cache search on Raspbian
+# Buster), so this was a real gap between what the UI already assumed
+# existed and what install.sh actually set up. Pulls the matching
+# static prebuilt binary from ttyd's own GitHub releases (no build
+# toolchain needed -- these are statically linked) rather than building
+# from source, since ttyd's own build deps (libwebsockets, json-c) not
+# being in Buster's repos either would just move the same gap one step
+# back. uname -m -> release asset name mapping covers every arch ttyd
+# actually publishes; anything else just skips this step rather than
+# guessing. -W: ttyd defaults to read-only (confirmed live -- the
+# login prompt showed but rejected every keystroke, journalctl showing
+# exactly why: "The --writable option is not set, will start in
+# readonly mode") -- without it this is a terminal you can only look
+# at, not use.
+TTYD_ARCH=""
+case "$(uname -m)" in
+	x86_64) TTYD_ARCH="x86_64" ;;
+	aarch64) TTYD_ARCH="aarch64" ;;
+	armv6l|armv7l) TTYD_ARCH="armhf" ;;
+	armv5*) TTYD_ARCH="arm" ;;
+	i686) TTYD_ARCH="i686" ;;
+esac
+if [ -z "$TTYD_ARCH" ]; then
+	echo "Unrecognized architecture $(uname -m) -- skipping ttyd, CMD button won't work."
+elif [ -x /usr/local/bin/ttyd ]; then
+	echo "ttyd already installed, skipping download."
+else
+	TTYD_VERSION="1.7.7"
+	curl -sL -o /tmp/ttyd."$TTYD_ARCH" \
+		"https://github.com/tsl0922/ttyd/releases/download/$TTYD_VERSION/ttyd.$TTYD_ARCH"
+	sudo install -m 755 /tmp/ttyd."$TTYD_ARCH" /usr/local/bin/ttyd
+	rm /tmp/ttyd."$TTYD_ARCH"
+fi
+if [ -x /usr/local/bin/ttyd ]; then
+	sudo tee /etc/systemd/system/ttyd.service > /dev/null <<-EOF
+	[Unit]
+	Description=ttyd web terminal (used by the sBitx web UI's CMD button)
+	After=network.target
+
+	[Service]
+	Type=simple
+	ExecStart=/usr/local/bin/ttyd -W -p 7681 login
+	Restart=on-failure
+	RestartSec=2
+
+	[Install]
+	WantedBy=multi-user.target
+	EOF
+	sudo systemctl daemon-reload
+	sudo systemctl enable --now ttyd
+fi
+
 sudo systemctl daemon-reload
 sudo systemctl enable zbitxd
 sudo systemctl restart zbitxd

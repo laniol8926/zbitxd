@@ -454,6 +454,18 @@ FILE* wav_start_writing(const char* path)
 	char format[4] = { 'W', 'A', 'V', 'E' };
 
 	FILE* f = fopen(path, "w");
+	// ZBITXD LOCAL CHANGE (2026-08-26): real crash, live -- fopen()
+	// failing here (confirmed cause: zbitxd runs as its own dedicated
+	// system user, HOME=/var/lib/zbitxd, whose sbitx/audio/ subdirectory
+	// was never created by anything) fell straight through into the
+	// fwrite() calls below with f == NULL, segfaulting the entire
+	// daemon -- mid-QSO, on a live band -- over what should have just
+	// been "recording couldn't start." Never skip a null check just
+	// because the failure "shouldn't" happen.
+	if (!f) {
+		fprintf(stderr, "wav_start_writing: fopen(%s) failed: %s\n", path, strerror(errno));
+		return NULL;
+	}
 
 	// NOTE: works only on little-endian architecture
 	fwrite(chunkID, sizeof(chunkID), 1, f);
@@ -473,6 +485,36 @@ FILE* wav_start_writing(const char* path)
 	fwrite(&subChunk2Size, sizeof(subChunk2Size), 1, f);
 
 	return f;
+}
+
+// ZBITXD LOCAL CHANGE (2026-08-26): real, long-standing bug -- user's
+// own report, from actually trying this a couple years ago against
+// jt9/ft8modem and never getting a WAV file either would read.
+// wav_start_writing() above writes the "data" subchunk size as a
+// 0xffffffff placeholder (a real convention for a still-open/streaming
+// WAV, but not one strict readers like jt9's own WAV loader accept),
+// meant to be patched once the real byte count is known -- but "REC
+// OFF" (sbitx.c's own record command handler) just called fclose()
+// directly, never patching it. The file's header ends up claiming a
+// ~4GB data chunk regardless of how much was actually recorded, which
+// a strict WAV parser rejects outright even though the file itself is
+// otherwise perfectly valid mono 16-bit 12kHz PCM (already the exact
+// sample rate WSJT-X/jt9 itself expects for FT8, so no resampling
+// needed). Seeks back and writes the real sizes before closing --
+// standard canonical-WAV byte offsets, RIFF size at 4, data size at
+// 40 (the 44-byte header written just above).
+void wav_finish_writing(FILE *f)
+{
+	if (!f)
+		return;
+	long file_size = ftell(f);
+	uint32_t data_size = file_size - 44;
+	uint32_t riff_size = file_size - 8;
+	fseek(f, 4, SEEK_SET);
+	fwrite(&riff_size, sizeof(riff_size), 1, f);
+	fseek(f, 40, SEEK_SET);
+	fwrite(&data_size, sizeof(data_size), 1, f);
+	fclose(f);
 }
 
 void wav_record(int32_t* samples, int count)
@@ -873,10 +915,19 @@ void sdr_request(char* request, char* response)
 			filter_tune(tx_filter, (1.0 * 300) / 96000.0, (1.0 * 3000) / 96000.0, 5);
 	} else if (!strcmp(cmd, "record")) {
 		if (!strcmp(value, "off")) {
-			fclose(pf_record);
+			wav_finish_writing(pf_record);
 			pf_record = NULL;
-		} else
+		} else {
+			// Real leak, confirmed live: a second "record=..." while
+			// one was already open just overwrote pf_record, leaving
+			// the first file's handle open forever with its header
+			// never flushed past 0 bytes (same underlying "can't
+			// selectively close a stdio FILE* except by closing it"
+			// reasoning as everywhere else this file gets touched).
+			if (pf_record)
+				wav_finish_writing(pf_record);
 			pf_record = wav_start_writing(value);
+		}
 	} else if (!strcmp(cmd, "tx")) {
 		if (!strcmp(value, "on"))
 			tr_switch(1);

@@ -466,6 +466,16 @@ static void *capture_thread_fn(void *arg)
 			}
 			modem_rx(rx_list->mode, buf, (int)n);
 			gen_spectrum_update(buf, (int)n);
+			// ZBITXD LOCAL CHANGE (2026-08-26): real, long-standing gap
+			// -- user's own report, tonight's REC ON test: two WAV files
+			// sat at 0 bytes forever. Root cause: wav_record() (sbitx.c)
+			// -- the function that actually writes decimated samples
+			// into an open recording -- was never called from anywhere
+			// in the whole codebase. REC ON/OFF only ever opened and
+			// closed a WAV header with nothing in between. No-ops
+			// cheaply (pf_record == NULL check, sbitx.c) on every buffer
+			// when not recording, so this is free the rest of the time.
+			wav_record(buf, (int)n);
 		}
 
 		capture_open = 0;

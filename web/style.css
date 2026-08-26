@@ -631,6 +631,20 @@ input[type="checkbox"] {
 	height: 560px;
 }
 
+/* Recorder panel -- see its own toolbar button's comment (FT8_ui,
+   index.html) for why this exists. Left/top chosen just to avoid
+   landing exactly on top of #settings_panel/#connect_panel's own
+   default positions; no explicit width -- content here is small
+   enough to just shrink-wrap to .sbitx-panel's own min-width. */
+#recorder_panel {
+	position: fixed;
+	left: 30px;
+	top: 60px;
+	border: solid 1px white;
+	background-color: black;
+	z-index: 2;
+}
+
 /* On a narrow phone-portrait viewport, the fixed 110px left offset
    above (see #settings_panel's own comment) still pushes the panel's
    right edge well past the visible screen -- span the full width with
