@@ -48,7 +48,7 @@
 	     file's line changed, by hand, same as any other deploy. -->
     <script src="pcm-player.js?v=1"></script>
 	<script src="proj4.js?v=1"></script>
-    <script src="gridmap.js?v=17"></script>
+    <script src="gridmap.js?v=22"></script>
 	<link rel="stylesheet" href="style.css?v=4">
   </head>
   <body>
@@ -1137,6 +1137,12 @@ function gridmap_open(){
 	// canvas" view every time, not wherever a stale pan/zoom from a
 	// previous open happened to leave off -- zoom in from there.
 	GRIDMAP.fitToCanvas();
+	// User's own ask (2026-08-26): center on the operator's own grid
+	// right away -- no-ops harmlessly if MYGRID isn't set. Panning to
+	// find your own location has no touch equivalent to a mouse drag on
+	// some phones; the zoom slider keeps this centered as its own
+	// zooming continues (see GRIDMAP.centerOnGrid()'s own comment).
+	GRIDMAP.centerOnGrid(el("MYGRID") ? el("MYGRID").value : "");
 }
 function gridmap_close(){
 	el("SHOW_GRIDMAP_CHECK").checked = false;

@@ -522,12 +522,15 @@ const GRIDMAP = (function gridmap() {
 
   // Replace gmSetGridMark:
   function gmSetGridMark(col, row, clr) {
-    const f = 150.0;
+    // User's own ask (2026-08-26), real screenshot: marks this size
+    // (both squares and circles) overlapped each other and the
+    // callsign labels on a busy band -- was 150.
+    const f = 450.0;
     const longitude = col * 2 - 180 + 0.0;
     const latitude = row - 90 + 1.0;
 
     const point = gmToMercatorPoint(longitude, latitude);
-    
+
     if (use_square_dots) {
       // const sx = Math.round(ofsCanvas.width / f);
       const sy = Math.round(ofsCanvas.height / f);
@@ -547,7 +550,7 @@ const GRIDMAP = (function gridmap() {
       ofsCtx.beginPath();
       ofsCtx.arc(point[0] + radius, point[1] + radius, radius, 0, 2 * Math.PI);
       ofsCtx.fill();
-    }    
+    }
     
   }
   function gmShowGridId(gridId, clr) {
@@ -987,6 +990,27 @@ const GRIDMAP = (function gridmap() {
     gmDrawScaledCanvas(fit);
   }
 
+  // User's own ask (2026-08-26): panning to find your own location has
+  // no touch equivalent to a mouse drag on some phones -- called once
+  // right after gmFitToCanvas() (index.html's gridmap_open()) so the
+  // map opens already centered on the operator's own grid instead of
+  // the whole map's own midpoint. Keeps working after that too: the
+  // zoom slider's own gmSliderZoom() always zooms around the canvas's
+  // exact center (fixedWidth/2, fixedHeight/2), so whatever's centered
+  // here stays centered as the operator zooms in/out with just the
+  // slider, no drag ever required.
+  function gmCenterOnGrid(gridId) {
+    if (!gmIsValidGridId(gridId))
+      return;
+    const fScale = scaleCur / 100;
+    const worldPt = gmGridToWorldPoint(gridId);
+    const maxOffsetX = ofsCanvas.width * fScale - fixedWidth;
+    const maxOffsetY = ofsCanvas.height * fScale - fixedHeight;
+    viewOffsetX = Math.max(0, Math.min(worldPt[0] * fScale - fixedWidth / 2, maxOffsetX));
+    viewOffsetY = Math.max(0, Math.min(worldPt[1] * fScale - fixedHeight / 2, maxOffsetY));
+    gmDrawScaledCanvas(scaleCur);
+  }
+
   // ZBITXD LOCAL CHANGE (2026-08-24): new function -- see index.html's
   // gridmap_apply_band() for why this exists (per-band data scoping).
   // Clears the *data* (all four tracking sets) but not the Logged/
@@ -1133,6 +1157,7 @@ const GRIDMAP = (function gridmap() {
     redraw: function () { gmDrawScaledCanvas(scaleCur); },
     resize: gmResize,
     fitToCanvas: gmFitToCanvas,
+    centerOnGrid: gmCenterOnGrid,
     clearSeen: gmClearSeen,
     setQsoLine: gmSetQsoLine,
     clearQsoLine: gmClearQsoLine,
