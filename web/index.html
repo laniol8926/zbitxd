@@ -48,7 +48,7 @@
 	     file's line changed, by hand, same as any other deploy. -->
     <script src="pcm-player.js?v=1"></script>
 	<script src="proj4.js?v=1"></script>
-    <script src="gridmap.js?v=11"></script>
+    <script src="gridmap.js?v=17"></script>
 	<link rel="stylesheet" href="style.css?v=4">
   </head>
   <body>
@@ -790,12 +790,6 @@ var gridmap_third_party_by_band = {};      // band -> Map("CALLA,CALLB" -> {call
 // about more than once no matter how many times its CQ/exchange decodes.
 var gridmap_lookup_requested = new Set();
 
-// Callsigns already given a forced box+label (GRIDMAP.ensureGridShown()/
-// labelCallsign()) via a third-party line -- session-lifetime, avoids
-// redoing the same draw calls on every repeat decode of an ongoing
-// exchange (gridmap_track_third_party() runs on every relevant decode,
-// not just the first).
-var gridmap_shown_calls = new Set();
 
 function gridmap_band_set(map, band){
 	if (!map[band])
@@ -917,19 +911,18 @@ function gridmap_track_third_party(text, mycallsign){
 			// decodes before debugging the QSO lines any further. Only
 			// on a genuine new/changed mapping (not every repeat decode
 			// of the same CQ) and only for the band actually on screen.
-			// User's own ask (2026-08-25): only label a callsign whose
-			// own grid actually has a box drawn -- this label call was
-			// never tied to that (a CQ decode alone never touches the
-			// Logged/Seen/Unlogged box tracking at all), so a dense band
-			// filled labels in with no box under them. hasVisibleBox()
-			// (gridmap.js) mirrors the exact same toggle+set checks the
-			// box-drawing functions gate themselves on.
-			if (grid_map.get(call) !== grid){
-				grid_map.set(call, grid);
-				if (band === gridmap_current_band && GRIDMAP.hasVisibleBox(grid)){
-					GRIDMAP.labelCallsign(grid, call);
-					GRIDMAP.redraw();
-				}
+			// User's own ask (2026-08-25): touchStation() every time a
+			// CQ decodes, not just on a new/changed grid mapping -- a
+			// station calling CQ every ~15s needs its lastSeen refreshed
+			// each time too, or the 90s staleness prune (gridmap.js)
+			// would time it out while it's still actively on the air.
+			// touchStation() itself only actually redraws when the
+			// station's genuinely new or its grid changed, so this
+			// stays cheap on every repeat decode.
+			grid_map.set(call, grid);
+			if (band === gridmap_current_band){
+				GRIDMAP.touchStation(call, grid);
+				GRIDMAP.redraw();
 			}
 		} else if (!grid_map.has(call)){
 			// This particular CQ decode didn't carry a usable grid (rare,
@@ -948,11 +941,11 @@ function gridmap_track_third_party(text, mycallsign){
 		return;
 	if (!ft8_callsign_looks_real(to_call) || !ft8_callsign_looks_real(from_call))
 		return;
-	if (ft8_field_is_grid(exch) && grid_map.get(from_call) !== exch){
+	if (ft8_field_is_grid(exch)){
 		grid_map.set(from_call, exch);
-		// Same box-gating as the CQ branch above.
-		if (band === gridmap_current_band && GRIDMAP.hasVisibleBox(exch)){
-			GRIDMAP.labelCallsign(exch, from_call);
+		// Same touchStation() treatment as the CQ branch above.
+		if (band === gridmap_current_band){
+			GRIDMAP.touchStation(from_call, exch);
 			GRIDMAP.redraw();
 		}
 	}
@@ -979,16 +972,15 @@ function gridmap_track_third_party(text, mycallsign){
 		// drawn once both sides' grids are already confirmed (the check
 		// just above -- including via the server's persistent directory
 		// if needed) -- solid enough data to just show a box+label for
-		// whichever side the separate Logged/Seen/Unlogged tracking
-		// never happened to touch, rather than leave the line's own
-		// endpoint looking unexplained.
-		[[to_call, to_grid], [from_call, from_grid]].forEach(function(pair){
-			if (gridmap_shown_calls.has(pair[0]))
-				return;
-			gridmap_shown_calls.add(pair[0]);
-			GRIDMAP.ensureGridShown(pair[1]);
-			GRIDMAP.labelCallsign(pair[1], pair[0]);
-		});
+		// both. touchStation() (not the old one-shot-only
+		// gridmap_shown_calls dedup) so a station still actively part of
+		// an ongoing exchange keeps its lastSeen refreshed on every
+		// message, not just the first -- otherwise the 90s staleness
+		// prune (gridmap.js) would time out a station still genuinely on
+		// the air, e.g. one repeatedly sending a report to a station
+		// that never replies (real report, live: V31DL/EU2Q).
+		GRIDMAP.touchStation(to_call, to_grid);
+		GRIDMAP.touchStation(from_call, from_grid);
 		GRIDMAP.trackExchange(to_call, to_grid, from_call, from_grid, from_call);
 		GRIDMAP.redraw();
 	}
@@ -4483,14 +4475,16 @@ function logbook_update(args){
 		if (worked_call){
 			if (gridmap_grid_by_callsign.get(worked_call) !== token[10]){
 				gridmap_grid_by_callsign.set(worked_call, token[10]);
-				// Force-show rather than gate on hasVisibleBox() -- same
-				// reasoning as gridmap_track_third_party()'s pairs (see
-				// its own comment): a worked station's grid straight from
-				// the logbook is solid enough data to just display,
-				// independent of the now-gone Logged/Seen toggles.
+				// touchStation() -- a worked station's grid straight from
+				// the logbook is solid enough data to just display. Note
+				// this is a one-time historical seed, not a live signal,
+				// so it ages out with the normal 90s staleness prune
+				// (gridmap.js) same as anything else not re-heard --
+				// matches the user's own long-standing take that a
+				// station worked days ago showing on a real-time map
+				// "means nothing."
 				if (wk_band === gridmap_current_band){
-					GRIDMAP.ensureGridShown(token[10]);
-					GRIDMAP.labelCallsign(token[10], worked_call);
+					GRIDMAP.touchStation(worked_call, token[10]);
 					GRIDMAP.redraw();
 				}
 			}
@@ -5515,11 +5509,12 @@ function response_handler(response){
 				// own the next time gridmap_track_third_party() sees a
 				// directed exchange involving it -- no need to reconstruct
 				// the original triggering message here.
-				// Same box-gating as gridmap_track_third_party() -- a
-				// server-side lookup resolves the grid but never touches
-				// the Logged/Seen/Unlogged box tracking on its own.
-				if (gridmap_current_band && GRIDMAP.hasVisibleBox(g_grid)){
-					GRIDMAP.labelCallsign(g_grid, g_call);
+				// Same touchStation() treatment as gridmap_track_third_
+				// party() -- also a one-time seed like the logbook one
+				// above, so it ages out normally if this callsign is
+				// never actually heard again this session.
+				if (gridmap_current_band){
+					GRIDMAP.touchStation(g_call, g_grid);
 					GRIDMAP.redraw();
 				}
 			}

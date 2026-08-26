@@ -34,10 +34,19 @@ const GRIDMAP = (function gridmap() {
   const img = new Image();
 
   img.crossOrigin = "anonymous";
-  img.src = "./Web_maps_Mercator_projection_SW.jpg";
+  // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- swapped for a
+  // much higher-resolution base map (6930x5870 vs the original
+  // 2068x2060) to hold up at the new 800% zoom cap without turning
+  // into a blurry blown-up JPEG. Same cartographer/source imagery
+  // (Strebe, NASA Blue Marble derivative) as the file this replaces,
+  // just a different, larger rendering of it -- covers 82 degrees N/S
+  // (not 85), hence ky below. CC BY-SA 3.0 -- requires attribution to
+  // Strebe if this app or its output is ever redistributed/published.
+  // https://commons.wikimedia.org/wiki/File:Mercator_projection_SW.jpg
+  img.src = "./Mercator_projection_SW.jpg";
 
   const kx = projection.forward([180, 0])[0]; // x-coordinate at (180�, 0�) in meters
-  const ky = projection.forward([0, 85])[1];  // y-coordinate at (0�, 85�) in meters
+  const ky = projection.forward([0, 82])[1];  // y-coordinate at (0�, 82�) in meters -- see img.src's own comment
 
   const scaleMin = 25;
   // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- 200% (the
@@ -64,17 +73,20 @@ const GRIDMAP = (function gridmap() {
   let showGridsSeen = false;
   let showGridsUnlogged = true;
 
-  // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- a third-party
-  // line (gmDrawThirdPartyLines()) is only ever drawn once BOTH
-  // endpoint grids are already confirmed (index.html only calls
-  // trackExchange() after resolving both, via the persistent
-  // callsign->grid directory if needed) -- solid enough data to just
-  // show, not hide the line over. Kept as its own set, independent of
-  // the Logged/Seen/Unlogged toggles (gmHasVisibleBox() below always
-  // counts it), so a grid we know about this way is never gated behind
-  // a filter that was really about a completely different question
-  // (has this station been worked).
-  const gridsForceShown = new Set();
+  // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- a station's
+  // box+label used to get baked onto the canvas once and stay forever
+  // (real report, live: a station last heard sending a one-way report
+  // minutes earlier, never replied to, still sitting on the map with
+  // no way to tell it was stale). This is a real-time display, and a
+  // typical FT8 QSO runs 60-90s end to end, so anything not re-heard
+  // within STATION_TTL_MS is noise, not signal. callsign -> {grid,
+  // lastSeen}; gmPruneStaleStations() (below) sweeps this on a timer
+  // and fully rebuilds the canvas (reloadGridMap()) whenever anything
+  // actually expired -- a baked box/label can't be selectively erased
+  // any other way.
+  const stationLastSeen = new Map();
+  const STATION_TTL_MS = 90 * 1000;
+  const STATION_SWEEP_MS = 10 * 1000;
 
   const btnGridsUnLogged = document.createElement("button");
 
@@ -201,6 +213,15 @@ const GRIDMAP = (function gridmap() {
     infoDiv.appendChild(infoSpan);
     infoSpan.style = "font-size: 12px; width: 120px; text-align: center; display: inline-flex;";
     setToolTip(infoDiv, "(longitude,latitude) GridId");
+    // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- base map
+    // image (img.src's own comment above) is CC BY-SA 3.0, which
+    // requires visible attribution to the author wherever it's used.
+    const mapCreditLink = document.createElement("a");
+    mapCreditLink.innerText = "Map: Strebe, CC BY-SA 3.0";
+    mapCreditLink.href = "https://commons.wikimedia.org/wiki/File:Mercator_projection_SW.jpg";
+    mapCreditLink.target = "_blank";
+    mapCreditLink.style = "font-size: 10px; color: white; margin-left: 8px; white-space: nowrap;";
+    sliderDiv.appendChild(mapCreditLink);
     containerDiv.appendChild(canvasDiv);
     containerDiv.appendChild(sliderDiv);
   }
@@ -294,7 +315,7 @@ const GRIDMAP = (function gridmap() {
       onsCtx.moveTo(pA[0], pA[1]);
       onsCtx.lineTo(pB[0], pB[1]);
       onsCtx.stroke();
-      onsCtx.strokeStyle = "gold";
+      onsCtx.strokeStyle = "red"; // user's own ask (2026-08-25): was gold
       onsCtx.lineWidth = 0.75; // half of the original 1.5px
       onsCtx.stroke();
 
@@ -316,7 +337,7 @@ const GRIDMAP = (function gridmap() {
       const arrowX = from[0] + (to[0] - from[0]) * thirdPartyT;
       const arrowY = from[1] + (to[1] - from[1]) * thirdPartyT;
       const angle = Math.atan2(to[1] - from[1], to[0] - from[0]);
-      const size = 11; // matched to gmDrawQsoLine()'s own arrowSize -- see this function's own comment on why
+      const size = 5.5; // user's own ask (2026-08-25): half of the original 11
       onsCtx.save();
       onsCtx.translate(arrowX, arrowY);
       onsCtx.rotate(angle);
@@ -325,7 +346,7 @@ const GRIDMAP = (function gridmap() {
       onsCtx.lineTo(-size, -size * 0.6);
       onsCtx.lineTo(-size, size * 0.6);
       onsCtx.closePath();
-      onsCtx.fillStyle = "gold";
+      onsCtx.fillStyle = "gold"; // user's own ask (2026-08-25): keep the arrowhead itself gold, only the line went red
       onsCtx.fill();
       onsCtx.lineWidth = 1.5;
       onsCtx.strokeStyle = "black";
@@ -493,7 +514,7 @@ const GRIDMAP = (function gridmap() {
   }
 
   function gmMarkPlace(longitude, latitude, clr) {
-    if (latitude > 85 || latitude < -85) return;
+    if (latitude > 82 || latitude < -82) return; // matches img.src's own coverage -- see its comment above
     const point = gmToMercatorPoint(longitude, latitude);
     ofsCtx.fillStyle = clr;
     ofsCtx.fillRect(point[0] - 1, point[1] - 1, 3, 3);
@@ -600,7 +621,7 @@ const GRIDMAP = (function gridmap() {
 
       x = pos[0] / 2 + 90;
       y = 90 - pos[1];
-      if (x >= 0 && x < 180 && y >= 0 && y < 180 && Math.abs(pos[1]) <= 85) {
+      if (x >= 0 && x < 180 && y >= 0 && y < 180 && Math.abs(pos[1]) <= 82) { // matches img.src's own coverage
         let gridId = "";
         gridId += String.fromCharCode(65 + Math.round(x) / 10);
         gridId += String.fromCharCode(65 + 18 - Math.round(y) / 10);
@@ -691,49 +712,63 @@ const GRIDMAP = (function gridmap() {
     }
   }
 
-  // ZBITXD LOCAL CHANGE (2026-08-25): user's own ask -- callsign
-  // density on the map got cluttered with labels for stations whose
-  // own grid square never actually got a box drawn (index.html calls
-  // labelCallsign() from several places -- CQ/directed-message
-  // decodes, the persistent server-side lookup response -- none of
-  // which are tied to whether gridIdLogged()/NotLogged()/JustLogged()
-  // ever ran for that same grid, or whether the matching Logged/Seen/
-  // Unlogged toggle is even on). Mirrors the exact same three
-  // conditions those functions themselves gate their own gmShowGridId()
-  // call on, so "would a box actually be visible for this grid right
-  // now" and "did a box actually get drawn" never disagree.
-  function gmHasVisibleBox(gridId) {
-    if (gridsForceShown.has(gridId))
-      return true;
-    if (showGridsUnlogged && gridsSeenNotLogged.has(gridId))
-      return true;
-    if (showGridsSeen && (gridsSeenLogged.has(gridId) || gridsSeenJustLogged.has(gridId)))
-      return true;
-    if (showGridsLogged && gridsLogged.has(gridId))
-      return true;
-    return false;
-  }
-
-  // User's own ask (2026-08-25): see gridsForceShown's own comment
-  // above. Idempotent -- safe to call on every repeat decode of the
-  // same pair, not just the first time.
-  function gmEnsureGridShown(gridId) {
-    if (gridsForceShown.has(gridId))
-      return;
-    gridsForceShown.add(gridId);
+  // Draws one station's box+label -- the one place both actually get
+  // drawn, shared by gmTouchStation() (incremental, the instant a
+  // station is newly seen or its grid changes) and gmRedrawStations()
+  // (bulk, after a full canvas rebuild).
+  function gmDrawStation(callsign, gridId) {
     gmShowGridId(gridId, "rgb(247, 247, 38)");
-    gmDelayedRefresh();
+    gmLabelCallsign(gridId, callsign);
   }
 
-  // Called from reloadGridMap() unconditionally (not gated by any
-  // Logged/Seen/Unlogged toggle, same as gmHasVisibleBox() treats this
-  // set) -- without this, a full reload (any toggle click) would wipe
-  // every force-shown box from the canvas and never bring it back.
-  function gmMarkForceShownGridIds() {
-    gridsForceShown.forEach(function (gridId) {
-      gmShowGridId(gridId, "rgb(247, 247, 38)");
+  // User's own ask (2026-08-25): the one call site index.html now uses
+  // any time it resolves a callsign<->grid pair confidently enough to
+  // display it (CQ/directed-message decodes, a worked station from the
+  // logbook, a third-party pair, the persistent server-side lookup
+  // response) -- replaces the older gmEnsureGridShown()/hasVisibleBox()
+  // pair, which had no concept of staleness at all. Refreshes lastSeen
+  // on every call (not just the first) so a station actively being
+  // heard never expires out from under itself; only redraws when
+  // actually new or the grid changed, same idempotence the old
+  // function had.
+  function gmTouchStation(callsign, gridId) {
+    const existing = stationLastSeen.get(callsign);
+    const isNew = !existing || existing.grid !== gridId;
+    stationLastSeen.set(callsign, {grid: gridId, lastSeen: Date.now()});
+    if (isNew) {
+      gmDrawStation(callsign, gridId);
+      gmDelayedRefresh();
+    }
+  }
+
+  // Redraws every still-tracked station in one pass -- called from
+  // reloadGridMap() (a full rebuild already wipes the canvas back to
+  // the bare base image) so this is the ONLY place a station's box/
+  // label gets erased: never redrawn here means it silently stops
+  // appearing once the rebuild finishes.
+  function gmRedrawStations() {
+    stationLastSeen.forEach(function (info, callsign) {
+      gmDrawStation(callsign, info.grid);
     });
   }
+
+  // Runs on a timer (see setInterval below) -- a baked box/label can't
+  // be selectively erased any other way than rebuilding the whole
+  // canvas, so this only actually reloads when something really did
+  // expire, not on every tick.
+  function gmPruneStaleStations() {
+    const now = Date.now();
+    let changed = false;
+    stationLastSeen.forEach(function (info, callsign) {
+      if (now - info.lastSeen > STATION_TTL_MS) {
+        stationLastSeen.delete(callsign);
+        changed = true;
+      }
+    });
+    if (changed)
+      reloadGridMap(false);
+  }
+  setInterval(gmPruneStaleStations, STATION_SWEEP_MS);
 
   function clickShowRoundDots() {
     use_square_dots = !use_square_dots;
@@ -829,7 +864,7 @@ const GRIDMAP = (function gridmap() {
     if (showGridsUnlogged) {
       gmMarkUnloggedGridIds();
     }
-    gmMarkForceShownGridIds();
+    gmRedrawStations();
     gmDrawScaledCanvas(scaleCur);
     setBtnsStateEnable(true);
   }
@@ -1110,7 +1145,6 @@ const GRIDMAP = (function gridmap() {
     gridIdLogged: gmGridIdLogged,
     gridIdNotLogged: gmGridIdNotLogged,
     gridIdJustLogged: gmGridIdJustLogged,
-    hasVisibleBox: gmHasVisibleBox,
-    ensureGridShown: gmEnsureGridShown,
+    touchStation: gmTouchStation,
   };
 })();
