@@ -493,16 +493,30 @@ const GRIDMAP = (function gridmap() {
     return point;
   }
 
-  // ZBITXD LOCAL CHANGE (2026-08-24): grid square -> world/ofsCanvas
-  // pixel coords in one step, same lon/lat formula gmSetGridMark()
-  // already uses (col/row -> longitude/latitude), just returning the
-  // Mercator point instead of drawing a mark with it. Used by the QSO
-  // line below.
+  // ZBITXD LOCAL CHANGE (2026-08-27): user's own ask, real report at
+  // the new deeper zoom levels -- the QSO/third-party lines' endpoints
+  // and the grid mark's own drawn center (gmSetGridMark, below) used to
+  // come from two different reference points: this used the grid
+  // square's NW corner (no offset), while the mark itself was drawn
+  // offset from that same corner by its own radius/box-half. The gap
+  // between the two was a fixed number of ofsCanvas pixels, so it was
+  // easy to miss at low zoom and got visibly worse the deeper you
+  // zoomed in -- exactly the effect of raising the zoom cap. Both now
+  // derive from this one function (the grid square's true geographic
+  // center, 1deg/0.5deg in from its edges), so a line drawn to
+  // gmGridToWorldPoint() always lands exactly on gmSetGridMark()'s own
+  // drawn center, at any zoom level.
+  function gmGridCenterPoint(col, row) {
+    const longitude = col * 2 - 180 + 1.0; // 1 deg = half the square's 2 deg width
+    const latitude = row - 90 + 0.5;       // 0.5 deg = half the square's 1 deg height
+    return gmToMercatorPoint(longitude, latitude);
+  }
+
+  // grid square -> world/ofsCanvas pixel coords at its true center --
+  // used by the QSO line/third-party line code below.
   function gmGridToWorldPoint(gridId) {
     const p = gmGridIdToPoint(gridId);
-    const longitude = p[0] * 2 - 180 + 0.0;
-    const latitude = p[1] - 90 + 1.0;
-    return gmToMercatorPoint(longitude, latitude);
+    return gmGridCenterPoint(p[0], p[1]);
   }
 
   function gmSetPix(x, y) {
@@ -520,27 +534,26 @@ const GRIDMAP = (function gridmap() {
     ofsCtx.fillRect(point[0] - 1, point[1] - 1, 3, 3);
   }
 
-  // Replace gmSetGridMark:
   function gmSetGridMark(col, row, clr) {
     // User's own ask (2026-08-26), real screenshot: marks this size
     // (both squares and circles) overlapped each other and the
     // callsign labels on a busy band -- was 150.
     const f = 450.0;
-    const longitude = col * 2 - 180 + 0.0;
-    const latitude = row - 90 + 1.0;
-
-    const point = gmToMercatorPoint(longitude, latitude);
+    // ZBITXD LOCAL CHANGE (2026-08-27): both branches now draw centered
+    // exactly on gmGridCenterPoint() -- see its own comment. Previously
+    // each branch drew offset from the square's NW corner by its own
+    // half-size, a different point than what gmGridToWorldPoint() gave
+    // the QSO line code, so a line's endpoint never quite landed on the
+    // mark it was pointing at.
+    const point = gmGridCenterPoint(col, row);
 
     if (use_square_dots) {
-      // const sx = Math.round(ofsCanvas.width / f);
-      const sy = Math.round(ofsCanvas.height / f);
-      // const oldMode = ofsCtx.globalCompositeOperation;
-      // ofsCtx.globalCompositeOperation = 'difference';
+      const side = Math.round(ofsCanvas.height / f) / 2 + 1;
       ofsCtx.fillStyle = "PowderBlue";
-      ofsCtx.fillRect(point[0], point[1], sy/2+1, sy/2+1);
-      // ofsCtx.globalCompositeOperation = oldMode;
+      ofsCtx.fillRect(point[0] - side/2, point[1] - side/2, side, side);
       ofsCtx.fillStyle = clr;
-      ofsCtx.fillRect(point[0]+1, point[1]+1, sy/2-1, sy/2-1);
+      const innerSide = side - 2;
+      ofsCtx.fillRect(point[0] - innerSide/2, point[1] - innerSide/2, innerSide, innerSide);
     }
     else {
       const sx = Math.round(ofsCanvas.width / f);
@@ -548,10 +561,9 @@ const GRIDMAP = (function gridmap() {
       const radius = Math.min(sx, sy) / 2; // Radius for circles
       ofsCtx.fillStyle = clr;
       ofsCtx.beginPath();
-      ofsCtx.arc(point[0] + radius, point[1] + radius, radius, 0, 2 * Math.PI);
+      ofsCtx.arc(point[0], point[1], radius, 0, 2 * Math.PI);
       ofsCtx.fill();
     }
-    
   }
   function gmShowGridId(gridId, clr) {
     const point = gmGridIdToPoint(gridId);
@@ -567,17 +579,22 @@ const GRIDMAP = (function gridmap() {
   // map for free and doesn't need any per-frame redraw cost. Black
   // outline + white fill for contrast against any part of the map.
   function gmLabelCallsign(gridId, callsign) {
-    const point = gmGridIdToPoint(gridId);
-    const longitude = point[0] * 2 - 180 + 0.0;
-    const latitude = point[1] - 90 + 1.0;
-    const p = gmToMercatorPoint(longitude, latitude);
+    // ZBITXD LOCAL CHANGE (2026-08-27): anchored from the same true
+    // grid-square center gmSetGridMark()/gmGridToWorldPoint() now use
+    // (was the NW corner) -- otherwise this label would drift away
+    // from its own dot at deeper zoom levels the same way the QSO line
+    // endpoints used to (see gmGridCenterPoint()'s own comment). The
+    // +6/-4 offset is fixed ofsCanvas pixels, not degrees, so it scales
+    // with the mark's own size instead of drifting on its own.
+    const gp = gmGridIdToPoint(gridId);
+    const p = gmGridCenterPoint(gp[0], gp[1]);
     ofsCtx.font = "10px sans-serif";
     ofsCtx.textBaseline = "bottom";
     ofsCtx.lineWidth = 3;
     ofsCtx.strokeStyle = "black";
-    ofsCtx.strokeText(callsign, p[0] + 4, p[1] - 2);
+    ofsCtx.strokeText(callsign, p[0] + 6, p[1] - 4);
     ofsCtx.fillStyle = "white";
-    ofsCtx.fillText(callsign, p[0] + 4, p[1] - 2);
+    ofsCtx.fillText(callsign, p[0] + 6, p[1] - 4);
   }
 
   function gmSetGridDot(gridId, clr) {

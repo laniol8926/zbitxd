@@ -1886,6 +1886,17 @@ body {
 	width: 30px;
 }
 
+/* RF drive step went from 5 to 1 (real report -- too coarse to fine-tune
+   output power), so the track needs to be longer or 1%-per-pixel makes
+   it just as hard to land on a value by feel. Track length only, same
+   width as the base .linear-dropdown/.linear-slider. */
+#linear_DRIVE > .linear-dropdown {
+	height: 220px;
+}
+#linear_DRIVE .linear-slider {
+	height: 210px;
+}
+
 /* Shrunk to ~4 characters wide, same treatment as #linear_IF/
    #linear_DRIVE above -- label shortened to "RPT" (was "REPEAT"), full
    name moved to a title= tooltip. Slightly wider than the 3-char boxes

@@ -48,7 +48,7 @@
 	     file's line changed, by hand, same as any other deploy. -->
     <script src="pcm-player.js?v=1"></script>
 	<script src="proj4.js?v=1"></script>
-    <script src="gridmap.js?v=22"></script>
+    <script src="gridmap.js?v=23"></script>
 	<link rel="stylesheet" href="style.css?v=4">
   </head>
   <body>
@@ -72,7 +72,7 @@
     	<input type="number" id="DRIVE" min="1" max="100" class="linear-value" readonly />
      	<div class="linear-dropdown">
       	<input type="range" class="linear-slider"
-        	id="slider_DRIVE" max="100" min="0" step="5" value="10" />
+        	id="slider_DRIVE" max="100" min="0" step="1" value="10" />
 			</div>
 		</div>
 		<div class="sbitxv3-control">
@@ -2531,6 +2531,20 @@ function panel_geometry_key(panel, prop){
 // out yet (e.g. before login).
 var PANEL_TOP_MARGIN = 12;
 
+// Real report, live (2026-08-27): dragging a panel's title bar far
+// enough right (e.g. a wider extended-desktop browser window spanning
+// two monitors) had no horizontal clamp at all -- left could end up at
+// any value, get saved to localStorage by save_panel_geometry(), and
+// silently re-restore on every future page load with no sanity check
+// there either (restore_panel_geometry() only checked top). Once saved
+// bad, the panel stayed permanently unreachable on that browser no
+// matter how many times the page was reloaded. This is how much of the
+// title bar always stays reachable from either edge of the *current*
+// viewport width, in both drag_move() (live) and restore_panel_geometry()
+// (a saved position from a wider window/monitor layout restoring on a
+// narrower one later).
+var MIN_VISIBLE_PX = 40;
+
 function panel_min_top(){
 	var row = document.getElementById("pan_and_ft8list_row");
 	if (row){
@@ -2557,6 +2571,21 @@ function restore_panel_geometry(panel){
 	var min_top = panel_min_top();
 	if (parseFloat(panel.style.top) < min_top)
 		panel.style.top = min_top + "px";
+	// See MIN_VISIBLE_PX's own comment -- same horizontal clamp drag_move()
+	// applies live, needed here too for a position saved from a wider
+	// window/monitor layout that's now restoring on a narrower one.
+	// Falls back to the CSS width when the panel is still display:none
+	// (getBoundingClientRect() would read 0x0 there).
+	var left = parseFloat(panel.style.left);
+	if (!isNaN(left)){
+		var w = parseFloat(panel.style.width) || parseFloat(getComputedStyle(panel).width) || 260;
+		var min_left = MIN_VISIBLE_PX - w;
+		var max_left = window.innerWidth - MIN_VISIBLE_PX;
+		if (left < min_left)
+			panel.style.left = min_left + "px";
+		else if (left > max_left)
+			panel.style.left = max_left + "px";
+	}
 }
 
 function save_panel_geometry(panel){
@@ -2628,7 +2657,7 @@ function init_draggable_panels(){
 		var body = panel.querySelector(".sbitx-panel-body");
 
 		var dragging = false, moved = false;
-		var start_x, start_y, start_left, start_top, min_top;
+		var start_x, start_y, start_left, start_top, start_width, min_top;
 
 		function drag_start(x, y){
 			var r = panel.getBoundingClientRect();
@@ -2640,7 +2669,7 @@ function init_draggable_panels(){
 			panel.style.right = "auto";
 			panel.style.width = r.width + "px";
 			start_x = x; start_y = y;
-			start_left = r.left; start_top = r.top;
+			start_left = r.left; start_top = r.top; start_width = r.width;
 			// #maincontrols is position:fixed at the top of the page --
 			// clamp the drag to its bottom edge (plus PANEL_TOP_MARGIN),
 			// not the bare viewport top, so a panel (e.g. connect_panel,
@@ -2657,7 +2686,13 @@ function init_draggable_panels(){
 			var dx = x - start_x, dy = y - start_y;
 			if (Math.abs(dx) > 3 || Math.abs(dy) > 3)
 				moved = true;
-			panel.style.left = (start_left + dx) + "px";
+			// See MIN_VISIBLE_PX's own comment -- keeps at least a strip
+			// of the title bar reachable from either edge of the current
+			// viewport, so dragging onto e.g. a wider extended-desktop
+			// window can't push it somewhere unrecoverable.
+			var min_left = MIN_VISIBLE_PX - start_width;
+			var max_left = window.innerWidth - MIN_VISIBLE_PX;
+			panel.style.left = Math.max(min_left, Math.min(max_left, start_left + dx)) + "px";
 			// Real report, live (2026-08-25), cellphone: dragging the
 			// title bar too close to the top of the screen let it go
 			// fully off-screen under the mobile browser's own chrome
@@ -3940,7 +3975,28 @@ function FT8_new_message(text, style){
 	// well before any further decode could arrive.
 	var current_call = el("CALL") ? el("CALL").value.toUpperCase() : "";
 	var other_party = ft8_message_other_party(text, mycallsign);
-	var belongs_to_active_exchange = current_call && other_party === current_call;
+	// Real report, live (2026-08-27): a station answering our CQ (or
+	// cold-calling us) out of the blue never showed up here at all --
+	// confirmed with KE8ESJ answering a CQ, nothing ever appeared in RX
+	// Frequency for it. Root cause: message_add() (modem_ft8.c)
+	// broadcasts the decoded text immediately, well before ft8_process()
+	// -- triggered by that same decode, over 150 lines later in the same
+	// function -- actually sets #CALL server-side. For the one message
+	// that starts a fresh exchange, this always read a still-stale empty
+	// current_call. other_party truthy on a genuine "RX"-styled decode
+	// can only mean we're the message's addressee (nobody transmits a
+	// real over-the-air message claiming to be *from* us except us, and
+	// our own echoes are styled "TX", not "RX" -- see
+	// ft8_message_other_party()'s own comment) -- so this is safe to
+	// trust without waiting for #CALL, but only while genuinely idle
+	// (current_call already empty). Once a real exchange is active, a
+	// message from some *other* station must still wait for #CALL to
+	// actually move first -- see this variable's own stale-resend
+	// history just below -- or a live pileup could show the wrong
+	// station's traffic here.
+	var starting_fresh_exchange = !current_call && style === "RX" && other_party;
+	var belongs_to_active_exchange = (current_call && other_party === current_call)
+		|| starting_fresh_exchange;
 	// Auto CQ: while calling CQ with nobody answering yet (no real
 	// exchange started, current_call still empty), also show our own
 	// outgoing CQ transmission in RX Frequency -- otherwise there was

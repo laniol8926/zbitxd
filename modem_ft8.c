@@ -199,6 +199,33 @@ static bool ft8_qso_log_pending = false;
 // confirms we're not still mid-transmission).
 static bool ft8_give_up_pending = false;
 
+// Give-up grace period: real report, live (2026-08-27), KE8ESJ -- our
+// own reply's repeat budget (FT8_REPEAT) hitting 0 immediately called
+// call_wipe() (via ft8_give_up_pending above), but the other station's
+// reply was already in flight and decoded only ~15s later -- well
+// within FT8's own normal cadence, not a slow/late response. CALL was
+// already wiped by then, so their perfectly on-time reply got
+// misclassified by ft8_process_impl()'s auto-respond gate as a *fresh*
+// cold call instead of a continuation, restarting the exchange instead
+// of just continuing it. One more full receive window before actually
+// giving up (finalizing/wiping) gives a normal-speed reply a real
+// chance to be recognized for what it is. Only applies to the
+// is_cq==false give-up path (our own reply exhausting) -- the CQ's own
+// give-up (is_cq==true, ft8_autocq_stop() below) never wipes CALL in
+// the first place (nobody had answered yet), so there's no wipe race
+// to guard against there.
+// Known limitation, same as the rest of this file's wallclock_day_ms-
+// based timing (it resets to 0 at local midnight, nothing here accounts
+// for that): a deadline computed within the last 16s of the day wraps
+// via the modulo below to a small value already less than the current
+// wallclock_day_ms, firing the grace check immediately instead of after
+// a real 16s wait -- degrades to this file's original immediate-give-up
+// behavior for that one ~16s window per day, not stuck pending forever
+// (the alternative of not wrapping at all).
+static bool ft8_give_up_grace_pending = false;
+static int ft8_give_up_grace_deadline_ms = 0;
+#define FT8_GIVE_UP_GRACE_MS 16000 // one FT8 slot (15s) + margin
+
 // Real regression, caught live (2026-08-23) right after first adding
 // the RRR/RR73 dedup fix below: reusing RECV to detect a repeated
 // RRR/RR73 clobbered it with the literal string "RRR"/"RR73" -- RECV
@@ -1711,9 +1738,11 @@ static void ft8_poll_impl(int tx_is_on){
 	// false then) would return above before ever reaching the block below
 	// that actually consumes it -- the deferred log/call-wipe would just
 	// never happen. ft8_give_up_pending needs the same treatment -- see
-	// its own comment.
+	// its own comment. ft8_give_up_grace_pending too -- it needs to keep
+	// getting polled (to notice its deadline passing) for as long as it
+	// stays set, same reasoning.
 	if (!ft8_repeat && !ft8_autocq_resume_pending && !ft8_qso_log_pending
-			&& !ft8_give_up_pending)
+			&& !ft8_give_up_pending && !ft8_give_up_grace_pending)
 		return;
 
 	// See ft8_qso_log_pending's own comment: the courtesy "73" queued in
@@ -1733,6 +1762,19 @@ static void ft8_poll_impl(int tx_is_on){
 	// queued.
 	if (!ft8_repeat && ft8_give_up_pending){
 		ft8_give_up_pending = false;
+		ft8_finalize_pending_qso();
+		call_wipe();
+		if (ft8_autocq_running)
+			ft8_autocq_resume_pending = true;
+	}
+
+	// See ft8_give_up_grace_pending's own comment: only actually finalize
+	// once the grace deadline has passed with nothing further heard from
+	// this station -- ft8_process_impl() cancels this early the instant a
+	// genuine continuation arrives, so reaching here at all means the
+	// grace window really did run out.
+	if (ft8_give_up_grace_pending && wallclock_day_ms >= ft8_give_up_grace_deadline_ms){
+		ft8_give_up_grace_pending = false;
 		ft8_finalize_pending_qso();
 		call_wipe();
 		if (ft8_autocq_running)
@@ -1906,7 +1948,18 @@ static void ft8_poll_impl(int tx_is_on){
 					// the final retry had even gone out. Deferred instead
 					// (see ft8_give_up_pending's own comment), same pattern
 					// as ft8_qso_log_pending right above it.
-					ft8_give_up_pending = true;
+					//
+					// Real report, live (2026-08-27), KE8ESJ: deferred only
+					// to "once this transmission finishes" wasn't enough --
+					// a normal-speed reply routinely arrives *after* that
+					// point too. Grace-period version instead (see
+					// ft8_give_up_grace_pending's own comment) -- gives one
+					// more full receive window before actually finalizing/
+					// wiping, cancelled early if a genuine continuation
+					// arrives first (ft8_process_impl()).
+					ft8_give_up_grace_pending = true;
+					ft8_give_up_grace_deadline_ms =
+						(wallclock_day_ms + FT8_GIVE_UP_GRACE_MS) % (24 * 3600 * 1000);
 				}
 			}
 			// Live countdown for the operator -- broadcast every time
@@ -1924,13 +1977,21 @@ static void ft8_poll_impl(int tx_is_on){
 		// delayed a full 30s/one alternating-pair cycle) is expected to
 		// no longer trigger this at all now, having landed at 1746ms --
 		// comfortably under the new 2000ms cutoff.
+		//
+		// User's own real report (2026-08-27): a station answered a CQ
+		// right after its 3rd/final repeat, and the reply back to them
+		// missed a slot. is_cq/CALL added so a real recurrence of this
+		// line unambiguously says which case it was -- our own CQ
+		// missing a repeat (is_cq 1, CALL empty) vs. a reply to someone
+		// missing its window (is_cq 0, CALL is who we were replying to)
+		// -- instead of having to infer it from ft8_tx_text alone.
 		else {
 			static int last_logged_window = -1;
 			int window_id = wallclock_day_ms / (is_ft4 ? 7500 : 15000);
 			if (window_id != last_logged_window) {
 				last_logged_window = window_id;
-				LOG(LOG_INFO, "%05d ft8_poll: MISSED window, slot_time %d ms (>= 4500ms gate), queued '%s'\n",
-					wallclock_day_ms % 60000, slot_time, ft8_tx_text);
+				LOG(LOG_INFO, "%05d ft8_poll: MISSED window (is_cq %d, CALL '%s'), slot_time %d ms (>= 4500ms gate), queued '%s' -- deferred to next matching slot\n",
+					wallclock_day_ms % 60000, is_cq, field_str("CALL"), slot_time, ft8_tx_text);
 			}
 		}
 	}
@@ -2291,6 +2352,33 @@ static void ft8_process_impl(char *message, ftx_operation operation){
 
 	// see if you are on auto responder, the logger is empty and we are the called party
 	if (auto_respond && !strlen(call) && !strcmp(m1, mycall)){
+		// User's own real report (2026-08-27): a station answered a CQ
+		// right after its 3rd/final repeat, and the reply back to them
+		// missed its own slot -- suspected root cause is decode/dispatch
+		// latency eating into the tight ~1-2s margin before the reply's
+		// target window opens (see ft8_poll_impl()'s "MISSED window" log
+		// and its own 4500ms-gate comment for the full reasoning). This
+		// line records how far into the *current* slot we already are by
+		// the time the reply actually gets queued -- cross-reference
+		// against a "MISSED window" line moments later (same CALL) to
+		// confirm whether a real miss traces back to this.
+		//
+		// Real bug caught live (2026-08-27), same investigation: this
+		// branch also fires for a genuine *cold call* (nobody was
+		// calling CQ at all), and -- after the give-up grace period just
+		// below was added -- can no longer fire mid-QSO the way it once
+		// could either. "auto-answering CQ" was flatly wrong for either
+		// of those; can't tell from here whether *we* were CQing (that's
+		// only decided inside ft8_on_start_qso(), from whether m1 there
+		// is literally "CQ" -- not the case in this branch, since m1 is
+		// already mycall by the condition above). Logged generically
+		// instead: a fresh/idle exchange starting from '%s'.
+		{
+			const bool is_ft4_now = !strcmp(field_str("MODE"), "FT4");
+			const int slot_time_now = is_ft4_now ? wallclock_day_ms % 7500 : wallclock_day_ms % 15000;
+			LOG(LOG_INFO, "%05d ft8_process: new exchange (CALL was empty) starting with '%s', queuing reply at slot_time %d ms\n",
+				wallclock_day_ms % 60000, m2, slot_time_now);
+		}
 		// Someone answered our own CQ -- move the RX line (client's
 		// waterfall overlay) to their frequency automatically, same as
 		// clicking their decode line would, since no click ever happens
@@ -2330,6 +2418,15 @@ static void ft8_process_impl(char *message, ftx_operation operation){
 		LOG(LOG_INFO, "ft8_process: ignoring stale-exchange message from '%s' (CALL is '%s')\n", m2, call);
 		return;
 	}
+
+	// See ft8_give_up_grace_pending's own comment: reaching here with
+	// CALL non-empty and m2==call (didn't return above) means this
+	// message genuinely continues the exchange the grace period was
+	// counting down for -- cancel it so the deferred finalize/wipe in
+	// ft8_poll_impl() doesn't fire later and clobber a now-active
+	// exchange out from under itself. Harmless no-op if it wasn't
+	// pending.
+	ft8_give_up_grace_pending = false;
 
 	if (!strcmp(m3, "73")){
 		ft8_abort();
@@ -2517,7 +2614,11 @@ void ft8_finalize_pending_qso(){
 	// (see ft8_give_up_pending's own comment), that's now moot: just
 	// drop it rather than leaving it to misfire later against whatever
 	// exchange happens to be running the next time ft8_repeat hits 0.
+	// Same reasoning for a still-pending give-up grace period (see its
+	// own comment) -- a new exchange taking over means whatever it was
+	// counting down for is moot too.
 	ft8_give_up_pending = false;
+	ft8_give_up_grace_pending = false;
 	if (!ft8_qso_log_pending)
 		return;
 	ft8_qso_log_pending = false;
