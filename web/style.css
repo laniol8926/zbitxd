@@ -1468,6 +1468,13 @@ input[type="checkbox"] {
 .wsjtx-cq-in-message {
 	color: rgb(251, 243, 0);
 }
+/* User's own ask (2026-08-28): background, not text color -- this
+   layers on top of wsjtx-cq-in-message's own yellow text (CQ Panel
+   rows are almost always also "cq-in-message"), so it has to work
+   as a background tint behind that color, not compete with it. */
+.wsjtx-worked-b4 {
+	background-color: rgba(140, 40, 40, 0.45);
+}
 /* generic styling of ui elements */
 
 .sbitx-list-box .ui-selected {background: grey; color: white;}

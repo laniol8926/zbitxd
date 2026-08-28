@@ -3314,15 +3314,24 @@ function ft8_cq_message_callsign(text){
 // not "ever worked" -- working the same station again on a different
 // band or mode is a legitimate new contact. worked_set is populated in
 // logbook_update().
-function FT8_already_worked(text){
-    if (!hide_worked_enabled)
-	return false;
+// Real ask, live (2026-08-28): with "Hide B4" unchecked (worked
+// stations shown, not hidden), there was no way to tell one had already
+// been worked short of clicking it and hitting pre_ft8_check()'s dupe-
+// confirmation gate (see FT8_message_chosen()'s own comment). Split the
+// underlying "was this worked on the current band/mode" check out from
+// the hide-vs-show decision so FT8_stylize_message_item() can use it to
+// flag the row visually regardless of whether Hide B4 is on.
+function FT8_is_worked(text){
     var call = ft8_cq_message_callsign(text);
     var band = el("BAND") ? el("BAND").value : null;
     var mode = el("MODE") ? el("MODE").value : null;
     if (!call || !band || !mode)
 	return false;
     return worked_set.has(call.toUpperCase() + "|" + mode.toUpperCase() + "|" + band);
+}
+
+function FT8_already_worked(text){
+    return hide_worked_enabled && FT8_is_worked(text);
 }
 
 function FT8_stylize_message_item(item, text, style, list_id) {
@@ -3437,6 +3446,16 @@ function FT8_stylize_message_item(item, text, style, list_id) {
 	// contact sender grid|R
 	htmMessage = deco_to_span(m1) + " " + deco_to_span(m2) + " " + deco_to_span(m3);
     }
+    // User's own ask (2026-08-28): with "Hide B4" off (worked stations
+    // shown, not hidden), there was no visual way to tell one had
+    // already been worked on this band/mode short of clicking it --
+    // see FT8_is_worked()'s own comment. CQ Panel only (list_id check)
+    // -- Band Activity/RX Frequency show every station regardless of
+    // worked status, this flag is specifically about which CQ to pick.
+    // classList.add(), not part of the className= assignments above, so
+    // it layers on top of whichever base class this item already got.
+    if (list_id === "wsjtx-cq" && FT8_is_worked(text))
+	item.classList.add("wsjtx-worked-b4");
     // explicit single space -- .ft8-label no longer pads out to a
     // fixed column width (see its own CSS comment), so without this
     // the label and message would run together with zero separation
@@ -3740,7 +3759,17 @@ function FT8_message_chosen(event){
 		// instead of leaving the UI in a state that looks like it
 		// worked while nothing happened and Simplify's solo logic
 		// permanently thinks a QSO is running.
-		if (!websocket_send("FT8_check "+deco_strip(message_text))){
+		// User's own ask (2026-08-28): "if i click on a station worked
+		// b4 i want to work him" -- "FT8" (unlike "FT8_check") calls
+		// ft8_process() directly with no dupe-confirmation gate at all
+		// (that gate, pre_ft8_check()'s, is what "FT8_check" goes
+		// through -- see FT8_stylize_message_item()'s worked-before
+		// styling just above for the *visual* heads-up that replaces
+		// it here). Deliberately still leaves autoans_pick_and_answer()
+		// alone -- it still sends "FT8_check" and keeps its own
+		// automatic skip-if-already-worked behavior, since that path
+		// has no human reviewing each pick.
+		if (!websocket_send("FT8 "+deco_strip(message_text))){
 			alert("Couldn't reach the server -- try again.");
 			return;
 		}
@@ -3758,31 +3787,6 @@ function FT8_message_chosen(event){
 		// the same as arming Auto CQ/Auto Answer does.
 		qso_in_progress = true;
 		set_band_activity_hidden(true);
-		// Real report, live (2026-08-28): "clicked on a station calling
-		// CQ... panel switched to RX Frequency but TX was never enabled"
-		// -- pre_ft8_check() (sbitx_daemon.c) has a deliberate dupe-
-		// confirmation safety gate: a first click on a station already
-		// worked on this band/mode does NOT transmit at all, only a
-		// second, matching click does -- with no server round-trip
-		// telling the client that happened. autoans_pick_and_answer()
-		// already has this exact detection for the automated case (its
-		// own comment, elsewhere in this file); manual clicks never had
-		// it. If TXACTIVE hasn't gone active within a few seconds, this
-		// click was the silent no-op, not a real QSO start -- undo the
-		// optimistic UI updates just above and tell the operator
-		// plainly, instead of leaving RX Frequency looking like a reply
-		// is in progress when nothing was ever queued.
-		if (manual_click_check_timer)
-			clearTimeout(manual_click_check_timer);
-		manual_click_check_timer = setTimeout(function(){
-			manual_click_check_timer = null;
-			if (!cq_active){
-				FT8_rx_clear();
-				qso_in_progress = false;
-				set_band_activity_hidden(false);
-				alert("Already worked that station on this band/mode -- click it again to confirm you want to work them again.");
-			}
-		}, 3000);
 	}
 
 	/*
@@ -4338,10 +4342,6 @@ function logger_enter_qso(){
 // (also bound to this button, and checks cq_active itself to decide
 // between "F1" and "abort=1") -- this handler only owns the highlight.
 var cq_active = false;
-// See FT8_message_chosen()'s own comment -- detects a manual click that
-// silently hit pre_ft8_check()'s dupe-confirmation gate (no reply ever
-// queued) instead of a real QSO start.
-var manual_click_check_timer = null;
 // Tracks whether the *current* cq_active state was caused by
 // ft8_autocq_start() specifically (client-armed), as opposed to a
 // plain manual F1 click -- both drive the exact same cq_active/
