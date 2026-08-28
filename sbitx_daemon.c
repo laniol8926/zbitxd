@@ -2673,8 +2673,38 @@ void set_radio_mode(char *mode){
 			new_bandwidth = field_int("BW_DIGITAL");
 	}
 	struct field *f = get_field_by_label("MODE");
-	if (strcmp(f->value, umode))
+	bool mode_changed = strcmp(f->value, umode) != 0;
+	if (mode_changed)
 		field_set("MODE", umode);
+	// Real report, live (2026-08-28): switching MODE between FT8/FT4
+	// while staying on the same band left the dial at whatever
+	// frequency the *previous* mode was using -- change_band()'s own
+	// WSJT-X-style table lookup (Settings > Frequencies) only ever ran
+	// on an actual band click, never on a mode-only switch. Confirmed
+	// live: FT8->FT4 on 30M left FREQ at FT8's stored 10.136 value
+	// instead of FT4's 10.140, needing a manual frequency entry to fix
+	// -- and a subsequent band click (even round-tripping right back to
+	// the same band) picked up the correct value immediately, showing
+	// the table itself was never the problem, just this missing trigger.
+	// Mirrors change_band()'s own table_freq branch, minus the band-
+	// index/stack bookkeeping that only makes sense for an actual band
+	// change (we're not changing bands here).
+	if (mode_changed && (mode_id(umode) == MODE_FT8 || mode_id(umode) == MODE_FT4)){
+		long cur_freq = atol(get_field("r1:freq")->value);
+		int max_bands = sizeof(band_stack)/sizeof(struct band);
+		for (i = 0; i < max_bands; i++){
+			if (band_stack[i].start <= cur_freq && cur_freq <= band_stack[i].stop){
+				long table_freq = band_freq_get(band_stack[i].name, umode);
+				if (table_freq > 0){
+					char freq_buf[20], resp[100];
+					sprintf(freq_buf, "%ld", table_freq);
+					set_operating_freq(table_freq, resp);
+					field_set("FREQ", freq_buf);
+				}
+				break;
+			}
+		}
+	}
 	//let the bw control trigger the filter
 	char bw_str[10];
 	sprintf(bw_str, "%d", new_bandwidth);
