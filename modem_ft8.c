@@ -2183,6 +2183,28 @@ void ft8_on_start_qso(char *message){
 	else if (!strcmp(m1, mycall)){
 		if (!m2[0])
 			return;
+		// Real bug, root-caused live (2026-08-28) via two corrupted
+		// historical logbook rows (2026-08-23/24: RECV holding the
+		// literal text "RRR"/"RR73" instead of a numeric report, EXCH
+		// left empty when it should have held a real grid). "RRR"/
+		// "RR73"/"73" are never valid content for the *first* message
+		// of a fresh exchange -- they only ever mean something as the
+		// closing steps of one already under way. Reaching this branch
+		// at all requires CALL to already be empty (this function's own
+		// call_wipe() above, or the auto-respond gate's !strlen(call)
+		// check) -- so a message shaped like this here is either a
+		// stray decode with no real exchange to attach to (nothing
+		// useful to do with it), or -- the actual root cause found live
+		// -- a genuine, on-time continuation whose CALL got wiped out
+		// from under it by some other give-up/completion race finishing
+		// moments before this arrived (today's give-up grace period
+		// closes one such race, but not every call_wipe() site has one).
+		// Either way, blindly logging it into RECV via the "not a grid
+		// shape, must be a report" fallback below is simply wrong.
+		// Ignoring it here closes the actual corruption path regardless
+		// of which race let CALL go empty.
+		if (!strcmp(m3, "RRR") || !strcmp(m3, "RR73") || !strcmp(m3, "73"))
+			return;
 		set_call_field(m2);
 		field_set("SENT", signal_strength);
 		LOG(LOG_DEBUG, "ft8_on_start_qso cold call: rst s %s\n", signal_strength);
@@ -2197,6 +2219,11 @@ void ft8_on_start_qso(char *message){
 		}
 	}
 	else { //we are breaking into someone else's qso
+		// See the cold-call branch's own comment just above -- same
+		// reasoning: "RRR"/"RR73"/"73" can never be valid content for
+		// *starting* a fresh exchange, manual break-in or not.
+		if (!strcmp(m3, "RRR") || !strcmp(m3, "RR73") || !strcmp(m3, "73"))
+			return;
 		set_call_field(m2);
 		if (isalpha(m3[0]) && isalpha(m3[1]) && strncmp(m3,"RR",2)!=0){ // R- RR are not EXCH
 			field_set("EXCH", m3); // the gridId is valid - use it
