@@ -1773,12 +1773,39 @@ static void ft8_poll_impl(int tx_is_on){
 	// this station -- ft8_process_impl() cancels this early the instant a
 	// genuine continuation arrives, so reaching here at all means the
 	// grace window really did run out.
-	if (ft8_give_up_grace_pending && wallclock_day_ms >= ft8_give_up_grace_deadline_ms){
-		ft8_give_up_grace_pending = false;
-		ft8_finalize_pending_qso();
-		call_wipe();
-		if (ft8_autocq_running)
-			ft8_autocq_resume_pending = true;
+	if (ft8_give_up_grace_pending){
+		if (wallclock_day_ms >= ft8_give_up_grace_deadline_ms){
+			ft8_give_up_grace_pending = false;
+			ft8_finalize_pending_qso();
+			call_wipe();
+			if (ft8_autocq_running)
+				ft8_autocq_resume_pending = true;
+		}
+		// Real bug, caught live (2026-08-28) via a real QSO with ER5DX,
+		// STILL happening after the "still waiting" return below was
+		// added: that fix only covered the *not yet expired* half of
+		// this check -- the *just expired, finalizing right now* half
+		// above had no return at all, so execution still fell straight
+		// through into the normal ftx_would_send()/repeat-decrement/
+		// actual-transmit block below, in this exact same tick.
+		// call_wipe() clears CALL/SENT/RECV/EXCH/NR but deliberately
+		// never touches ft8_tx_text (a separate buffer) -- so if a slot
+		// boundary happened to land on this same tick (likely, since
+		// the grace deadline was itself derived from real slot timing),
+		// it retransmitted the same already-finished message again,
+		// decremented ft8_repeat to -1, re-triggered this exact give-up
+		// branch, and re-armed a *fresh* 16s grace period. Forever, in
+		// a stable 16s-period loop -- confirmed live, retransmissions
+		// exactly 16s (FT8_GIVE_UP_GRACE_MS) apart. CALL genuinely did
+		// get wiped each cycle (why the CQ Panel correctly reappeared,
+		// per the user's own report) even while this kept transmitting
+		// underneath it the whole time. Unconditional return now,
+		// whether grace just expired or is still pending -- either way
+		// there is nothing left to legitimately transmit this tick; a
+		// genuinely new exchange starting fresh always goes through
+		// ft8_on_start_qso(), a completely different call path where
+		// this flag is false.
+		return;
 	}
 
 	// Auto CQ: the QSO that just finished (ft8_process()'s "73"/"RR73"
