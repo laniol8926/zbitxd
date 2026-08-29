@@ -3914,10 +3914,38 @@ int main( int argc, char* argv[] ) {
 
 	// Auto CQ/Auto Answer must never silently resume autonomous
 	// transmitting after a restart, whatever user_settings.ini happens to
-	// have persisted from the last session -- same safety reasoning as
-	// RIGCONNECT not auto-reconnecting on startup: the operator has to
-	// explicitly re-arm it every time.
+	// have persisted from the last session -- real regulatory-compliance
+	// concern (unattended auto-TX), the operator has to explicitly re-arm
+	// it every time.
 	set_field("#ft8_auto", "OFF");
+
+	// Real gap, caught live (2026-08-29): RIGCONNECT (spawns rigctld,
+	// connects it to the physical rig) was previously client-triggered
+	// only (the settings panel's Connect button) -- this had briefly been
+	// treated as the same class of restart-safety concern as Auto CQ just
+	// above, but on reflection (user's own call) the two aren't alike:
+	// Auto CQ's concern is unattended TRANSMISSION; this just re-opens CAT
+	// control (frequency/mode), which sends nothing over the air by
+	// itself. Every zbitxd restart tonight (deploying unrelated fixes)
+	// silently killed rigctld (a child process) and left it dead until
+	// someone happened to click Connect again -- confirmed live: two
+	// separate FREQ commands landed cleanly on the daemon side with zero
+	// error logged, yet never reached the real radio, because there was
+	// no rigctld running to relay them at all. Auto-connecting here
+	// closes that gap using whatever RIGMODEL/RIGDEVICE/RIGBAUD are
+	// already persisted from the last successful manual Connect -- a
+	// no-op if generic_rig_mode is off, or if nothing's been configured
+	// yet (fresh install, RIGDEVICE still empty). The one case this is
+	// expected to still fail (same as a manual Connect click would) is
+	// the user's own: swapped to a different radio without yet updating
+	// these settings -- rig_generic_connect()/rigctld already degrade
+	// safely for that (logged "could not connect", no crash), same as
+	// it always has for a manual Connect attempt against a bad device.
+	if (generic_rig_mode && field_str("RIGDEVICE")[0]) {
+		char model_id[16];
+		snprintf(model_id, sizeof(model_id), "%d", atoi(field_str("RIGMODEL")));
+		rig_generic_connect(model_id, field_str("RIGDEVICE"), field_str("RIGBAUD"));
+	}
 
 	// apply the persisted region's 80M/40M band edges now that settings
 	// (including #region itself) have actually loaded
