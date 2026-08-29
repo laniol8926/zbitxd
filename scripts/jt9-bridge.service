@@ -1,0 +1,14 @@
+[Unit]
+Description=jt9 decoder-merge bridge for zbitxd (task: decoder merge)
+After=zbitxd.service
+Wants=zbitxd.service
+
+[Service]
+Type=simple
+User=zbitxd
+ExecStart=/usr/bin/python3 /usr/local/share/zbitxd/jt9_bridge.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
