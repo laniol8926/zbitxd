@@ -1036,11 +1036,18 @@ input[type="checkbox"] {
    J/Z/D source-tag column added real width on top of the existing
    label+message content). ID selector, not a shared class -- only
    widens this one panel, not CQ Panel/RX Frequency, which still share
-   .sbitx-list-container's own 320px at rest. 4ch (not a flat px add)
+   .sbitx-list-container's own sizing at rest. 4ch (not a flat px add)
    since the panel's own font is monospace -- ties the width increase
-   to the font's actual character width regardless of font-size. */
+   to the font's actual character width regardless of font-size.
+   flex-basis, not width -- real bug, first version of this rule only
+   set width, which .sbitx-list-container's own "flex: 1" (shorthand
+   for flex-grow:1 flex-shrink:1 flex-basis:0%) silently overrides for
+   actual layout sizing in a flex context, so that first attempt had
+   zero visible effect despite deploying correctly. flex-grow/shrink
+   stay inherited at 1 so this panel still grows/shrinks proportionally
+   alongside CQ Panel/RX Frequency, just from a wider starting point. */
 #wsjtx-activity {
-	width: calc(320px + 4ch);
+	flex-basis: calc(320px + 4ch);
 }
 
 /* Applied to #wsjtx-cq/#wsjtx-rx (not #wsjtx-activity -- it's the least
