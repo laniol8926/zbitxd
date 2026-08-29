@@ -263,8 +263,12 @@ void jt9_display_decode(const char *message){
 	else
 		snprintf(text, sizeof(text), "%s %s", m1_p, m2_p);
 
-	if (jt9_native_seen_has(hhmmss, text))
-		return; // our own decoder already showed this one this slot
+	// POC source-tag column (Band Activity/CQ Panel): used to be an early
+	// return here, silently dropping any jt9 catch that duplicated one
+	// sbitx_ft8_decode() already showed. Now shown either way, tagged J
+	// (fresh jt9-only catch) or D (duplicate) via sem[0] below, so the
+	// dedup logic's actual live hit rate is visible instead of inferred.
+	bool is_dup = jt9_native_seen_has(hhmmss, text);
 
 	char mycallsign_upper[20];
 	{
@@ -280,6 +284,14 @@ void jt9_display_decode(const char *message){
 	text_span_semantic sem[MAX_CONSOLE_LINE_STYLES];
 	memset(sem, 0, sizeof(sem));
 	int sem_i = 0, pos = 0;
+
+	// Catch-all whole-line span, same role as sbitx_ft8_decode()'s own
+	// sem[0] (native): drives web_write()'s <WSJTX-RX-*> tag selection
+	// (only sem[0].semantic is consulted there) and the front-panel
+	// decimal-stripping range check. .length gets backfilled to the
+	// final buf length once it's known, below.
+	int line_span_i = sem_i;
+	sem[sem_i++].semantic = is_dup ? STYLE_FT8_RX_DUP : STYLE_FT8_RX_JT9;
 
 	pos += snprintf(buf + pos, sizeof(buf) - pos, "%s  ", hhmmss);
 	sem[sem_i].start_column = 0;
@@ -359,13 +371,17 @@ void jt9_display_decode(const char *message){
 		sem[sem_i].length = (int)strlen(m4_p);
 		sem[sem_i++].semantic = (m4_p == extra) ? STYLE_GRID : STYLE_CALLER;
 	}
+	sem[line_span_i].length = pos; // backfill now that the whole line is built
 
 	message_add("FT8", (unsigned int)atoi(freq_str), 0, text);
-	// "j> " (vs native's own ">> ") -- lets a jt9-only catch (the
-	// merge's whole point) be told apart from a native one at a glance,
-	// same as native's own message-type-prefixed ">> " logging just
-	// above sbitx_ft8_decode()'s own write_console_semantic() call.
-	LOG(LOG_INFO, "j> %s\n", buf);
+	// "j> "/"jd> " (vs native's own ">> ") -- lets a jt9-only catch (the
+	// merge's whole point) be told apart from a native one at a glance in
+	// the journal, same as native's own message-type-prefixed ">> "
+	// logging just above sbitx_ft8_decode()'s own write_console_semantic()
+	// call -- "jd> " is the same J/D split now visible live in the
+	// Band Activity/CQ Panel source-tag column, useful for confirming the
+	// two agree without a browser open.
+	LOG(LOG_INFO, "%s%s\n", is_dup ? "jd> " : "j> ", buf);
 	write_console_semantic(buf, sem, sem_i);
 }
 

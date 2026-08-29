@@ -1083,6 +1083,13 @@ void  web_write(int style, char *data){
 		case STYLE_FT8_RX:
 			strcpy(tag, "WSJTX-RX");
 			break;
+		// POC source-tag column -- see sdr_ui.h's own comment on these two.
+		case STYLE_FT8_RX_JT9:
+			strcpy(tag, "WSJTX-RX-J");
+			break;
+		case STYLE_FT8_RX_DUP:
+			strcpy(tag, "WSJTX-RX-D");
+			break;
 		case STYLE_FLDIGI_RX:
 			strcpy(tag, "FLDIGI-RX");
 			break;

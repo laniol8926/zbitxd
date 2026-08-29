@@ -1455,6 +1455,37 @@ input[type="checkbox"] {
 	text-align: left;
 }
 
+/* POC source-tag column, Band Activity/CQ Panel only (user's own ask):
+   which decoder produced this row -- Z (native), J (jt9_bridge.py, a
+   fresh catch), D (jt9_bridge.py, duplicates a Z row already shown this
+   slot). Fixed 1ch width + monospace, same reasoning as .ft8-freq-field
+   -- a single always-present character, but still worth a fixed box so
+   the label/message that follows doesn't shift by a pixel or two
+   depending on glyph width. Bracket-style background instead of plain
+   text color so it reads as a tag/badge at a glance, not part of the
+   decoded message itself. */
+.ft8-source-field {
+	display: inline-block;
+	width: 1ch;
+	text-align: center;
+	font-weight: bold;
+	border-radius: 2px;
+	padding: 0 3px;
+	margin-right: 2px;
+}
+.ft8-source-z {
+	background-color: rgba(60, 90, 160, 0.65);
+	color: rgb(220, 230, 255);
+}
+.ft8-source-j {
+	background-color: rgba(60, 150, 90, 0.65);
+	color: rgb(220, 255, 230);
+}
+.ft8-source-d {
+	background-color: rgba(160, 120, 40, 0.65);
+	color: rgb(255, 235, 210);
+}
+
 .ft8-message {
 	font-size: 9pt;
 	font-weight: bold;

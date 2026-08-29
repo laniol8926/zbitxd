@@ -58,11 +58,12 @@ void ft8_set_qso_lock(float freq_hz);
 // thread only -- see the queue's own comment in modem_ft8.c.
 void ft8_grid_queue_drain(void);
 
-// Gives a jt9-only catch (decoder-merge task, fed in via the
-// FT8CONTINUE remote command) its own Band Activity/CQ Panel row,
-// deduped against our own decoder's own catches -- see this function's
-// own comment in modem_ft8.c for why this was needed at all (neither
-// FT8CONTINUE nor ft8_process() ever displayed anything on their own).
+// Gives a jt9 catch (decoder-merge task, fed in via the FT8CONTINUE
+// remote command) its own Band Activity/CQ Panel row, tagged J (not
+// seen by our own decoder this slot) or D (duplicates one our own
+// decoder already showed) -- see this function's own comment in
+// modem_ft8.c for why this was needed at all (neither FT8CONTINUE nor
+// ft8_process() ever displayed anything on their own).
 // Call before ft8_process(message, FTX_CONTINUE_QSO), with the same
 // untouched raw message text -- this tokenizes its own private copy.
 void jt9_display_decode(const char *message);

@@ -157,6 +157,8 @@ char ff_char(int style) {
 	case STYLE_TIME:
 	case STYLE_FREQ:
 	case STYLE_FT8_RX:
+	case STYLE_FT8_RX_JT9:
+	case STYLE_FT8_RX_DUP:
 	    return 'A' + 6;
 	case STYLE_SNR:
 	case STYLE_FT8_TX:
@@ -206,6 +208,8 @@ char *ff_cs(char * markup, int style) {
 int old_style_font(int style) {
     switch (style) {
     case STYLE_FT8_RX:
+    case STYLE_FT8_RX_JT9:
+    case STYLE_FT8_RX_DUP:
 	return 6; // FONT_FT8_RX
     case STYLE_FT8_TX:
 	return 7; // FONT_FT8_TX
@@ -284,9 +288,11 @@ void hd_strip_decoration(char * ft8_message, char * decorated) {
 int hd_decorate(int style, const char * message, char * decorated) {
 	switch (style) {
 	case STYLE_FT8_RX:
+	case STYLE_FT8_RX_JT9:
+	case STYLE_FT8_RX_DUP:
 	case STYLE_FT8_TX:
 	case STYLE_FT8_QUEUED:
-	case STYLE_FT8_REPLY: 
+	case STYLE_FT8_REPLY:
 		{
 		decorated[0] = 0;
 			struct hd_message_struct fms;

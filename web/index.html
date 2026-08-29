@@ -3413,7 +3413,7 @@ function FT8_already_worked(text){
     return hide_worked_enabled && FT8_is_worked(text);
 }
 
-function FT8_stylize_message_item(item, text, style, list_id) {
+function FT8_stylize_message_item(item, text, style, list_id, source) {
     //tokenize the message
     var token_list = text.match(/\S+/g);
     if (token_list.length < 6 || token_list.length > 9){
@@ -3539,7 +3539,18 @@ function FT8_stylize_message_item(item, text, style, list_id) {
     // fixed column width (see its own CSS comment), so without this
     // the label and message would run together with zero separation
     // for shorter labels (e.g. RX Frequency's "TX" echo lines).
-    item.innerHTML = htmLabel + ' <span class="ft8-message">' + htmMessage + '</span>';
+    //
+    // POC source-tag column, user's own ask: which decoder produced this
+    // row -- Z (native sbitx_ft8_decode()), J (jt9_bridge.py, not seen
+    // natively this slot), D (jt9_bridge.py, duplicates a Z row already
+    // shown this slot). Band Activity/CQ Panel only -- source is only
+    // ever passed for those two list_ids (see FT8_new_message()'s own
+    // comment); RX Frequency and the operator's own TX/Q lines get no
+    // badge at all, source is undefined there.
+    var sourceBadge = "";
+    if (source)
+	sourceBadge = "<span class='ft8-source-field ft8-source-" + source.toLowerCase() + "'>" + source + "</span> ";
+    item.innerHTML = sourceBadge + htmLabel + ' <span class="ft8-message">' + htmMessage + '</span>';
 }
 
 // Most recent FT8 decode-period time label (HHMMSS, the first token of
@@ -3561,7 +3572,7 @@ function FT8_format_period_label(label){
 	return label.substring(0,2) + ":" + label.substring(2,4) + ":" + label.substring(4,6) + " UTC";
 }
 
-function FT8_list_append(list_id, text, style){
+function FT8_list_append(list_id, text, style, source){
 
 	// "Q" is ft8_tx()'s queued-placeholder line, written the instant
 	// F1/a macro is clicked -- timestamped at click time, not when the
@@ -3581,7 +3592,7 @@ function FT8_list_append(list_id, text, style){
 		return;
 
 	var item = document.createElement("li");
-	FT8_stylize_message_item(item, text, style, list_id);
+	FT8_stylize_message_item(item, text, style, list_id, source);
 
 	item.id = deco_strip(text).replace(/[^\w\-\/\~]+/g, "_");
 	// item.id above squashes spaces to '_' -- fine for a DOM id, but
@@ -4021,7 +4032,7 @@ function update_ft8_panel_layout(){
 	});
 }
 
-function FT8_new_message(text, style){
+function FT8_new_message(text, style, source){
 	//log("ft8:" + text + ":" + style);
 	// \S+ (collapses repeated whitespace), not split(' ') -- the server
 	// pads the frequency field to a fixed width (e.g. " 647" vs "1834"),
@@ -4032,7 +4043,10 @@ function FT8_new_message(text, style){
 	// tokenization FT8_stylize_message_item()/ft8_message_tokenize()
 	// already use, where the frequency field is reliably index 3.
 	var words = text.match(/\S+/g) || [];
-	FT8_list_append("wsjtx-activity", text, style) ;
+	// source ("Z"/"J"/"D", see update_data()'s own comment) is only ever
+	// passed for genuine RX decodes -- undefined for the operator's own
+	// TX/Q lines, which FT8_stylize_message_item() takes as "no badge".
+	FT8_list_append("wsjtx-activity", text, style, source) ;
 	// CQ Panel is for stations calling CQ, not the operator's own CQ --
 	// style is "RX" only for genuine incoming decodes ("TX"/"Q" are the
 	// operator's own transmission/queued-to-transmit), so this excludes
@@ -4040,7 +4054,7 @@ function FT8_new_message(text, style){
 	// to answer, not echo what was just sent (still shows in Band
 	// Activity and RX Frequency, both unaffected by this check)
 	if (style == "RX" && FT8_message_is_cq(text) && !FT8_already_worked(text)){
-		FT8_list_append("wsjtx-cq", text, style);
+		FT8_list_append("wsjtx-cq", text, style, source);
 		// Auto Answer was waiting specifically for a CQ that isn't the
 		// one it just gave up on/finished with -- check whether this
 		// new one qualifies before actually acting on it.
@@ -5155,7 +5169,26 @@ function update_data(text){
 		if (wsjtx)
 			for (var i = 0; i < wsjtx.length; i++)
 				if (wsjtx[i].innerHTML.length > 30)
-					FT8_new_message(wsjtx[i].innerHTML, "RX");
+					FT8_new_message(wsjtx[i].innerHTML, "RX", "Z");
+
+		// POC source-tag column (Band Activity/CQ Panel): jt9_bridge.py
+		// catches, tagged apart from native's plain WSJTX-RX above by
+		// web_write()'s own STYLE_FT8_RX_JT9/STYLE_FT8_RX_DUP routing
+		// (sdr_ui.h) -- "J" fresh jt9-only catch, "D" duplicates one
+		// native already showed this slot (see jt9_display_decode()'s
+		// own comment, modem_ft8.c, for why duplicates are shown here
+		// at all rather than silently dropped).
+		wsjtx = xml.getElementsByTagName("WSJTX-RX-J");
+		if (wsjtx)
+			for (var i = 0; i < wsjtx.length; i++)
+				if (wsjtx[i].innerHTML.length > 30)
+					FT8_new_message(wsjtx[i].innerHTML, "RX", "J");
+
+		wsjtx = xml.getElementsByTagName("WSJTX-RX-D");
+		if (wsjtx)
+			for (var i = 0; i < wsjtx.length; i++)
+				if (wsjtx[i].innerHTML.length > 30)
+					FT8_new_message(wsjtx[i].innerHTML, "RX", "D");
 
 		//read the QSO specific ones too
 		wsjtx = xml.getElementsByTagName("WSJTX-TX");

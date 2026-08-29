@@ -26,6 +26,16 @@ typedef enum {
     STYLE_FREQ,
     // mode-specific semantics
     STYLE_FT8_RX,
+    // POC source-tag column (Band Activity/CQ Panel): which decoder
+    // produced this line -- jt9_display_decode()'s own catch-all sem[0]
+    // uses these instead of STYLE_FT8_RX so web_write() can route them to
+    // a distinct <WSJTX-RX-*> tag the client tells apart without having
+    // to re-parse the message text itself. Placed inside the existing
+    // STYLE_FT8_RX..STYLE_FT8_REPLY range on purpose -- write_console_semantic()'s
+    // own front-panel decimal-stripping check already range-tests against
+    // that span and should keep applying to these too.
+    STYLE_FT8_RX_JT9, // fresh catch from jt9_bridge.py, not seen natively this slot
+    STYLE_FT8_RX_DUP, // jt9_bridge.py catch that duplicates one sbitx_ft8_decode() already showed
     STYLE_FT8_TX,
     STYLE_FT8_QUEUED,
     STYLE_FT8_REPLY,
