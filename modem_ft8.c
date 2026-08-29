@@ -1634,6 +1634,79 @@ void *ft8_thread_function(void *ptr){
 	}
 }
 
+// Task: decoder merge (2026-08-29) -- step 1 of running jt9 as a second,
+// independent decoder alongside our own and merging (union of) both
+// sets of decodes, per last night's design discussion and the offline
+// prototype that validated it's worth doing (real captured 20M audio:
+// jt9 86/18 CQs, our own decoder 69/15 CQs, merged union 102/21 CQs).
+// This step only dumps a WAV file per completed slot -- nothing reads
+// it yet, that's the next step (spawn jt9 against it, parse its stdout,
+// feed the result into our own decode pipeline the same way a real
+// decode from sbitx_ft8_decode() would be).
+//
+// buf/n_samples here is always exactly one FT8/FT4 slot's worth of
+// already-decimated 12kHz mono float audio -- the *same* data
+// sbitx_ft8_decode() itself decodes from (ft8_rx_buffer, passed in by
+// ft8_rx() right where it would otherwise reset that buffer for the
+// next slot), so this needs no decimation or resampling of its own,
+// and is already exactly the format jt9 expects (see wave.c's own
+// comment: 12kHz mono 16-bit PCM, no resampling needed).
+//
+// Ping-pongs between two fixed filenames rather than a growing set of
+// timestamped ones -- nothing to clean up, and a reader (jt9, next
+// step) always finds a stable, fully-written file from the *previous*
+// slot while the current one is still accumulating into the other, so
+// it can never observe a half-written file. /tmp matches this file's
+// own already-established convention for short-lived diagnostic WAV
+// dumps (see the SIC dump path elsewhere in this file) -- these are
+// working files for the next decode cycle, not something meant to
+// persist like an operator's own manual recording (REC ON/OFF, sbitx.c
+// -- a completely separate file/feature, deliberately untouched by
+// this one).
+static int jt9_slot_wav_toggle = 0;
+// start_ms: the just-completed slot's own real wall-clock start time
+// (ft8_rx_buff_start_ms at the call site) -- jt9 has no real-time
+// reference of its own from a bare WAV file (its own decode output
+// always shows a placeholder "000000"), so this gets embedded directly
+// in the filename for the consuming service (decoder-merge task) to
+// recover and substitute in, the same way zbitxd's own decoder derives
+// msg_time from when the slot it decoded actually started.
+static void jt9_dump_slot_wav(const float *buf, int n_samples, int start_ms){
+	if (n_samples <= 0)
+		return;
+	if (n_samples > FT8_MAX_BUFF)
+		n_samples = FT8_MAX_BUFF;
+
+	int total_sec = start_ms / 1000;
+	int hh = total_sec / 3600;
+	int mm = (total_sec / 60) % 60;
+	int ss = total_sec % 60;
+	char path[64];
+	snprintf(path, sizeof(path), "/tmp/zbitxd_jt9_slot_%d_%02d%02d%02d.wav",
+		jt9_slot_wav_toggle, hh, mm, ss);
+	jt9_slot_wav_toggle ^= 1;
+
+	// Same float -> int16 conversion/clamp ft8_lib's own save_wav()
+	// uses (wave.c) -- ft8_rx_buffer's values are already in that same
+	// roughly -1..+1 range sbitx_ft8_decode() itself trusts, so this is
+	// just the standard PCM16 scale-and-clamp, not a new calibration.
+	static int16_t pcm[FT8_MAX_BUFF];
+	for (int i = 0; i < n_samples; i++){
+		float v = buf[i] * 32767.0f;
+		if (v > 32767.0f)
+			v = 32767.0f;
+		else if (v < -32768.0f)
+			v = -32768.0f;
+		pcm[i] = (int16_t)v;
+	}
+
+	FILE *f = wav_start_writing(path);
+	if (!f)
+		return;
+	fwrite(pcm, sizeof(int16_t), n_samples, f);
+	wav_finish_writing(f);
+}
+
 // the ft8 sampling is at 12000, the incoming samples are at
 // 96000 samples/sec
 void ft8_rx(int32_t *samples, int count) {
@@ -1682,6 +1755,10 @@ void ft8_rx(int32_t *samples, int count) {
 //~ printf("time %d -> %d; slot %d; ft8_rx_buff_index %d\n", time_was % 60000, wallclock_day_ms % 60000, slot_time, ft8_rx_buff_index);
 
 	if (slot_time < 500){
+		// See jt9_dump_slot_wav()'s own comment -- must run before the
+		// reset just below, while ft8_rx_buffer/ft8_rx_buff_index still
+		// hold the just-completed slot's own data, not the next one's.
+		jt9_dump_slot_wav(ft8_rx_buffer, ft8_rx_buff_index, ft8_rx_buff_start_ms);
 		ft8_rx_buff_index = 0;
 		ft8_rx_buff_start_ms = wallclock_day_ms;
 	}
