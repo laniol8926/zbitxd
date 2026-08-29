@@ -65,7 +65,21 @@ JT9_MODE_FLAG = {"FT8": "-8", "FT4": "-5"}
 ZBITXD_HOST = "127.0.0.1"
 ZBITXD_PORT = 8081
 POLL_INTERVAL_SEC = 0.5
-JT9_TIMEOUT_SEC = 12
+# Real gap, caught live (2026-08-29): on the actual FT8 calling
+# frequency (14.074 -- far busier than the quieter samples this was
+# first tuned against), a real decode measured 28-32s on this Pi's
+# hardware, well past the old 12s timeout -- subprocess.run() was
+# killing real, still-in-progress decodes outright instead of just
+# delivering them a slot or two late. User's own real-world WSJT-Z GUI
+# experience confirms this is normal, not a bug to route around: the
+# GUI doesn't finish within one slot either on a busy band, Deep mode
+# especially (multi-pass) -- it isn't a problem there because nothing
+# times out the computation. 40s gives real margin above the measured
+# worst case without being so long a genuinely hung jt9 process (e.g.
+# a corrupt WAV) blocks the queue indefinitely -- MAX_PENDING_FILES
+# below still caps how far behind a busy frequency can make this
+# bridge fall, independent of this timeout.
+JT9_TIMEOUT_SEC = 40
 # One connect/send/close per decoded line, not one connection carrying
 # several -- remote.c's own recv() loop (sbitx_daemon.c/remote.c)
 # truncates at the *first* \r or \n it sees in whatever arrived in a
