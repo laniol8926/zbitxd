@@ -43,15 +43,29 @@ cap also discards (without processing) anything older than a few cycles
 if a backlog ever builds up (jt9 fell behind, or this script wasn't
 running for a while) -- bounded disk usage regardless of what state the
 consumer was in.
+
+Concurrency: real report, live (2026-08-29, Quadra comparison rig) --
+jt9 takes ~15-25s per file against a 15s slot cadence, so even with an
+otherwise-idle CPU, strictly sequential processing (one jt9 at a time)
+structurally can't keep up: any slot whose decode runs long pushes
+every later slot's *processing* behind by that same amount, with no way
+to claw it back. Multiple jt9 invocations now run concurrently (see
+MAX_CONCURRENT_JT9) so a slow slot no longer blocks the next one from
+starting. Each concurrent invocation gets its own scratch subdirectory
+(see process_file()'s own comment) -- jt9 writes its own working files
+(decoded.txt, FFTW wisdom) relative to cwd, and two jt9s sharing one cwd
+would corrupt each other's.
 """
 
 import glob
 import os
 import re
+import shutil
 import socket
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 
 WAV_GLOB = "/tmp/zbitxd_jt9_slot_*.wav"
 # Real bug, caught before it ever shipped: this originally always ran
@@ -88,6 +102,13 @@ JT9_TIMEOUT_SEC = 40
 # timing. A fresh connection per line sidesteps that entirely instead
 # of trying to time sends around it -- trivial overhead on loopback.
 MAX_PENDING_FILES = 6
+# How many jt9 processes may run at once -- see this file's own
+# "Concurrency" module comment. Sized to leave real headroom for
+# zbitxd's own native decode thread (always-on, one full core) rather
+# than claiming every core for jt9 alone; tune down on smaller hardware
+# (e.g. the Pi Zero 2 W this originally ran on solo) if zbitxd's own
+# decoding starts starving.
+MAX_CONCURRENT_JT9 = max(1, (os.cpu_count() or 4) - 1)
 # Real bug, caught live (2026-08-29): jt9 writes its own scratch file
 # (./decoded.txt, relative to whatever its current working directory
 # is) as part of a normal decode pass -- subprocess.run() below doesn't
@@ -103,7 +124,9 @@ MAX_PENDING_FILES = 6
 # identical WAV file, cwd was the only variable). A dedicated directory
 # (not bare /tmp) avoids any chance of two concurrent jt9 runs -- this
 # script's own, or an operator's manual test -- colliding on the same
-# decoded.txt.
+# decoded.txt. Now that this script itself runs jt9 concurrently (see
+# "Concurrency" above), each invocation gets its own subdirectory
+# under this one instead of sharing it directly -- see process_file().
 JT9_CWD = "/tmp/zbitxd_jt9_bridge_scratch"
 
 # jt9 -8 <file> stdout, one decode per line, e.g.:
@@ -139,6 +162,14 @@ def process_file(path):
     hh, mm, ss, mode = m.groups()
     real_time = hh + mm + ss
 
+    # Own scratch subdirectory per invocation -- see JT9_CWD's own
+    # comment. Named from the WAV's own basename, which is already
+    # unique (toggle+HHMMSS+mode), so concurrent invocations never
+    # collide. Best-effort cleanup in finally -- a leftover directory
+    # here is harmless clutter, not a correctness problem, so a failed
+    # rmtree (e.g. NFS oddities) is not worth crashing the worker over.
+    scratch = os.path.join(JT9_CWD, os.path.basename(path))
+    os.makedirs(scratch, exist_ok=True)
     try:
         result = subprocess.run(
             # -w 0: FFTW3 planning patience, default is 1 -- measured live
@@ -151,11 +182,13 @@ def process_file(path):
             # not the large-FFT step -m parallelizes.
             ["jt9", "-w", "0", JT9_MODE_FLAG[mode], path],
             capture_output=True, text=True, timeout=JT9_TIMEOUT_SEC,
-            cwd=JT9_CWD,
+            cwd=scratch,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         log(f"jt9 failed on {path}: {e}")
         return
+    finally:
+        shutil.rmtree(scratch, ignore_errors=True)
 
     n_sent = 0
     for raw in result.stdout.splitlines():
@@ -171,36 +204,54 @@ def process_file(path):
         log(f"{os.path.basename(path)}: {n_sent} decode(s) sent")
 
 
-def prune_backlog():
+def process_and_remove(path):
+    try:
+        process_file(path)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def prune_backlog(in_flight):
     # See MAX_PENDING_FILES's own comment -- self-healing bound on
     # unprocessed accumulation, independent of the main per-file
-    # processing loop below.
+    # processing loop below. in_flight (files a worker already owns)
+    # are excluded from both the count and the discard candidates --
+    # they're being actively worked, not backlog.
     paths = sorted(glob.glob(WAV_GLOB), key=lambda p: os.path.getmtime(p) if os.path.exists(p) else 0)
-    if len(paths) <= MAX_PENDING_FILES:
-        return paths
-    stale = paths[: len(paths) - MAX_PENDING_FILES]
+    pending = [p for p in paths if p not in in_flight]
+    if len(pending) <= MAX_PENDING_FILES:
+        return pending
+    stale = pending[: len(pending) - MAX_PENDING_FILES]
     for p in stale:
         log(f"backlog too deep, discarding unprocessed: {p}")
         try:
             os.remove(p)
         except OSError:
             pass
-    return paths[len(paths) - MAX_PENDING_FILES:]
+    return pending[len(pending) - MAX_PENDING_FILES:]
 
 
 def main():
     os.makedirs(JT9_CWD, exist_ok=True)
-    log(f"watching {WAV_GLOB}, feeding {ZBITXD_HOST}:{ZBITXD_PORT}")
-    while True:
-        for path in prune_backlog():
-            if not os.path.exists(path):
-                continue
-            process_file(path)
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-        time.sleep(POLL_INTERVAL_SEC)
+    log(f"watching {WAV_GLOB}, feeding {ZBITXD_HOST}:{ZBITXD_PORT}, up to {MAX_CONCURRENT_JT9} jt9(s) at once")
+    in_flight = {}  # path -> Future
+    with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JT9) as pool:
+        while True:
+            done = [p for p, fut in in_flight.items() if fut.done()]
+            for p in done:
+                del in_flight[p]
+
+            for path in prune_backlog(set(in_flight)):
+                if not os.path.exists(path) or path in in_flight:
+                    continue
+                if len(in_flight) >= MAX_CONCURRENT_JT9:
+                    break
+                in_flight[path] = pool.submit(process_and_remove, path)
+
+            time.sleep(POLL_INTERVAL_SEC)
 
 
 if __name__ == "__main__":
