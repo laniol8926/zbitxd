@@ -37,12 +37,16 @@ void addGridToFile(char * gridId, int cnt) {
 
 void hd_createGridList() {
 	 onfFout = fopen(STATEDIR "/grids.txt", "wb");
+	 if (onfFout == NULL) {
+		 perror("hd_createGridList: fopen " STATEDIR "/grids.txt");
+		 return;
+	 }
 
 		logbook_open();
 		logbook_get_grids(addGridToFile);
 
         fwrite("\0\0", 1, 2, onfFout);
-        if (onfFout != NULL) fclose(onfFout);
+        fclose(onfFout);
 }
 
 struct hd_message_struct {
