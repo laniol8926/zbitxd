@@ -54,7 +54,14 @@ import sys
 import time
 
 WAV_GLOB = "/tmp/zbitxd_jt9_slot_*.wav"
-FILENAME_RE = re.compile(r"zbitxd_jt9_slot_\d+_(\d{2})(\d{2})(\d{2})\.wav$")
+# Real bug, caught before it ever shipped: this originally always ran
+# "jt9 -8" (FT8) regardless of which mode a slot was actually decoded
+# in -- FT4 audio fed through FT8's own symbol timing decodes nothing.
+# jt9's real flag for FT4 is "-5"/"--ft4" ("-4" is the unrelated older
+# JT4 mode, an easy trap). modem_ft8.c now embeds the mode in the
+# filename (jt9_dump_slot_wav()'s own comment) for exactly this.
+FILENAME_RE = re.compile(r"zbitxd_jt9_slot_\d+_(\d{2})(\d{2})(\d{2})_(FT4|FT8)\.wav$")
+JT9_MODE_FLAG = {"FT8": "-8", "FT4": "-5"}
 ZBITXD_HOST = "127.0.0.1"
 ZBITXD_PORT = 8081
 POLL_INTERVAL_SEC = 0.5
@@ -88,7 +95,12 @@ JT9_CWD = "/tmp/zbitxd_jt9_bridge_scratch"
 # jt9 -8 <file> stdout, one decode per line, e.g.:
 #   000000 -10  0.1 1501 ~  CS7BHA WX7P R-11
 # groups: (snr, dt, freq, message)
-DECODE_RE = re.compile(r"^\d{6}\s+([+-]?\d+)\s+([+-]?[\d.]+)\s+(\d+)\s+~\s+(\S.*\S|\S)\s*$")
+# The FT4-capable build (WSJT-Z 2.0.18) uses "+" instead of "~" as the
+# field separator for FT4 decodes specifically -- FT8 decodes from the
+# same binary still use "~". Confirmed directly: same binary, same
+# flags otherwise, -8 output used "~" throughout, -5 output used "+"
+# throughout on a real live-captured sample of each.
+DECODE_RE = re.compile(r"^\d{6}\s+([+-]?\d+)\s+([+-]?[\d.]+)\s+(\d+)\s+[~+]\s+(\S.*\S|\S)\s*$")
 
 
 def log(msg):
@@ -110,11 +122,12 @@ def process_file(path):
     if not m:
         log(f"unrecognized filename, skipping: {path}")
         return
-    real_time = "".join(m.groups())  # HHMMSS
+    hh, mm, ss, mode = m.groups()
+    real_time = hh + mm + ss
 
     try:
         result = subprocess.run(
-            ["jt9", "-8", path],
+            ["jt9", JT9_MODE_FLAG[mode], path],
             capture_output=True, text=True, timeout=JT9_TIMEOUT_SEC,
             cwd=JT9_CWD,
         )

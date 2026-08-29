@@ -1671,7 +1671,16 @@ static int jt9_slot_wav_toggle = 0;
 // in the filename for the consuming service (decoder-merge task) to
 // recover and substitute in, the same way zbitxd's own decoder derives
 // msg_time from when the slot it decoded actually started.
-static void jt9_dump_slot_wav(const float *buf, int n_samples, int start_ms){
+//
+// is_ft4: real bug, caught before it ever shipped -- jt9_bridge.py
+// originally always ran "jt9 -8" (FT8), regardless of which mode the
+// slot was actually decoded in. FT4 audio fed through FT8's own symbol
+// timing decodes nothing -- jt9 needs "-5"/"--ft4" for that instead
+// ("-4" is the unrelated older JT4 mode, an easy trap). The WAV
+// filename had no way to tell the two apart, so the consuming service
+// had no way to pick the right flag -- embedded here for the same
+// reason start_ms is.
+static void jt9_dump_slot_wav(const float *buf, int n_samples, int start_ms, bool is_ft4){
 	if (n_samples <= 0)
 		return;
 	if (n_samples > FT8_MAX_BUFF)
@@ -1681,9 +1690,9 @@ static void jt9_dump_slot_wav(const float *buf, int n_samples, int start_ms){
 	int hh = total_sec / 3600;
 	int mm = (total_sec / 60) % 60;
 	int ss = total_sec % 60;
-	char path[64];
-	snprintf(path, sizeof(path), "/tmp/zbitxd_jt9_slot_%d_%02d%02d%02d.wav",
-		jt9_slot_wav_toggle, hh, mm, ss);
+	char path[72];
+	snprintf(path, sizeof(path), "/tmp/zbitxd_jt9_slot_%d_%02d%02d%02d_%s.wav",
+		jt9_slot_wav_toggle, hh, mm, ss, is_ft4 ? "FT4" : "FT8");
 	jt9_slot_wav_toggle ^= 1;
 
 	// Same float -> int16 conversion/clamp ft8_lib's own save_wav()
@@ -1758,7 +1767,7 @@ void ft8_rx(int32_t *samples, int count) {
 		// See jt9_dump_slot_wav()'s own comment -- must run before the
 		// reset just below, while ft8_rx_buffer/ft8_rx_buff_index still
 		// hold the just-completed slot's own data, not the next one's.
-		jt9_dump_slot_wav(ft8_rx_buffer, ft8_rx_buff_index, ft8_rx_buff_start_ms);
+		jt9_dump_slot_wav(ft8_rx_buffer, ft8_rx_buff_index, ft8_rx_buff_start_ms, is_ft4);
 		ft8_rx_buff_index = 0;
 		ft8_rx_buff_start_ms = wallclock_day_ms;
 	}
