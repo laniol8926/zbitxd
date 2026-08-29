@@ -155,9 +155,9 @@ void ft8_grid_queue_drain(void){
 // dropped by ft8_process_impl()'s own "not a message for %s" early-out
 // with nothing else ever seeing it either.
 //
-// jt9_native_seen_push()/has(): a small ring buffer of (HHMMSS, message
-// text) pairs sbitx_ft8_decode() pushes into every time IT displays a
-// decode (same HHMMSS format hmst_time_sprint() already produces, same
+// jt9_native_seen_push()/has(): a ring buffer of (HHMMSS, message text)
+// pairs sbitx_ft8_decode() pushes into every time IT displays a decode
+// (same HHMMSS format hmst_time_sprint() already produces, same
 // message-body text write_console_semantic() already shows) -- checked
 // by jt9_display_decode() below before giving a jt9-fed message its own
 // row, so a message both sides catch only ever shows once, from
@@ -169,7 +169,28 @@ void ft8_grid_queue_drain(void){
 // not reusing ft8_process_mutex (that one's scope is the QSO exchange
 // state machine; this is unrelated display-dedup bookkeeping with no
 // reason to serialize against it).
-#define JT9_NATIVE_SEEN_CAP 32
+//
+// Real bug, caught live (2026-08-29) via the very first real
+// measurement on a busy calling frequency: a first cut of this at 32
+// entries was wildly too small. On 14.074 (the actual FT8 calling
+// frequency) native alone produces ~35 decodes in ONE 15s slot, and
+// jt9's own decode of that exact slot -- confirmed measured at 28-32s
+// on this Pi's hardware (see JT9_TIMEOUT_SEC's own comment,
+// jt9_bridge.py) -- doesn't arrive back via FT8CONTINUE until native
+// has already moved 1-2 slots further on, each producing another ~35
+// entries of its own. A 32-entry ring buffer gets fully overwritten
+// within native's OWN single slot, let alone two more -- so by the
+// time jt9's delayed copy of an already-shown message arrived, native's
+// own record of ever having shown it was long gone, and dedup silently
+// never fired at all (confirmed: a live measurement window showed 385
+// "unique" jt9 catches against only 374 native ones -- almost no
+// overlap recognized, though this was the exact busy frequency where
+// heavy overlap is expected). Sized for real headroom instead of
+// guessing again: ~35/slot * 2 slots of typical jt9 lag * 4x safety
+// margin against MAX_PENDING_FILES's own deeper backlog allowance
+// (jt9_bridge.py) rounds comfortably past 512; the actual memory cost
+// (entry size ~88 bytes) is trivial either way.
+#define JT9_NATIVE_SEEN_CAP 512
 static struct { char hhmmss[8]; char text[80]; } jt9_native_seen[JT9_NATIVE_SEEN_CAP];
 static int jt9_native_seen_head = 0;
 static pthread_mutex_t jt9_native_seen_mutex = PTHREAD_MUTEX_INITIALIZER;
