@@ -1486,7 +1486,7 @@ input[type="checkbox"] {
    rows are almost always also "cq-in-message"), so it has to work
    as a background tint behind that color, not compete with it. */
 .wsjtx-worked-b4 {
-	background-color: rgba(140, 40, 40, 0.45);
+	background-color: rgba(110, 60, 170, 0.55);
 }
 /* generic styling of ui elements */
 
