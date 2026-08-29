@@ -143,6 +143,211 @@ void ft8_grid_queue_drain(void){
 	}
 }
 
+// Real gap found investigating jt9_bridge_analysis.md's own caveat
+// about "duplicate" Band Activity rows for messages both our own
+// decoder and jt9 catch (decoder-merge task) -- tracing ft8_process_impl()
+// and the FT8CONTINUE remote command handler (sbitx_daemon.c) end to
+// end found neither one ever called write_console_semantic() or
+// message_add() at all. So the real problem wasn't a duplicate row; it
+// was that a jt9-only catch (the whole point of the merge -- the ones
+// our own decoder misses) never appeared in Band Activity/CQ Panel in
+// the first place, and any jt9 catch not addressed to us was silently
+// dropped by ft8_process_impl()'s own "not a message for %s" early-out
+// with nothing else ever seeing it either.
+//
+// jt9_native_seen_push()/has(): a small ring buffer of (HHMMSS, message
+// text) pairs sbitx_ft8_decode() pushes into every time IT displays a
+// decode (same HHMMSS format hmst_time_sprint() already produces, same
+// message-body text write_console_semantic() already shows) -- checked
+// by jt9_display_decode() below before giving a jt9-fed message its own
+// row, so a message both sides catch only ever shows once, from
+// whichever side decoded it first. sbitx_ft8_decode() runs on the
+// dedicated FT8 decode thread; jt9_display_decode() runs on the main
+// thread (jt9's decodes arrive via the FT8CONTINUE remote command,
+// drained from ui_tick() same as any other client command) -- a
+// separate small mutex protects this buffer specifically, deliberately
+// not reusing ft8_process_mutex (that one's scope is the QSO exchange
+// state machine; this is unrelated display-dedup bookkeeping with no
+// reason to serialize against it).
+#define JT9_NATIVE_SEEN_CAP 32
+static struct { char hhmmss[8]; char text[80]; } jt9_native_seen[JT9_NATIVE_SEEN_CAP];
+static int jt9_native_seen_head = 0;
+static pthread_mutex_t jt9_native_seen_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void jt9_native_seen_push(const char *hhmmss, const char *text){
+	pthread_mutex_lock(&jt9_native_seen_mutex);
+	strncpy(jt9_native_seen[jt9_native_seen_head].hhmmss, hhmmss, sizeof(jt9_native_seen[0].hhmmss) - 1);
+	jt9_native_seen[jt9_native_seen_head].hhmmss[sizeof(jt9_native_seen[0].hhmmss) - 1] = 0;
+	strncpy(jt9_native_seen[jt9_native_seen_head].text, text, sizeof(jt9_native_seen[0].text) - 1);
+	jt9_native_seen[jt9_native_seen_head].text[sizeof(jt9_native_seen[0].text) - 1] = 0;
+	jt9_native_seen_head = (jt9_native_seen_head + 1) % JT9_NATIVE_SEEN_CAP;
+	pthread_mutex_unlock(&jt9_native_seen_mutex);
+}
+
+static bool jt9_native_seen_has(const char *hhmmss, const char *text){
+	bool found = false;
+	pthread_mutex_lock(&jt9_native_seen_mutex);
+	for (int i = 0; i < JT9_NATIVE_SEEN_CAP; i++){
+		if (jt9_native_seen[i].hhmmss[0] && !strcmp(jt9_native_seen[i].hhmmss, hhmmss) &&
+				!strcmp(jt9_native_seen[i].text, text)){
+			found = true;
+			break;
+		}
+	}
+	pthread_mutex_unlock(&jt9_native_seen_mutex);
+	return found;
+}
+
+// Gives a jt9-only catch (FT8CONTINUE, sbitx_daemon.c's remote command
+// handler) its own Band Activity/CQ Panel row -- mirrors
+// sbitx_ft8_decode()'s own buf/sem construction (see its own comment),
+// but working from jt9's already-decoded plain text instead of a live
+// ftx_message_t candidate (jt9 decoded this externally -- no
+// candidate/spans struct exists here to read field types from, so
+// fields are classified from the text itself, using the exact same
+// shape-checks ft8_on_start_qso() and native's own span-styling already
+// use elsewhere in this file, so the visual result matches).
+//
+// message is the exact raw text FT8CONTINUE received, still untouched
+// -- ft8_message_tokenize()'s own strtok() would shred it, so (same
+// reason ft8_process()'s own caller in sbitx_ft8_decode() already
+// copies first, see that call site's comment) this tokenizes a private
+// copy, leaving the caller's copy intact for the ft8_process() call
+// that still needs to run right after this returns.
+void jt9_display_decode(const char *message){
+	char scratch[128];
+	strncpy(scratch, message, sizeof(scratch) - 1);
+	scratch[sizeof(scratch) - 1] = 0;
+
+	char *save = NULL;
+	char *hhmmss = strtok_r(scratch, " \r\n", &save);
+	char *dt_str = strtok_r(NULL, " \r\n", &save);
+	char *snr_str = strtok_r(NULL, " \r\n", &save);
+	char *freq_str = strtok_r(NULL, " \r\n", &save);
+	char *p = strtok_r(NULL, " \r\n", &save);
+	if (p && !strcmp(p, "~"))
+		p = strtok_r(NULL, " \r\n", &save);
+	char *m1_p = p;
+	char *m2_p = m1_p ? strtok_r(NULL, " \r\n", &save) : NULL;
+	char *m3_p = m2_p ? strtok_r(NULL, " \r\n", &save) : NULL;
+	char *m4_p = m3_p ? strtok_r(NULL, " \r\n", &save) : NULL;
+	if (!hhmmss || !dt_str || !snr_str || !freq_str || !m1_p || !m2_p || strlen(hhmmss) != 6)
+		return; // malformed -- nothing sensible to display
+
+	char text[80];
+	if (m4_p)
+		snprintf(text, sizeof(text), "%s %s %s %s", m1_p, m2_p, m3_p, m4_p);
+	else if (m3_p)
+		snprintf(text, sizeof(text), "%s %s %s", m1_p, m2_p, m3_p);
+	else
+		snprintf(text, sizeof(text), "%s %s", m1_p, m2_p);
+
+	if (jt9_native_seen_has(hhmmss, text))
+		return; // our own decoder already showed this one this slot
+
+	char mycallsign_upper[20];
+	{
+		char mycallsign[20];
+		get_field_value("#mycallsign", mycallsign);
+		int i;
+		for (i = 0; i < (int)strlen(mycallsign) && i < (int)sizeof(mycallsign_upper) - 1; i++)
+			mycallsign_upper[i] = toupper(mycallsign[i]);
+		mycallsign_upper[i] = 0;
+	}
+
+	char buf[128];
+	text_span_semantic sem[MAX_CONSOLE_LINE_STYLES];
+	memset(sem, 0, sizeof(sem));
+	int sem_i = 0, pos = 0;
+
+	pos += snprintf(buf + pos, sizeof(buf) - pos, "%s  ", hhmmss);
+	sem[sem_i].start_column = 0;
+	sem[sem_i].length = 6;
+	sem[sem_i++].semantic = STYLE_TIME;
+
+	int col_start = pos;
+	pos += snprintf(buf + pos, sizeof(buf) - pos, "%s %s %s ~ ", dt_str, snr_str, freq_str);
+	int snr_col = col_start + (int)strlen(dt_str) + 1;
+	sem[sem_i].start_column = snr_col;
+	sem[sem_i].length = (int)strlen(snr_str);
+	sem[sem_i++].semantic = STYLE_SNR;
+	int freq_col = snr_col + (int)strlen(snr_str) + 1;
+	sem[sem_i].start_column = freq_col;
+	sem[sem_i].length = (int)strlen(freq_str);
+	sem[sem_i++].semantic = STYLE_FREQ;
+
+	int text_start = pos;
+	pos += snprintf(buf + pos, sizeof(buf) - pos, "%s\n", text);
+	(void)pos;
+
+	// Field-role assignment mirrors ft8_on_start_qso()'s own m1-m4
+	// handling exactly: a CQ's real caller callsign sits right before
+	// the grid (m2 in "CQ CALL GRID", m3 in "CQ DX CALL GRID" -- "DX"
+	// is just a qualifier token, not a callsign, same as ft8_on_start_qso()
+	// treats it); a non-CQ message's m1/m2 are always the addressed
+	// station and the sender, in that order.
+	bool is_cq = !strcmp(m1_p, "CQ");
+	char *caller = is_cq ? (m4_p ? m3_p : m2_p) : m2_p;
+	char *qualifier = (is_cq && m4_p) ? m2_p : NULL; // e.g. "DX"/"POTA" in "CQ DX CALL GRID"
+	char *extra = is_cq ? (m4_p ? m4_p : m3_p) : m3_p; // grid, signal report, or 73/RR73/RRR
+
+	int col = text_start;
+	if (sem_i < MAX_CONSOLE_LINE_STYLES){
+		sem[sem_i].start_column = col;
+		sem[sem_i].length = (int)strlen(m1_p);
+		if (is_cq)
+			sem[sem_i].semantic = STYLE_FT8_RX; // token, e.g. "CQ"
+		else if (!strcmp(m1_p, mycallsign_upper))
+			sem[sem_i].semantic = STYLE_MYCALL;
+		else
+			sem[sem_i].semantic = STYLE_CALLEE;
+		sem_i++;
+	}
+	col += (int)strlen(m1_p) + 1;
+
+	if (m2_p && sem_i < MAX_CONSOLE_LINE_STYLES){
+		sem[sem_i].start_column = col;
+		sem[sem_i].length = (int)strlen(m2_p);
+		if (qualifier)
+			sem[sem_i].semantic = STYLE_FT8_RX; // "DX"/"POTA" etc, not a callsign
+		else if (!strcmp(m2_p, mycallsign_upper))
+			sem[sem_i].semantic = STYLE_MYCALL;
+		else
+			sem[sem_i].semantic = STYLE_CALLER;
+		sem_i++;
+	}
+	col += (int)strlen(m2_p) + 1;
+
+	if (m3_p && sem_i < MAX_CONSOLE_LINE_STYLES){
+		sem[sem_i].start_column = col;
+		sem[sem_i].length = (int)strlen(m3_p);
+		if (m3_p == caller)
+			sem[sem_i].semantic = !strcmp(m3_p, mycallsign_upper) ? STYLE_MYCALL : STYLE_CALLER;
+		else if (!strcmp(m3_p, "73") || !strcmp(m3_p, "RR73") || !strcmp(m3_p, "RRR"))
+			sem[sem_i].semantic = STYLE_FT8_RX;
+		else if (isalpha((unsigned char)m3_p[0]) && isalpha((unsigned char)m3_p[1]) && strncmp(m3_p, "RR", 2))
+			sem[sem_i].semantic = STYLE_GRID; // same shape-check ft8_on_start_qso() uses
+		else
+			sem[sem_i].semantic = STYLE_LOG; // signal report -- native maps FTX_FIELD_RST to STYLE_LOG too
+		sem_i++;
+		col += (int)strlen(m3_p) + 1;
+	}
+
+	if (m4_p && sem_i < MAX_CONSOLE_LINE_STYLES){
+		sem[sem_i].start_column = col;
+		sem[sem_i].length = (int)strlen(m4_p);
+		sem[sem_i++].semantic = (m4_p == extra) ? STYLE_GRID : STYLE_CALLER;
+	}
+
+	message_add("FT8", (unsigned int)atoi(freq_str), 0, text);
+	// "j> " (vs native's own ">> ") -- lets a jt9-only catch (the
+	// merge's whole point) be told apart from a native one at a glance,
+	// same as native's own message-type-prefixed ">> " logging just
+	// above sbitx_ft8_decode()'s own write_console_semantic() call.
+	LOG(LOG_INFO, "j> %s\n", buf);
+	write_console_semantic(buf, sem, sem_i);
+}
+
 static int ft8_decode_triggered_for_ms = -1;
 static int ft8_do_tx = 0;
 static int ft8_pitch = 0;
@@ -1250,6 +1455,15 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 			// troubleshooting printf (n1qm's note, now superseded).
 			int prefix_len = 8 + snprintf(hmst_time_sprint(buf, raw_ms), sizeof(buf) - 8, " %+4.1f %+03d %4d ~ ", time_sec, cand->snr, freq_hz);
 			int line_len = prefix_len + snprintf(buf + prefix_len, sizeof(buf) - prefix_len, "%s\n", text);
+			// See jt9_native_seen_push()'s own comment (this file, near
+			// ft8_grid_queue) -- lets jt9_display_decode() know we already
+			// showed this exact (slot, message) so it doesn't show it again.
+			{
+				char hhmmss[7];
+				memcpy(hhmmss, buf, 6);
+				hhmmss[6] = 0;
+				jt9_native_seen_push(hhmmss, text);
+			}
 			if (message_type) // not type 0
 				LOG(LOG_INFO, ">> %d %s\n", message_type, buf);
 			else // type 0 : we care about the subtype (n3)

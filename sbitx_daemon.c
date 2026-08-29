@@ -3484,15 +3484,20 @@ void cmd_exec(char *cmd){
 	else if (!strcmp(exec, "FT8_check")) {
 		pre_ft8_check(args);
 	}
-	// Test-only: the real RX decode pipeline (sbitx_ft8_decode() in
-	// modem_ft8.c) calls ft8_process(buf, FTX_CONTINUE_QSO) directly
-	// for every genuine decoded message addressed to us once a QSO is
-	// already under way (signal report / RR73 / RRR / 73) -- there was
-	// no client-reachable way to exercise that path without a second
-	// real station on the air. Lets a synthetic mid-QSO reply be
-	// injected the same way a real decode would arrive, to verify the
-	// exchange/logging state machine end to end on the dummy load.
+	// Originally test-only (a synthetic mid-QSO reply injected the same
+	// way a real decode would arrive, to verify the exchange/logging
+	// state machine on the dummy load without needing a second real
+	// station on the air) -- now also the real production entry point
+	// for the jt9 decoder-merge task's own decodes (jt9_bridge.py).
+	// jt9_display_decode() gives a jt9-only catch its own Band
+	// Activity/CQ Panel row (deduped against sbitx_ft8_decode()'s own
+	// catches -- see that function's own comment in modem_ft8.c); must
+	// run before ft8_process() below, which tokenizes (destructively,
+	// strtok()) the exact buffer it's handed -- args itself would
+	// already be shredded to just its first token by the time
+	// ft8_process() returns.
 	else if (!strcmp(exec, "FT8CONTINUE")) {
+		jt9_display_decode(args);
 		ft8_process(args, FTX_CONTINUE_QSO);
 	}
 	// TEMPORARY, task #25 SIC validation only -- remove once done.
