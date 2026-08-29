@@ -1657,10 +1657,29 @@ function resize_ui(){
 	// pan_adapter_width above) and applying it as #main's margin-top
 	// replaces that single-line assumption with the real number,
 	// regardless of orientation or how many lines it takes.
+	sync_main_margin_to_toolbar_height();
+	sync_pan_row_height();
+}
+
+// Real report, live (2026-08-28), cellphone: still broken with the
+// keyboard open OR closed, in portrait -- a Connect panel already
+// positioned via panel_min_top() (which reads #pan_and_ft8list_row's
+// own rect, itself only correctly pushed below the wrapped toolbar
+// because of *this* logic) stayed wrong regardless, because this used
+// to run only inline inside resize_ui() (window's own "resize" event).
+// #maincontrols wrapping onto a 2nd line (the actual root cause here,
+// per the comment where this logic originally lived, a few lines up)
+// doesn't reliably fire a window resize on every mobile browser/
+// keyboard-mode combination -- so #main's marginTop, and everything
+// positioned relative to it, could stay stale independent of the
+// keyboard entirely. Pulled into its own function so a ResizeObserver
+// directly on #maincontrols (below) can also drive it -- that fires on
+// any real height change, for any reason, matching the same panel-
+// content-changed pattern init_draggable_panels() already uses.
+function sync_main_margin_to_toolbar_height(){
 	var maincontrols_h = el("maincontrols").offsetHeight;
 	if (maincontrols_h > 0)
 		el("main").style.marginTop = maincontrols_h + "px";
-	sync_pan_row_height();
 }
 
 // Static 0-3000Hz frequency scale, drawn once and only redrawn on
@@ -2546,15 +2565,75 @@ var PANEL_TOP_MARGIN = 12;
 var MIN_VISIBLE_PX = 40;
 
 function panel_min_top(){
+	var toolbar_bound;
 	var row = document.getElementById("pan_and_ft8list_row");
 	if (row){
 		var r = row.getBoundingClientRect();
 		if (r.height > 0)
-			return r.top + PANEL_TOP_MARGIN;
+			toolbar_bound = r.top + PANEL_TOP_MARGIN;
 	}
-	var mc = document.getElementById("maincontrols");
-	return (mc ? mc.getBoundingClientRect().bottom : 0) + PANEL_TOP_MARGIN;
+	if (toolbar_bound === undefined){
+		var mc = document.getElementById("maincontrols");
+		toolbar_bound = (mc ? mc.getBoundingClientRect().bottom : 0) + PANEL_TOP_MARGIN;
+	}
+	// Real report, live (2026-08-28), cellphone screenshots: the Connect
+	// panel's title bar (and its Close button with it) scrolled off the
+	// TOP of the screen the moment the on-screen keyboard opened, in
+	// portrait -- worked fine in landscape. getBoundingClientRect() above
+	// is relative to the *layout* viewport, which doesn't move when a
+	// mobile keyboard opens -- but many mobile browsers scroll the page
+	// to keep the focused input visible above the keyboard, and that
+	// scroll can carry position:fixed elements along with it, so what's
+	// actually *visible* (the *visual* viewport) shifts down away from
+	// where this function still thinks the panel should stop. Widely
+	// supported on mobile browsers, window.visualViewport.offsetTop
+	// reports exactly that shift -- folding it in here means every
+	// existing caller (restore, drag, resize) automatically respects it
+	// too, not just this one call site.
+	var visible_bound = (window.visualViewport ? window.visualViewport.offsetTop : 0) + PANEL_TOP_MARGIN;
+	return Math.max(toolbar_bound, visible_bound);
 }
+
+// See panel_min_top()'s own comment -- a panel already sitting open
+// when the keyboard appears needs to move on its own, since nothing
+// else (drag, restore) would trigger panel_min_top()'s own clamp for
+// it. Re-clamps every currently open panel the instant the visible
+// area actually changes (keyboard open/close, address bar show/hide).
+function reclamp_open_panels_to_viewport(){
+	var min_top = panel_min_top();
+	document.querySelectorAll(".sbitx-panel").forEach(function(panel){
+		if (panel.style.display === "none")
+			return;
+		var top = parseFloat(panel.style.top);
+		if (!isNaN(top) && top < min_top)
+			panel.style.top = min_top + "px";
+	});
+}
+if (window.visualViewport){
+	window.visualViewport.addEventListener("resize", reclamp_open_panels_to_viewport);
+	window.visualViewport.addEventListener("scroll", reclamp_open_panels_to_viewport);
+}
+
+// Real report, live (2026-08-28), cellphone: still broken with the
+// keyboard closed too -- the visualViewport listener above wasn't the
+// actual fix for this one. Real culprit: #maincontrols itself wraps
+// onto a second line in narrow portrait (visible in the report's own
+// screenshot -- the AC/AA checkboxes stacking), and nothing re-ran
+// sync_main_margin_to_toolbar_height() (previously only inline inside
+// resize_ui(), see its own comment) when the toolbar's own real height
+// changed for a reason other than a window resize -- #main's margin-top
+// (and so #pan_and_ft8list_row's position, and so panel_min_top()'s own
+// clamp value) could all stay stale regardless of the keyboard. A plain
+// ResizeObserver on #maincontrols closes that gap, same pattern
+// init_draggable_panels() already uses for a panel's own content
+// changes -- re-syncs the margin first, then re-clamps any already-open
+// panel against the now-correct value.
+var maincontrols_el = document.getElementById("maincontrols");
+if (maincontrols_el)
+	new ResizeObserver(function(){
+		sync_main_margin_to_toolbar_height();
+		reclamp_open_panels_to_viewport();
+	}).observe(maincontrols_el);
 
 function restore_panel_geometry(panel){
 	["left", "top", "width", "height"].forEach(function(prop){

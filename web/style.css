@@ -591,7 +591,18 @@ input[type="checkbox"] {
 	border: solid 1px white;
 	background-color: black;
 	opacity: 1;
-	z-index: 1;
+	/* Real report, live (2026-08-28), cellphone: the wrapped 2nd line of
+	   #maincontrols (z-index:50 -- see its own comment) visually and
+	   interactively covered this panel's own title bar/Close button in
+	   narrow portrait, no matter how precisely its own top position was
+	   computed -- any residual overlap between two fixed-position
+	   elements always painted the higher z-index one on top. Same
+	   principle already established for .panel-resize-handle's own
+	   z-index:60 ("reachable even where it overlaps the toolbar, same
+	   as a real OS window") just never applied to the panel itself.
+	   Above #maincontrols now, so this can never be covered by it
+	   regardless of exactly where either one's real height ends up. */
+	z-index: 55;
 	width: 600px;
 	max-width: 95vw;
 	max-height: 90vh;
@@ -622,7 +633,8 @@ input[type="checkbox"] {
 	border: solid 1px white;
 	background-color: black;
 	opacity: 1;
-	z-index: 2;
+	/* See #settings_panel's own comment -- same fix, same real report. */
+	z-index: 55;
 	width: 600px;
 	max-width: 95vw;
 	max-height: 90vh;
@@ -642,7 +654,8 @@ input[type="checkbox"] {
 	top: 60px;
 	border: solid 1px white;
 	background-color: black;
-	z-index: 2;
+	/* See #settings_panel's own comment -- same fix, same real report. */
+	z-index: 55;
 }
 
 /* On a narrow phone-portrait viewport, the fixed 110px left offset
