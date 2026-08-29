@@ -3767,13 +3767,25 @@ function FT8_list_append(list_id, text, style, source){
 	// seen (wsjtx-activity/wsjtx-cq/wsjtx-rx) stayed a permanent DOM node
 	// for the life of the page, accumulating thousands of <li> elements
 	// over a long session on a busy band. These panels are for seeing
-	// what's happening *now*, not deep scrollback, so capped at 2x the
-	// panel's own actual visible row count -- measured live from the
-	// real rendered DOM (container height / this item's own rendered
-	// height) rather than a fixed guess, so it stays correct across
-	// different screens/zoom levels/font rendering instead of silently
-	// drifting from what's actually on screen.
-	var max_entries = 2 * Math.floor(ol.clientHeight / item.offsetHeight);
+	// what's happening *now*, not deep scrollback, so capped at a
+	// multiple of the panel's own actual visible row count -- measured
+	// live from the real rendered DOM (container height / this item's
+	// own rendered height) rather than a fixed guess, so it stays
+	// correct across different screens/zoom levels/font rendering
+	// instead of silently drifting from what's actually on screen.
+	//
+	// wsjtx-activity gets a much bigger multiple than the others, user's
+	// own ask: a single busy period there can be 45+ native (Z) entries
+	// on its own, before any jt9 (J/D) catches for that same period even
+	// arrive (jt9_bridge.py runs ~20-30s behind, structurally -- see
+	// FT8_insert_late()'s own comment). At the old flat 2x, a busy
+	// period's own Z rows could already be trimmed off by the time its
+	// late J/D catches showed up, leaving a period visibly Z-less even
+	// though native genuinely decoded plenty there. CQ Panel/RX
+	// Frequency don't have this problem -- CQ Panel is filtered to CQ-
+	// only traffic, far sparser -- so they keep the original 2x.
+	var max_entries_multiple = (list_id === "wsjtx-activity") ? 8 : 2;
+	var max_entries = max_entries_multiple * Math.floor(ol.clientHeight / item.offsetHeight);
 	while (ol.children.length > max_entries)
 		ol.removeChild(reversed ? ol.lastChild : ol.firstChild);
 
