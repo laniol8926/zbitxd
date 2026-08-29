@@ -3572,6 +3572,50 @@ function FT8_format_period_label(label){
 	return label.substring(0,2) + ":" + label.substring(2,4) + ":" + label.substring(4,6) + " UTC";
 }
 
+// Late-arriving decode: jt9_bridge.py's own catches can land ~60-90s
+// behind real time even with zero backlog drops (jt9 itself just takes
+// that long per file relative to the 15s slot cadence) -- user's own
+// live observation: with the J/Z/D source-tag column, this showed up
+// as J/D rows for a slot always appended/prepended wherever "now" is
+// in the list, landing far from -- and out of chronological order
+// with -- the Z rows they actually match. Finds that slot's own
+// existing period group (identified by its divider's already-rendered
+// label, the same string FT8_format_period_label() would produce for
+// this item's period) and inserts there instead of at the current
+// edge. Returns false if that period's group no longer exists (e.g.
+// trimmed off by max_entries below in the time since) -- caller falls
+// back to the normal edge-append/prepend in that case rather than
+// silently dropping the message.
+function FT8_insert_late(ol, item, period, reversed){
+    var target_label = FT8_format_period_label(period);
+    var dividers = ol.querySelectorAll(".sbitx-list-divider");
+    var target_divider = null;
+    for (var i = 0; i < dividers.length; i++)
+	if (dividers[i].textContent === target_label){
+	    target_divider = dividers[i];
+	    break;
+	}
+    if (!target_divider)
+	return false;
+    if (reversed){
+	// This period's own entries sit directly after its divider,
+	// newest-of-that-period first (see the reversed insertion
+	// comment below) -- inserting right after the divider matches
+	// where an on-time entry for this same period would have landed.
+	ol.insertBefore(item, target_divider.nextSibling);
+    } else {
+	// This period's own entries run from its divider up to (but not
+	// including) the next divider, or the end of the list -- append
+	// at the end of that run, same position an on-time entry would
+	// have been appended to.
+	var next = target_divider.nextElementSibling;
+	while (next && !next.classList.contains("sbitx-list-divider"))
+	    next = next.nextElementSibling;
+	ol.insertBefore(item, next); // next === null appends at the end
+    }
+    return true;
+}
+
 function FT8_list_append(list_id, text, style, source){
 
 	// "Q" is ft8_tx()'s queued-placeholder line, written the instant
@@ -3666,7 +3710,15 @@ function FT8_list_append(list_id, text, style, source){
 	// forward-looking divider label was reading the same unstripped
 	// text, just less noticeable there.
 	var period = FT8_period_label(deco_strip(text));
-	if (list_id != "wsjtx-rx"){
+	// Older than the newest period already shown -- see
+	// FT8_insert_late()'s own comment for why this happens routinely
+	// with jt9_bridge.py's catches, not just as a rare race.
+	var is_late = period && FT8_list_last_period[list_id] !== undefined
+			&& period < FT8_list_last_period[list_id];
+	if (list_id != "wsjtx-rx" && is_late && FT8_insert_late(ol, item, period, reversed)){
+		// handled -- inserted into its own existing period group,
+		// skip the normal edge-append/prepend path below entirely.
+	} else if (list_id != "wsjtx-rx"){
 		if (reversed){
 			// Reversed order still labels a divider with the period it
 			// introduces, same idea as the non-reversed case below --
