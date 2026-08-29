@@ -141,7 +141,15 @@ def process_file(path):
 
     try:
         result = subprocess.run(
-            ["jt9", JT9_MODE_FLAG[mode], path],
+            # -w 0: FFTW3 planning patience, default is 1 -- measured live
+            # (real backlogged WAV, same file, both runs): 30.3s at the
+            # default vs 21.1s at 0, byte-identical decode output (32/32
+            # lines, no diff) -- pure planning-time waste at the default,
+            # not a sensitivity tradeoff. -m (FFT threads) tested
+            # separately and gave no real gain (30.0s vs 30.3s baseline)
+            # -- jt9's cost is dominated by single-threaded FT8/LDPC work,
+            # not the large-FFT step -m parallelizes.
+            ["jt9", "-w", "0", JT9_MODE_FLAG[mode], path],
             capture_output=True, text=True, timeout=JT9_TIMEOUT_SEC,
             cwd=JT9_CWD,
         )
