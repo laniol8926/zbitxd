@@ -1032,6 +1032,16 @@ input[type="checkbox"] {
 	width: 320px;
 	border: none;
 }
+/* User's own ask: Band Activity specifically was wrapping lines (the
+   J/Z/D source-tag column added real width on top of the existing
+   label+message content). ID selector, not a shared class -- only
+   widens this one panel, not CQ Panel/RX Frequency, which still share
+   .sbitx-list-container's own 320px at rest. 4ch (not a flat px add)
+   since the panel's own font is monospace -- ties the width increase
+   to the font's actual character width regardless of font-size. */
+#wsjtx-activity {
+	width: calc(320px + 4ch);
+}
 
 /* Applied to #wsjtx-cq/#wsjtx-rx (not #wsjtx-activity -- it's the least
    important of the three, user's own call) by set_band_activity_hidden()
