@@ -3715,7 +3715,16 @@ function FT8_list_append(list_id, text, style, source){
 	// scoping needed. Falls through to the normal insert path below
 	// if no match is found (e.g. that Z row already scrolled off) --
 	// nothing is silently dropped, it just can't be suppressed anymore.
-	if (source === "D" && (list_id === "wsjtx-activity" || list_id === "wsjtx-cq")){
+	//
+	// Real report, live (2026-08-30): this originally only covered
+	// wsjtx-activity/wsjtx-cq -- the same duplicate-row problem showed
+	// up in wsjtx-rx too (RX Frequency), since an active QSO's exchange
+	// is exactly the kind of strong, easy signal both the native
+	// decoder and jt9 commonly catch independently. source wasn't even
+	// being passed on FT8_new_message()'s own "wsjtx-rx" append call
+	// site before this, so this list never got tagged -- or
+	// deduplicated -- at all until that was fixed alongside this.
+	if (source === "D" && (list_id === "wsjtx-activity" || list_id === "wsjtx-cq" || list_id === "wsjtx-rx")){
 		var dup_key = FT8_dedup_key(text);
 		if (dup_key){
 			var ol_existing = el(list_id).querySelector("ol");
@@ -4323,7 +4332,7 @@ function FT8_new_message(text, style, source){
 	var own_cq_while_idle = !current_call && style === "TX"
 		&& FT8_message_is_cq(text) && ft8_cq_message_callsign(text) === mycallsign;
 	if (belongs_to_active_exchange || own_cq_while_idle){
-		FT8_list_append("wsjtx-rx", text, style);
+		FT8_list_append("wsjtx-rx", text, style, source);
 	}
 	if (belongs_to_active_exchange){
 		// Real task #25 ask: narrow the server's own candidate search to
