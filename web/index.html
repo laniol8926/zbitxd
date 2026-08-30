@@ -1895,13 +1895,41 @@ function sync_pan_row_height(){
 	var pan_h = el("pan_adapter").offsetHeight;
 	col.style.height = prev_col_height;
 
+	// Real bug, confirmed live: set_waterfall_hidden() (user's own
+	// "Hide Waterfall" toggle) sets display:none on both
+	// #waterfall_wrap and #waterfall_scale, leaving only the spectrum's
+	// fixed 60px inside #pan_adapter -- pan_h above then measures that
+	// much shorter #pan_adapter, and Band Activity/CQ Panel/RX
+	// Frequency (stretched to match it) collapsed down to ~2 visible
+	// rows along with it. These panels are useful on their own even
+	// with the waterfall hidden -- a real decode list, not just
+	// something that rides along with however tall the waterfall
+	// happens to be -- so floor the applied height at a usable minimum
+	// regardless of what #pan_adapter itself measures.
+	// Real bug, confirmed live: pan_h landing at exactly 0 (not just
+	// "small") slipped past the "pan_h > 0 && pan_h < floor" guard this
+	// used to have -- row.style.height then fell straight through to
+	// pan_h > 0 ? ... : "" below, which is "" (auto) for pan_h===0,
+	// bypassing the floor entirely. Math.max() applies it unconditionally
+	// instead, regardless of whether pan_h measured as 0, small-but-
+	// positive, or negative.
+	var MIN_PAN_ROW_HEIGHT = 300;
+	pan_h = Math.max(pan_h, MIN_PAN_ROW_HEIGHT);
+
 	if (side_by_side){
-		row.style.height = pan_h > 0 ? (pan_h + "px") : "";
+		row.style.height = pan_h + "px";
 		col.style.height = "";
 	} else {
 		row.style.height = "";
 		var avail = window.innerHeight - col.getBoundingClientRect().top - 8;
-		col.style.height = avail > 50 ? (avail + "px") : "";
+		// Same floor as the side-by-side branch above, and for the same
+		// reason -- this branch doesn't even read pan_h (a completely
+		// separate calculation, viewport height minus the column's own
+		// top offset), so the fix above never applied here at all.
+		// Whatever pushed col's top down enough to make avail small (or
+		// <=50, previously collapsing to unstyled "auto") gets the same
+		// real-decode-list-deserves-usable-height treatment instead.
+		col.style.height = Math.max(avail, MIN_PAN_ROW_HEIGHT) + "px";
 	}
 }
 

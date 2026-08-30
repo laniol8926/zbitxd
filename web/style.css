@@ -1349,6 +1349,16 @@ input[type="checkbox"] {
 	   sit side by side under nowrap -- each is calc(50% - 8px), which
 	   was never close to needing to wrap in the first place. */
 	flex-flow: row nowrap;
+	/* Reverted live (2026-08-29): bumping this to 42% did widen the
+	   column, but #pan_adapter's own waterfall/spectrum canvases appear
+	   to size their HEIGHT off their own available WIDTH (resize_ui(),
+	   not investigated in detail here) -- shrinking #pan_adapter's width
+	   to compensate also shrank its real rendered height, and
+	   #ft8_list_column derives its OWN height by matching #pan_adapter's
+	   (align-items:stretch, see this rule's own comment above) --
+	   collapsed Band Activity down to ~2 visible rows. Back to 38%
+	   until the actual waterfall/spectrum resize logic is understood
+	   well enough to widen this column without that side effect. */
 	flex: 0 0 38%;
 	width: auto;
 	min-width: 0;
@@ -1359,6 +1369,20 @@ input[type="checkbox"] {
 	   above for the other half of this fix. Same fix applied to
 	   .sbitx-list-container itself, one level in. */
 	min-height: 0;
+}
+/* User's own ask, after sync_pan_row_height()'s own JS-side MIN_PAN_ROW_HEIGHT
+   floor (index.html) didn't visibly help -- forces a real minimum
+   directly, !important because JS sets this element's height as an
+   inline style (col.style.height), which normally beats any plain CSS
+   rule regardless of source-order or selector specificity; only
+   !important reliably wins over that. Deliberately a separate rule
+   from #ft8_list_column's own min-height:0 above (left untouched, see
+   its own comment on why that specific value matters) rather than
+   changing that value directly -- 300px is a fixed floor, not
+   "unbounded natural content height", so it doesn't reintroduce the
+   no-scrollbar bug that min-height:0 was fixing. */
+#ft8_list_column {
+	min-height: 300px !important;
 }
 @media (max-width: 900px) {
 	#wsjtx-cq { order: 1; }
@@ -1551,6 +1575,16 @@ input[type="checkbox"] {
 	padding: 0;
 	height: 9pt;
 }
+/* Tried dropping Band Activity specifically to 8pt to fit more
+   characters per line (see git history) -- reverted live, user's own
+   report: too small to read comfortably. Back to matching CQ Panel/RX
+   Frequency's own 9pt (the shared .ft8-label/.ft8-message/
+   .sbitx-list-box/li rules above already cover that with no override
+   needed here) -- the wrapping this was meant to fix may not even be a
+   real issue: it first showed up while the radio was on the Quadra and
+   the Pi's own Band Activity had little real content to judge against.
+   Revisit sizing only if real wrapping still shows up with the radio
+   actually feeding the Pi again. */
 
 .sbitx-list-divider {
 	color: #888;
