@@ -64,6 +64,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -170,8 +171,28 @@ def process_file(path):
     # rmtree (e.g. NFS oddities) is not worth crashing the worker over.
     scratch = os.path.join(JT9_CWD, os.path.basename(path))
     os.makedirs(scratch, exist_ok=True)
+
+    # Streaming, not subprocess.run(): real finding, live (2026-08-30,
+    # user's own recollection from an earlier ft8modem integration,
+    # confirmed by direct measurement here) -- jt9 writes decoded lines
+    # to stdout progressively as it finds them, not all at once at exit.
+    # A real captured slot measured 20/21 decodes arriving in the first
+    # 4.2s of a 9.2s total run -- the remaining ~5s of runtime produced
+    # exactly one more line. subprocess.run()'s capture_output=True only
+    # hands back output once the process fully exits, silently sitting
+    # on decodes that were already ready seconds earlier. Popen + reading
+    # stdout line-by-line sends each one the instant it appears instead,
+    # while still letting the process run to natural completion for
+    # whatever stragglers show up late -- full latency win for the
+    # common case, zero data loss for the rare slow one.
+    #
+    # timeout is enforced by a watchdog thread (Popen has no built-in
+    # timeout the way run() does) rather than by giving up on stragglers
+    # early -- killing the process here still lets the for loop below
+    # see EOF and exit cleanly, same outcome subprocess.run()'s own
+    # TimeoutExpired path had, just without discarding lines already read.
     try:
-        result = subprocess.run(
+        proc = subprocess.Popen(
             # -w 0: FFTW3 planning patience, default is 1 -- measured live
             # (real backlogged WAV, same file, both runs): 30.3s at the
             # default vs 21.1s at 0, byte-identical decode output (32/32
@@ -181,25 +202,41 @@ def process_file(path):
             # -- jt9's cost is dominated by single-threaded FT8/LDPC work,
             # not the large-FFT step -m parallelizes.
             ["jt9", "-w", "0", JT9_MODE_FLAG[mode], path],
-            capture_output=True, text=True, timeout=JT9_TIMEOUT_SEC,
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+            text=True, bufsize=1,  # line-buffered
             cwd=scratch,
         )
-    except (OSError, subprocess.TimeoutExpired) as e:
+    except OSError as e:
         log(f"jt9 failed on {path}: {e}")
-        return
-    finally:
         shutil.rmtree(scratch, ignore_errors=True)
+        return
+
+    timed_out = threading.Event()
+
+    def _kill_on_timeout():
+        timed_out.set()
+        proc.kill()
+
+    watchdog = threading.Timer(JT9_TIMEOUT_SEC, _kill_on_timeout)
+    watchdog.start()
 
     n_sent = 0
-    for raw in result.stdout.splitlines():
-        dm = DECODE_RE.match(raw)
-        if not dm:
-            continue
-        snr, dt, freq, msg = dm.groups()
-        # TIME DT SNR FREQ ~ MSG -- see this file's own module comment
-        if send_ft8continue(f"{real_time} {dt} {snr} {freq} ~ {msg}"):
-            n_sent += 1
-        time.sleep(0.02)  # trivial spacing, not required for correctness -- just avoids a tight burst of connects
+    try:
+        for raw in proc.stdout:
+            dm = DECODE_RE.match(raw.rstrip("\n"))
+            if not dm:
+                continue
+            snr, dt, freq, msg = dm.groups()
+            # TIME DT SNR FREQ ~ MSG -- see this file's own module comment
+            if send_ft8continue(f"{real_time} {dt} {snr} {freq} ~ {msg}"):
+                n_sent += 1
+    finally:
+        watchdog.cancel()
+        proc.wait()
+        shutil.rmtree(scratch, ignore_errors=True)
+
+    if timed_out.is_set():
+        log(f"jt9 timed out on {path} after {JT9_TIMEOUT_SEC}s ({n_sent} decode(s) sent before kill)")
     if n_sent:
         log(f"{os.path.basename(path)}: {n_sent} decode(s) sent")
 
