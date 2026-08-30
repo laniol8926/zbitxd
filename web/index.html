@@ -3374,6 +3374,38 @@ function ft8_message_other_party(text, mycallsign){
     return null;
 }
 
+// Who actually transmitted this message -- for a CQ, the CQing station
+// itself (ft8_cq_message_callsign(), defined below); for a directed
+// message, always m2 (FT8's own "addressee sender ..." field order,
+// the same m2 ft8_message_other_party() above already reads). Distinct
+// from ft8_message_other_party(): that one only matches when the
+// message is addressed *to us*; this one matches on who *sent* it,
+// regardless of who they're talking to. User's own report: after
+// answering a CQ, if that station never replies to us -- because
+// they've moved on to someone else, or just re-sent their own CQ --
+// the old other_party-only check went silent, with no visibility into
+// what actually happened; the operator's only signal was "I called
+// again and got nothing." Used by RX Frequency's own
+// belongs_to_active_exchange check (below) to keep showing that
+// station's traffic either way, so there's something to actually act
+// on (wait, or give up and look elsewhere) instead of guessing.
+function ft8_message_sender(text){
+    if (FT8_message_is_cq(text))
+	return ft8_cq_message_callsign(text);
+    var token_list = text.match(/\S+/g);
+    if (!token_list || token_list.length < 6 || token_list.length > 9)
+	return null;
+    var tilde_pos = -1;
+    for (var i = 3; i < token_list.length; ++i)
+	if (token_list[i] == '~') {
+	    tilde_pos = i;
+	    break;
+	}
+    if (tilde_pos < 0 || tilde_pos + 2 >= token_list.length)
+	return null;
+    return deco_strip(token_list[tilde_pos + 2]).toUpperCase();
+}
+
 // Same tilde/token parsing FT8_stylize_message_item() uses to decide
 // the 'wsjtx-cq-in-message' style, factored out so the CQ Panel filter
 // can't drift from what actually gets styled as a CQ call.
@@ -3644,7 +3676,65 @@ function FT8_insert_late(ol, item, period, reversed){
     return true;
 }
 
+// Same (period, bare-message) key jt9_native_seen_has() matches on
+// server-side (modem_ft8.c) -- hhmmss plus the tilde-onward message
+// body, deliberately excluding the DT/SNR/freq fields that precede the
+// tilde, since those are independently re-measured by native and jt9
+// and can differ slightly (e.g. 1307 vs 1306 Hz) even for the exact
+// same underlying decode. Used to find the already-displayed Z row a
+// newly-arriving D message duplicates, regardless of that measurement
+// noise. Returns null if text doesn't look like a real decode line
+// (no tilde) -- caller treats that as "no match", same as any other
+// lookup miss.
+function FT8_dedup_key(text){
+    var tokens = deco_strip(text).match(/\S+/g);
+    if (!tokens || tokens.length < 1)
+	return null;
+    var tilde_pos = -1;
+    for (var i = 3; i < tokens.length; ++i)
+	if (tokens[i] == '~') { tilde_pos = i; break; }
+    if (tilde_pos < 0)
+	return null;
+    return tokens[0] + "|" + tokens.slice(tilde_pos + 1).join(" ");
+}
+
 function FT8_list_append(list_id, text, style, source){
+
+	// User's own ask, live report (screenshot): a D row was showing up
+	// as a *second*, separate entry right alongside the Z row it
+	// duplicates -- confusing, reads as a real double-decode even
+	// though the underlying tagging was correct. Find that existing Z
+	// row (matched via FT8_dedup_key(), so independently-measured
+	// DT/SNR/freq noise between the two decoders doesn't stop the
+	// match) and relabel its own badge to D in place instead of
+	// inserting a whole new row. Scanning every child instead of
+	// scoping to this period's own divider group (the way
+	// FT8_insert_late() does) is safe here specifically because the
+	// key already embeds the row's own hhmmss -- a same-text row from
+	// a genuinely different period simply won't match, no extra
+	// scoping needed. Falls through to the normal insert path below
+	// if no match is found (e.g. that Z row already scrolled off) --
+	// nothing is silently dropped, it just can't be suppressed anymore.
+	if (source === "D" && (list_id === "wsjtx-activity" || list_id === "wsjtx-cq")){
+		var dup_key = FT8_dedup_key(text);
+		if (dup_key){
+			var ol_existing = el(list_id).querySelector("ol");
+			var kids = ol_existing.children;
+			for (var ei = 0; ei < kids.length; ei++){
+				var cand = kids[ei];
+				if (!cand.dataset || !cand.dataset.message)
+					continue;
+				if (FT8_dedup_key(cand.dataset.message) !== dup_key)
+					continue;
+				var badge = cand.querySelector(".ft8-source-field");
+				if (badge){
+					badge.textContent = "D";
+					badge.className = "ft8-source-field ft8-source-d";
+				}
+				return; // suppressed -- Z row relabeled, no new row inserted
+			}
+		}
+	}
 
 	// "Q" is ft8_tx()'s queued-placeholder line, written the instant
 	// F1/a macro is clicked -- timestamped at click time, not when the
@@ -4209,7 +4299,14 @@ function FT8_new_message(text, style, source){
 	// history just below -- or a live pileup could show the wrong
 	// station's traffic here.
 	var starting_fresh_exchange = !current_call && style === "RX" && other_party;
-	var belongs_to_active_exchange = (current_call && other_party === current_call)
+	// sender: see ft8_message_sender()'s own comment -- catches this
+	// station's traffic even when it's no longer addressed to us (a
+	// re-sent CQ, or a reply to someone else), which other_party alone
+	// can't. RX-only (style check), same reasoning as other_party
+	// above: we only ever hear a genuinely different sender on an "RX"
+	// decode, never our own "TX" echo.
+	var sender = style === "RX" ? ft8_message_sender(text) : null;
+	var belongs_to_active_exchange = (current_call && (other_party === current_call || sender === current_call))
 		|| starting_fresh_exchange;
 	// Auto CQ: while calling CQ with nobody answering yet (no real
 	// exchange started, current_call still empty), also show our own
