@@ -933,10 +933,12 @@ void band_freq_list(char *out, size_t out_size){
 // picks this up on next restart, no fresh-install-only path needed.
 // Bulk-seeded once from the FCC ULS database (scripts/seed_callsign_grid.py,
 // writing directly via the sqlite3 CLI, source='uls') and kept fresh by
-// every live FT8 CQ decode (modem_ft8.c, via callsign_grid_set() below,
-// source='decode') -- see this feature's own design note for why CQ only:
-// the CQ message is the one unambiguous case where a station is
-// self-broadcasting its own grid to nobody in particular.
+// every live FT8 decode that genuinely carries a sender's own grid
+// (modem_ft8.c, via callsign_grid_set() below, source='decode') -- both
+// a CQ (self-broadcasting to nobody in particular) and the first step of
+// answering a CQ/calling another station directly (see that call site's
+// own comment for why both shapes are protocol-guaranteed genuine grids,
+// not a text heuristic).
 void callsign_grid_ensure_table(void){
 	char *err_msg;
 

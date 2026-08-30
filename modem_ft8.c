@@ -1574,22 +1574,38 @@ static int sbitx_ft8_decode(float *signal, int num_samples)
 			// for a genuine decoded 4-char grid, never for RR73/RRR/73 (those
 			// get FTX_FIELD_TOKEN) or a signal report (FTX_FIELD_RST) -- can't
 			// alias the way a string-shape check (e.g. "RR73" incidentally
-			// matching a grid's own A-R/A-R/0-9/0-9 pattern) can. Deliberately
-			// scoped to CQ only (types[0] a token, not a real callsign -- a
-			// reply-to-CQ's types[0] is FTX_FIELD_CALL, the callee): the CQ is
-			// the one unambiguous case of a station broadcasting its own grid
-			// to nobody in particular. FT8 decoding runs on its own thread
-			// (ft8_thread_function) -- logbook.c's db handle is only ever
-			// touched from the main thread (no existing precedent for
-			// cross-thread sqlite access in this codebase, and this project
-			// already hit a real cross-thread race in this exact subsystem
-			// once before, see ft8_process_mutex's own comment above) -- so
-			// this only ever queues the candidate; ft8_grid_queue_drain()
-			// (main thread, ui_tick()) is what actually writes it.
+			// matching a grid's own A-R/A-R/0-9/0-9 pattern) can.
+			//
+			// User's own ask (2026-08-30): originally CQ-only (types[0] a
+			// token, not a real callsign) -- the one unambiguous case of a
+			// station broadcasting its own grid to nobody in particular.
+			// Widened to also cover the OTHER message shape that genuinely
+			// carries a sender's own grid: the first step of answering a
+			// CQ (or calling another station directly), types[0] a real
+			// callsign (FTX_FIELD_CALL, the addressee) rather than a
+			// token. Same protocol guarantee applies either way --
+			// unpackgrid() doesn't care who the message is addressed to,
+			// only that a genuine grid field is present -- and captures
+			// stations that only ever answer others' CQs, never send
+			// their own, which CQ-only would otherwise never place at
+			// all. sender (types[1], the actual grid owner) and the grid
+			// field itself are extracted identically in both shapes; only
+			// the addressee (types[0]) differs, and it isn't used here.
+			//
+			// FT8 decoding runs on its own thread (ft8_thread_function) --
+			// logbook.c's db handle is only ever touched from the main
+			// thread (no existing precedent for cross-thread sqlite access
+			// in this codebase, and this project already hit a real
+			// cross-thread race in this exact subsystem once before, see
+			// ft8_process_mutex's own comment above) -- so this only ever
+			// queues the candidate; ft8_grid_queue_drain() (main thread,
+			// ui_tick()) is what actually writes it.
+			bool grid_msg_is_cq = spans.types[0] != FTX_FIELD_CALL &&
+					spans.offsets[0] >= 0 && !strncmp(text + spans.offsets[0], "CQ", 2);
+			bool grid_msg_is_reply = spans.types[0] == FTX_FIELD_CALL;
 			if (span_i >= 3 && spans.offsets[2] >= 0 && spans.types[2] == FTX_FIELD_GRID &&
 					spans.offsets[1] >= 0 && spans.types[1] == FTX_FIELD_CALL &&
-					spans.offsets[0] >= 0 && spans.types[0] != FTX_FIELD_CALL &&
-					!strncmp(text + spans.offsets[0], "CQ", 2)) {
+					spans.offsets[0] >= 0 && (grid_msg_is_cq || grid_msg_is_reply)) {
 				char *sender = text + spans.offsets[1];
 				char *sender_end = strchr(sender, ' ');
 				if (!sender_end)
