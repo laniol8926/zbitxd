@@ -140,6 +140,27 @@ JT9_CWD = "/tmp/zbitxd_jt9_bridge_scratch"
 # throughout on a real live-captured sample of each.
 DECODE_RE = re.compile(r"^\d{6}\s+([+-]?\d+)\s+([+-]?[\d.]+)\s+(\d+)\s+[~+]\s+(\S.*\S|\S)\s*$")
 
+# Real bug, live (2026-08-31, journalctl on the Pi): auto-answer called
+# 3D2USU's grid square ("RH82") instead of 3D2USU itself. Root cause,
+# confirmed against jt9's own Fortran source (decoder.f90): a decode
+# made via jt9's AP (a-priori) decoder carries a trailing 2-char
+# annotation after the message -- `write(annot,'(a1,i1)') 'a',nap`,
+# e.g. "CQ 3D2USU RH82                        a1" -- decoder metadata
+# (which AP hypothesis matched), not part of the transmitted FT8
+# message. DECODE_RE's message group greedily swallowed it as a 4th
+# token, and the server's ft8_on_start_qso() (modem_ft8.c) picks its
+# CQ-message field layout purely from whether a 4th token exists --
+# "CQ 3D2USU RH82 a1" was misread as the 4-field "CQ <special> CALL
+# GRID" shape, taking the grid ("RH82") as the callsign to call instead
+# of "3D2USU". Confirmed intermittent (same message, e.g. "CQ KO4OL
+# EM77", showed up both with and without the "a1" suffix across
+# different slots) -- consistent with it depending on whether that
+# particular decode used the AP path, not a fixed property of the
+# message. annot is always exactly 'a' + a single digit (never part of
+# a legitimate FT8 message token -- grids/reports/RR73/73 never take
+# that shape), so it's safe to strip unconditionally.
+AP_ANNOT_RE = re.compile(r"\s+a\d$")
+
 
 def log(msg):
     print(f"jt9_bridge: {msg}", file=sys.stderr, flush=True)
@@ -227,6 +248,7 @@ def process_file(path):
             if not dm:
                 continue
             snr, dt, freq, msg = dm.groups()
+            msg = AP_ANNOT_RE.sub("", msg)
             # TIME DT SNR FREQ ~ MSG -- see this file's own module comment
             if send_ft8continue(f"{real_time} {dt} {snr} {freq} ~ {msg}"):
                 n_sent += 1
