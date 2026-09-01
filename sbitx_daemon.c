@@ -3503,9 +3503,28 @@ void cmd_exec(char *cmd){
 	// strtok()) the exact buffer it's handed -- args itself would
 	// already be shredded to just its first token by the time
 	// ft8_process() returns.
+	//
+	// Real bug, live (2026-09-01), journalctl-traced: right after a real
+	// QSO with N1IG closed (his own "73" arrived and was processed by
+	// the native decoder, which correctly call_wipe()'d CALL), jt9's own
+	// -- duplicate, content-identical -- catch of that exact same "73"
+	// landed ~3s later and was still unconditionally run through
+	// ft8_process() a second time. With CALL now empty, that second pass
+	// hit ft8_process_impl()'s auto-respond "cold call" branch (m1 ==
+	// mycall, call empty) and called ft8_on_start_qso() -- which bails
+	// out harmlessly before transmitting anything (m3 is "73"), but not
+	// before its own unconditional modem_abort()/tx_off()/set rx_pitch
+	// field already ran, snapping the waterfall RX line and RX Frequency
+	// panel back onto N1IG's frequency again well after the QSO had
+	// actually ended. jt9_display_decode() already knows this is a
+	// content-identical duplicate of a message the native decoder
+	// already ran through ft8_process() this exact slot (that's what
+	// the D badge means) -- so skip the redundant, and in this case
+	// harmful, second ft8_process() pass for it.
 	else if (!strcmp(exec, "FT8CONTINUE")) {
-		jt9_display_decode(args);
-		ft8_process(args, FTX_CONTINUE_QSO);
+		bool is_dup = jt9_display_decode(args);
+		if (!is_dup)
+			ft8_process(args, FTX_CONTINUE_QSO);
 	}
 	// TEMPORARY, task #25 SIC validation only -- remove once done.
 	// Re-runs sbitx_ft8_decode() against a previously captured WAV

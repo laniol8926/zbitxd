@@ -235,7 +235,10 @@ static bool jt9_native_seen_has(const char *hhmmss, const char *text){
 // copies first, see that call site's comment) this tokenizes a private
 // copy, leaving the caller's copy intact for the ft8_process() call
 // that still needs to run right after this returns.
-void jt9_display_decode(const char *message){
+// Returns true if this was a duplicate of a message the native decoder
+// already showed this slot -- see the header's own comment for why the
+// caller needs this.
+bool jt9_display_decode(const char *message){
 	char scratch[128];
 	strncpy(scratch, message, sizeof(scratch) - 1);
 	scratch[sizeof(scratch) - 1] = 0;
@@ -253,7 +256,7 @@ void jt9_display_decode(const char *message){
 	char *m3_p = m2_p ? strtok_r(NULL, " \r\n", &save) : NULL;
 	char *m4_p = m3_p ? strtok_r(NULL, " \r\n", &save) : NULL;
 	if (!hhmmss || !dt_str || !snr_str || !freq_str || !m1_p || !m2_p || strlen(hhmmss) != 6)
-		return; // malformed -- nothing sensible to display
+		return false; // malformed -- nothing sensible to display, not a confirmed duplicate either
 
 	char text[80];
 	if (m4_p)
@@ -383,6 +386,7 @@ void jt9_display_decode(const char *message){
 	// two agree without a browser open.
 	LOG(LOG_INFO, "%s%s\n", is_dup ? "jd> " : "j> ", buf);
 	write_console_semantic(buf, sem, sem_i);
+	return is_dup;
 }
 
 static int ft8_decode_triggered_for_ms = -1;

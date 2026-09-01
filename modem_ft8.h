@@ -66,4 +66,8 @@ void ft8_grid_queue_drain(void);
 // ft8_process() ever displayed anything on their own).
 // Call before ft8_process(message, FTX_CONTINUE_QSO), with the same
 // untouched raw message text -- this tokenizes its own private copy.
-void jt9_display_decode(const char *message);
+// Returns true if this message duplicated one the native decoder
+// already showed (and therefore already ran through ft8_process()) this
+// slot -- caller should skip its own ft8_process() call in that case,
+// see that call site's own comment for the real bug this fixes.
+bool jt9_display_decode(const char *message);

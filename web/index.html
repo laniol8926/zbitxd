@@ -3603,12 +3603,19 @@ function FT8_stylize_message_item(item, text, style, list_id, source) {
     // POC source-tag column, user's own ask: which decoder produced this
     // row -- Z (native sbitx_ft8_decode()), J (jt9_bridge.py, not seen
     // natively this slot), D (jt9_bridge.py, duplicates a Z row already
-    // shown this slot). Band Activity/CQ Panel only -- source is only
-    // ever passed for those two list_ids (see FT8_new_message()'s own
-    // comment); RX Frequency and the operator's own TX/Q lines get no
-    // badge at all, source is undefined there.
+    // shown this slot). Band Activity/CQ Panel only -- the operator's
+    // own TX/Q lines get no badge at all, source is undefined there.
+    //
+    // Real report, live (2026-09-01): RX Frequency started showing the
+    // badge too once source got passed through to its own
+    // FT8_list_append() call (needed there for the D-suppression dedup
+    // match, see that function's own comment) -- but RX Frequency is a
+    // single-exchange view, not a "which decoder caught this" audit
+    // list the way Band Activity/CQ Panel are, so the badge is just
+    // clutter there. source is still passed/used for dedup, just never
+    // rendered outside the two panels it was actually designed for.
     var sourceBadge = "";
-    if (source)
+    if (source && (list_id === "wsjtx-activity" || list_id === "wsjtx-cq"))
 	sourceBadge = "<span class='ft8-source-field ft8-source-" + source.toLowerCase() + "'>" + source + "</span> ";
     item.innerHTML = sourceBadge + htmLabel + ' <span class="ft8-message">' + htmMessage + '</span>';
 }
@@ -4212,6 +4219,22 @@ function update_rx_panel_visibility(){
 // visible -> full width (.wsjtx-panel-solo), all 3 -> default fixed
 // width.
 function update_ft8_panel_layout(){
+	// Band Activity and CQ Panel are supposed to be mutually exclusive
+	// (see set_band_activity_hidden()'s own comment) -- but that
+	// exclusivity is decided independently in two places (the checkbox
+	// handler there, and RX Frequency's own has_content-driven force-
+	// hide/restore in update_rx_panel_visibility()), which can fire in
+	// either order around a QSO's start/end. Real report, live
+	// (2026-09-01): checking then unchecking Hide Band Activity shortly
+	// after a QSO left both panels visible together. Rather than chase
+	// down which exact interleaving caused it, enforce the invariant
+	// directly here -- this function already runs at the tail of both
+	// paths, so it's the one place guaranteed to run last regardless of
+	// ordering. Band Activity wins a genuine conflict (it's the one the
+	// checkbox is actually named after).
+	if (el("wsjtx-activity").style.display !== "none" && el("wsjtx-cq").style.display !== "none")
+		el("wsjtx-cq").style.display = "none";
+
 	var panel_ids = ["wsjtx-activity", "wsjtx-cq", "wsjtx-rx"];
 	var visible_ids = panel_ids.filter(function(id){
 		return el(id).style.display !== "none";
