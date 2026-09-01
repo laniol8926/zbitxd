@@ -462,15 +462,26 @@ static bool ft8_give_up_pending = false;
 // to guard against there.
 // Known limitation, same as the rest of this file's wallclock_day_ms-
 // based timing (it resets to 0 at local midnight, nothing here accounts
-// for that): a deadline computed within the last 16s of the day wraps
-// via the modulo below to a small value already less than the current
-// wallclock_day_ms, firing the grace check immediately instead of after
-// a real 16s wait -- degrades to this file's original immediate-give-up
-// behavior for that one ~16s window per day, not stuck pending forever
-// (the alternative of not wrapping at all).
+// for that): a deadline computed within the last FT8_GIVE_UP_GRACE_MS
+// of the day wraps via the modulo below to a small value already less
+// than the current wallclock_day_ms, firing the grace check immediately
+// instead of after a real wait -- degrades to this file's original
+// immediate-give-up behavior for that one small window per day, not
+// stuck pending forever (the alternative of not wrapping at all).
 static bool ft8_give_up_grace_pending = false;
 static int ft8_give_up_grace_deadline_ms = 0;
-#define FT8_GIVE_UP_GRACE_MS 16000 // one FT8 slot (15s) + margin
+// Real report, live (2026-09-01), N5TLH, journalctl-traced: 16s (one
+// slot + margin) wasn't enough -- our own 3rd/final repeat was queued
+// at :30, the grace deadline landed at :46, but N5TLH's real reply
+// wasn't actually decoded until :58 (his own reply transmission landed
+// in the *second* slot after our last repeat, not the very next one --
+// a normal enough delay, not a slow/broken reply). CALL had already
+// been wiped by the time it arrived, so update_rx_panel_visibility()'s
+// TXACTIVE 1->0 handler (index.html) had already cleared RX Frequency,
+// and the operator never saw the reply land there at all -- had to
+// find N5TLH's own still-sitting CQ Panel entry and click it manually
+// instead. Widened to cover two full slots + margin, not one.
+#define FT8_GIVE_UP_GRACE_MS 31000 // two FT8 slots (30s) + margin
 
 // Real regression, caught live (2026-08-23) right after first adding
 // the RRR/RR73 dedup fix below: reusing RECV to detect a repeated

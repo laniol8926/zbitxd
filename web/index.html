@@ -3374,6 +3374,31 @@ function ft8_message_other_party(text, mycallsign){
     return null;
 }
 
+// Real bug, live (2026-09-01), screenshot-confirmed: a station's own
+// real over-the-air closing "73" -- decoded a beat after our own
+// courtesy "73" already finished transmitting and the exchange had
+// already logged and cleared (see notify_qso_logged()'s own comment,
+// webserver.c) -- got treated as the first message of a brand new
+// exchange with that same station, re-populating RX Frequency right
+// after it had correctly just emptied out. Same reasoning already
+// applied server-side (ft8_on_start_qso()'s own cold-call branch,
+// modem_ft8.c): "73"/"RR73"/"RRR" can never be the message that starts
+// a fresh exchange -- they only ever mean something as the closing
+// step of one already under way. Same tilde-relative m3, same
+// tokenization ft8_message_other_party() above already uses.
+function ft8_message_is_closing(text){
+    var token_list = text.match(/\S+/g);
+    if (!token_list || token_list.length < 6 || token_list.length > 9)
+	return false;
+    var tilde_pos = -1;
+    for (var i = 3; i < token_list.length; ++i)
+	if (token_list[i] == '~') { tilde_pos = i; break; }
+    if (tilde_pos < 0 || tilde_pos + 3 >= token_list.length)
+	return false;
+    var m3 = deco_strip(token_list[tilde_pos + 3]).toUpperCase();
+    return m3 === "73" || m3 === "RR73" || m3 === "RRR";
+}
+
 // Who actually transmitted this message -- for a CQ, the CQing station
 // itself (ft8_cq_message_callsign(), defined below); for a directed
 // message, always m2 (FT8's own "addressee sender ..." field order,
@@ -4330,7 +4355,8 @@ function FT8_new_message(text, style, source){
 	// actually move first -- see this variable's own stale-resend
 	// history just below -- or a live pileup could show the wrong
 	// station's traffic here.
-	var starting_fresh_exchange = !current_call && style === "RX" && other_party;
+	var starting_fresh_exchange = !current_call && style === "RX" && other_party
+		&& !ft8_message_is_closing(text);
 	// sender: see ft8_message_sender()'s own comment -- catches this
 	// station's traffic even when it's no longer addressed to us (a
 	// re-sent CQ, or a reply to someone else), which other_party alone
