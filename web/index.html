@@ -5952,6 +5952,21 @@ function response_handler(response){
 				alert("Incorrect passkey.\r\nIf you have forgotten your pass key\r\n" +
 				"You can see it in user_settings.ini in sbitx/data folder");
 			break;
+			// Server-pushed the moment a QSO auto-completes (enter_qso(),
+			// notify_qso_logged() -- see its own comment in webserver.c):
+			// no operator click is involved on this path (auto-answer/
+			// Auto CQ), so nothing else ever told the client to refresh.
+			// Real report, live (2026-09-01), screenshot-confirmed: RX
+			// Frequency kept showing the just-finished exchange's stale
+			// "73" indefinitely without this. logbook_request() re-pulls
+			// through the normal, already-correct 'QSO' case below (keeps
+			// logbook_bottom_row_id tracking consistent, unlike trying to
+			// hand-parse a row out of this bare ping); FT8_rx_clear() runs
+			// immediately here too rather than waiting on that round trip.
+		case 'QSOLOGGED':
+			logbook_request(logbook_bottom_row_id);
+			FT8_rx_clear();
+			break;
 		case 'QSO':
 			logbook_update(args);
 			// Real report, live (2026-08-24): with Auto CQ resuming right

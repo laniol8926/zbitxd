@@ -39,6 +39,28 @@ static void web_respond(struct mg_connection *c, char *message){
 	mg_ws_send(c, message, strlen(message), WEBSOCKET_OP_TEXT);
 }
 
+// Real bug, live (2026-09-01), screenshot-confirmed: RX Frequency kept
+// showing a completed QSO's closing "73" well after the exchange had
+// actually logged. Root cause: enter_qso() (sbitx_daemon.c) sets
+// update_logs = 1 on a genuine auto-completed QSO, but nothing ever
+// reads that flag -- it's dead. The client only ever clears RX
+// Frequency (FT8_rx_clear(), on its own 'QSO' websocket case) in
+// response to a log row it explicitly *requested* (logbook_request(),
+// e.g. opening the Logbook panel) -- there was no path at all for the
+// server to proactively tell it "a QSO just logged, go refresh" the
+// moment an automatic exchange (auto-answer/Auto CQ, no operator click
+// involved at all) actually completes. Deliberately a lightweight
+// "something changed, go re-pull it" ping rather than trying to
+// reconstruct get_logs()'s own multi-row/ID-tracking response format
+// for a single new row here -- the client already has a correct,
+// working path for that (logbook_request()); this just tells it when
+// to use it, and clears RX Frequency's own stale display immediately
+// rather than waiting on that round trip.
+void notify_qso_logged(void){
+	if (authenticated_conn)
+		web_respond(authenticated_conn, "QSOLOGGED");
+}
+
 static void get_console(struct mg_connection *c){
 	char buff[2100];
 	int n = web_get_console(buff, 2000);

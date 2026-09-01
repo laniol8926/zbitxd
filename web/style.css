@@ -1574,6 +1574,27 @@ input[type="checkbox"] {
 	margin: 0;
 	padding: 0;
 	height: 9pt;
+	/* Real bug, live (2026-09-01), screenshot confirmed: rows are a
+	   fixed single-line height in every size variant here (this rule,
+	   .wsjtx-panel-expanded, .wsjtx-panel-solo below), but nothing ever
+	   stopped a row's content from wrapping onto a second line when it
+	   didn't fit -- harmless by coincidence as long as content always
+	   happened to be short enough for the width/font combo in play.
+	   That coincidence broke the moment Band Activity (source badge +
+	   label + message -- longer per-row content than CQ Panel/RX
+	   Frequency, which never got a badge) ended up sharing
+	   .wsjtx-panel-expanded's 50%-width/13pt state alongside RX
+	   Frequency (a real, valid 2-panel combination -- see
+	   update_ft8_panel_layout()'s own comment -- .wsjtx-panel-expanded's
+	   was written assuming only CQ Panel/RX Frequency could ever land
+	   here). The wrapped second line had nowhere to go but overlap the
+	   next row. Truncating instead of wrapping is correct everywhere
+	   this list is used, not just for this one combination -- a
+	   single-line row list should never silently grow a second line.
+	*/
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
 }
 /* Tried dropping Band Activity specifically to 8pt to fit more
    characters per line (see git history) -- reverted live, user's own

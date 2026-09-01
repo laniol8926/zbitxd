@@ -1436,17 +1436,23 @@ void enter_qso(){
 		printf("Duplicate log entry not accepted for %s within five minutes of last entry of %s.\n", callsign, callsign);
 		return;
 	}
-	logbook_add(get_field("#contact_callsign")->value, 
-		get_field("#rst_sent")->value, 
-		get_field("#exchange_sent")->value, 
-		get_field("#rst_received")->value, 
+	logbook_add(get_field("#contact_callsign")->value,
+		get_field("#rst_sent")->value,
+		get_field("#exchange_sent")->value,
+		get_field("#rst_received")->value,
 		get_field("#exchange_received")->value);
 	char buff[100];
-	sprintf(buff, "Logged: %s %s-%s %s-%s\n", 
-		field_str("CALL"), field_str("SENT"), field_str("NR"), 
+	sprintf(buff, "Logged: %s %s-%s %s-%s\n",
+		field_str("CALL"), field_str("SENT"), field_str("NR"),
 		field_str("RECV"), field_str("EXCH"));
 	write_console(STYLE_LOG, buff);
 	update_logs = 1;
+	// See notify_qso_logged()'s own comment (webserver.c) -- without
+	// this, an automatically-completed QSO (auto-answer/Auto CQ, no
+	// operator click involved) never told the client to refresh, and RX
+	// Frequency kept showing the just-finished exchange's stale content
+	// indefinitely.
+	notify_qso_logged();
 	// wipe the call if not FT8/FT4
 	switch (mode_id(field_str("MODE"))) {
 	case MODE_FT4:
