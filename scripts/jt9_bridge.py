@@ -268,6 +268,14 @@ def process_file(path):
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, bufsize=1,  # line-buffered
             cwd=scratch,
+            # Windows: jt9.exe is a console-subsystem binary -- Popen()
+            # opens a new console window for it by default even though
+            # this script itself runs windowless (pythonw.exe, no
+            # console of its own to inherit). CREATE_NO_WINDOW suppresses
+            # that; confirmed live (2026-09-02) as a real, visible popup
+            # each time a slot triggered a jt9 run before this was added.
+            # No effect on Linux -- the flag only exists under Windows.
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
     except OSError as e:
         log(f"jt9 failed on {path}: {e}")
