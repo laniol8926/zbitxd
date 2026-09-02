@@ -136,6 +136,48 @@ try {
     Remove-Item -Recurse -Force $tmpDir -ErrorAction SilentlyContinue
 }
 
+# --- jt9 decoder-merge bridge (optional) ---
+# Companion to modem_ft8.c's own jt9_dump_slot_wav()/jt9_temp_dir() --
+# runs jt9 (from an existing WSJT-X/WSJT-Z install) as a second,
+# independent FT8/FT4 decoder and merges its catches with zbitxd's own
+# (see scripts/jt9_bridge.py's own module comment). Entirely optional:
+# zbitxd works fully without it, just without the extra decoder-merge
+# sensitivity. Needs a real Python 3 (not the Microsoft Store's
+# execution-alias stub, which prints an error and exits non-zero until
+# someone actually completes a Store install) and an existing WSJT-X or
+# WSJT-Z install for jt9.exe itself (jt9_bridge.py's own find_jt9()
+# looks in the usual install locations) -- neither is installed by this
+# script; both are only checked for.
+if (Test-Path ".\scripts\jt9_bridge.py") {
+    Copy-Item ".\scripts\jt9_bridge.py" "$InstallDir\jt9_bridge.py" -Force
+
+    $pythonOk = $false
+    try {
+        $pyVersion = & python --version 2>&1
+        if ($LASTEXITCODE -eq 0 -and $pyVersion -match "^Python 3") { $pythonOk = $true }
+    } catch { }
+
+    if ($pythonOk) {
+        $pythonExe = (Get-Command python).Source
+        $pythonwPath = $pythonExe -replace "python\.exe$", "pythonw.exe"
+        if (-not (Test-Path $pythonwPath)) { $pythonwPath = $pythonExe }
+
+        $taskName = "zbitxd jt9 bridge"
+        if (-not (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue)) {
+            Write-Host "Registering jt9 decoder-merge bridge to start at logon..."
+            $action = New-ScheduledTaskAction -Execute $pythonwPath -Argument "`"$InstallDir\jt9_bridge.py`"" -WorkingDirectory $InstallDir
+            $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+            $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero)
+            Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Settings $settings -User $env:USERNAME | Out-Null
+            Start-ScheduledTask -TaskName $taskName
+        }
+        Write-Host "jt9 decoder-merge bridge installed and running (Task Scheduler: `"$taskName`", starts at logon)."
+    } else {
+        Write-Host ""
+        Write-Warning "jt9_bridge.py was copied but not started -- no real Python 3 found (the 'python'/'python3' commands on this machine are Microsoft Store execution-alias stubs until that install is completed). Install Python 3 from python.org, then run: pythonw `"$InstallDir\jt9_bridge.py`" -- or re-run this installer afterward to register the startup task automatically. zbitxd itself works fully without this; it's purely an optional decoder-merge sensitivity boost -- see scripts/jt9_bridge.py's own module comment."
+    }
+}
+
 # --- Windows Firewall: web UI port ---
 $ruleName = "zbitxd web UI"
 if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {

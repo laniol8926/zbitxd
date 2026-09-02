@@ -10,6 +10,8 @@
 // sbitx_daemon.c.
 #ifndef _WIN32
 #include <arpa/inet.h>
+#else
+#include <windows.h>
 #endif
 #include <time.h>
 #include <math.h>
@@ -1950,6 +1952,30 @@ void *ft8_thread_function(void *ptr){
 // persist like an operator's own manual recording (REC ON/OFF, sbitx.c
 // -- a completely separate file/feature, deliberately untouched by
 // this one).
+// Windows port: /tmp isn't a real path there -- MinGW resolves it
+// relative to the current drive root (C:\tmp\...), which doesn't exist,
+// so the dump silently fails. GetTempPathA() is the real Windows
+// equivalent (honors %TEMP%/%TMP%, same as Python's tempfile.gettempdir()
+// -- jt9_bridge.py's own Windows port uses that same call, so both sides
+// land in the same directory without either one hardcoding the other's
+// path). Falls back to a fixed path only if the API call itself fails,
+// which in practice never happens on a real Windows install.
+static const char *jt9_temp_dir(void){
+#ifdef _WIN32
+	static char dir[MAX_PATH];
+	static bool have_dir = false;
+	if (!have_dir) {
+		DWORD len = GetTempPathA(sizeof(dir), dir);
+		if (len == 0 || len >= sizeof(dir))
+			strcpy(dir, "C:\\Windows\\Temp\\");
+		have_dir = true;
+	}
+	return dir;
+#else
+	return "/tmp/";
+#endif
+}
+
 static int jt9_slot_wav_toggle = 0;
 // start_ms: the just-completed slot's own real wall-clock start time
 // (ft8_rx_buff_start_ms at the call site) -- jt9 has no real-time
@@ -1977,9 +2003,9 @@ static void jt9_dump_slot_wav(const float *buf, int n_samples, int start_ms, boo
 	int hh = total_sec / 3600;
 	int mm = (total_sec / 60) % 60;
 	int ss = total_sec % 60;
-	char path[72];
-	snprintf(path, sizeof(path), "/tmp/zbitxd_jt9_slot_%d_%02d%02d%02d_%s.wav",
-		jt9_slot_wav_toggle, hh, mm, ss, is_ft4 ? "FT4" : "FT8");
+	char path[320];
+	snprintf(path, sizeof(path), "%szbitxd_jt9_slot_%d_%02d%02d%02d_%s.wav",
+		jt9_temp_dir(), jt9_slot_wav_toggle, hh, mm, ss, is_ft4 ? "FT4" : "FT8");
 	jt9_slot_wav_toggle ^= 1;
 
 	// Same float -> int16 conversion/clamp ft8_lib's own save_wav()

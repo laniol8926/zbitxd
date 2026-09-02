@@ -64,11 +64,18 @@ import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 
-WAV_GLOB = "/tmp/zbitxd_jt9_slot_*.wav"
+# Windows port: /tmp isn't a real path there. tempfile.gettempdir()
+# honors %TEMP%/%TMP%, the same place GetTempPathA() resolves to on the
+# C side (modem_ft8.c's jt9_temp_dir()) -- both sides land in the same
+# directory without either one hardcoding the other's path. Unchanged
+# on Linux (still /tmp, matching every existing live deployment).
+JT9_TMPDIR = tempfile.gettempdir()
+WAV_GLOB = os.path.join(JT9_TMPDIR, "zbitxd_jt9_slot_*.wav")
 # Real bug, caught before it ever shipped: this originally always ran
 # "jt9 -8" (FT8) regardless of which mode a slot was actually decoded
 # in -- FT4 audio fed through FT8's own symbol timing decodes nothing.
@@ -128,7 +135,42 @@ MAX_CONCURRENT_JT9 = max(1, (os.cpu_count() or 4) - 1)
 # decoded.txt. Now that this script itself runs jt9 concurrently (see
 # "Concurrency" above), each invocation gets its own subdirectory
 # under this one instead of sharing it directly -- see process_file().
-JT9_CWD = "/tmp/zbitxd_jt9_bridge_scratch"
+JT9_CWD = os.path.join(JT9_TMPDIR, "zbitxd_jt9_bridge_scratch")
+
+# Windows port: jt9.exe doesn't sit on PATH the way a Linux package's
+# /usr/bin entry would -- WSJT-X/WSJT-Z install to a fixed directory and
+# don't add themselves to PATH. shutil.which() still covers the case
+# where a user (or a future installer step) did add it. Below that,
+# fall back to the same real install layout confirmed live on this
+# project's own Windows test machine (both WSJT-X and WSJT-Z installed
+# side by side under C:\WSJT\<variant>\bin\jt9.exe) -- WSJT-Z preferred
+# when both are present, since this bridge's FT4 field-separator/AP-
+# annotation handling (DECODE_RE, AP_ANNOT_RE above) was validated
+# against WSJT-Z's own jt9 output specifically, not WSJT-X's. Program
+# Files locations covered too, in case a future install used the
+# installer's own default path instead of C:\WSJT.
+def find_jt9():
+    found = shutil.which("jt9")
+    if found:
+        return found
+    if os.name == "nt":
+        candidates = [
+            r"C:\WSJT\wsjtz\bin\jt9.exe",
+            r"C:\WSJT\wsjtx\bin\jt9.exe",
+            os.path.expandvars(r"%ProgramFiles%\WSJT-Z\bin\jt9.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\WSJT-Z\bin\jt9.exe"),
+            os.path.expandvars(r"%ProgramFiles%\WSJT-X\bin\jt9.exe"),
+            os.path.expandvars(r"%ProgramFiles(x86)%\WSJT-X\bin\jt9.exe"),
+        ]
+        for c in candidates:
+            if os.path.isfile(c):
+                return c
+    # Last resort: let Popen's own FileNotFoundError report exactly what
+    # was tried, rather than this function silently guessing further.
+    return "jt9"
+
+
+JT9_PATH = find_jt9()
 
 # jt9 -8 <file> stdout, one decode per line, e.g.:
 #   000000 -10  0.1 1501 ~  CS7BHA WX7P R-11
@@ -222,7 +264,7 @@ def process_file(path):
             # separately and gave no real gain (30.0s vs 30.3s baseline)
             # -- jt9's cost is dominated by single-threaded FT8/LDPC work,
             # not the large-FFT step -m parallelizes.
-            ["jt9", "-w", "0", JT9_MODE_FLAG[mode], path],
+            [JT9_PATH, "-w", "0", JT9_MODE_FLAG[mode], path],
             stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, bufsize=1,  # line-buffered
             cwd=scratch,
@@ -295,6 +337,7 @@ def prune_backlog(in_flight):
 
 def main():
     os.makedirs(JT9_CWD, exist_ok=True)
+    log(f"using jt9 at {JT9_PATH}")
     log(f"watching {WAV_GLOB}, feeding {ZBITXD_HOST}:{ZBITXD_PORT}, up to {MAX_CONCURRENT_JT9} jt9(s) at once")
     in_flight = {}  # path -> Future
     with ThreadPoolExecutor(max_workers=MAX_CONCURRENT_JT9) as pool:
