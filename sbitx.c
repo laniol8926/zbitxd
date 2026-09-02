@@ -6,14 +6,33 @@
 #include <complex.h>
 #include <fftw3.h>
 #include <unistd.h>
+// Windows port sketch: linux/types.h is unused here (no __u8/__u16/
+// __u32/__u64/__le*/__be* anywhere in this file, confirmed via grep) --
+// same dead-include pattern found and guarded in sbitx_daemon.c.
+#ifndef _WIN32
 #include <linux/types.h>
+#endif
+// Windows port sketch: PATH_MAX (the only thing linux/limits.h would
+// provide) is unused here (confirmed via grep) -- same dead-include
+// pattern found and guarded elsewhere tonight.
+#ifndef _WIN32
 #include <linux/limits.h>
+#endif
 #include <stdint.h>
 #include <time.h>
 #include <signal.h>
 #include <pthread.h>
 #include <errno.h>
+// Windows port sketch: the old zBitx SDR's own ALSA I/Q capture/
+// playback thread is long gone from this codebase (see sound.h's own
+// comment) -- sound_mixer()/sound_volume() below are the only two
+// functions in this file that still touch ALSA directly at all, both
+// pure hardware-mixer-control calls, nothing to do with the actual
+// audio *path* (that's sound_generic.c/sound_generic_win.c). Guarded at
+// their own definitions, not here -- see their own comments.
+#ifndef _WIN32
 #include <alsa/asoundlib.h>
+#endif
 #include "sdr.h"
 #include "sdr_ui.h"
 #include "sound.h"
@@ -125,6 +144,18 @@ struct rx* rx_list = NULL;
 // is the real audio path for this backend). Only these four still had
 // live callers outside that dead thread.
 
+#ifdef _WIN32
+// Windows always runs in generic_rig_mode (no zBitx hardware is
+// possible there at all) -- the exact same condition the Linux version
+// of this function already early-returns on before touching ALSA (see
+// its own comment, kept below), so this is a behaviorally-identical
+// no-op, not a change: a Windows build would have taken that early
+// return every single time regardless.
+void sound_mixer(char* card_name, char* element, int make_on)
+{
+	(void)card_name; (void)element; (void)make_on;
+}
+#else
 void sound_mixer(char* card_name, char* element, int make_on)
 {
 	long min, max;
@@ -167,7 +198,17 @@ void sound_mixer(char* card_name, char* element, int make_on)
 	}
 	snd_mixer_close(handle);
 }
+#endif
 
+#ifdef _WIN32
+// Not called from anywhere in the codebase at all (confirmed via grep)
+// -- kept as a real no-op rather than deleted, same "guard, don't
+// delete" approach used elsewhere tonight, in case that changes.
+void sound_volume(char* card_name, char* element, int volume)
+{
+	(void)card_name; (void)element; (void)volume;
+}
+#else
 void sound_volume(char* card_name, char* element, int volume)
 {
 	long min, max;
@@ -191,6 +232,7 @@ void sound_volume(char* card_name, char* element, int volume)
 
 	snd_mixer_close(handle);
 }
+#endif
 
 static int use_virtual_cable = 0;
 

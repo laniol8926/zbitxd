@@ -1,18 +1,14 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <string.h>
-#include <arpa/inet.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <complex.h>
 #include <math.h>
-#include <fcntl.h>
-#include <complex.h>
 #include <fftw3.h>
+#include "winsock_compat.h" // see its own top comment -- socket()/etc.
 #include "sdr.h"
 #include "sdr_ui.h"
 
@@ -199,8 +195,13 @@ void hamlib_start(){
   struct sockaddr_storage serverStorage;
   socklen_t addr_size;
 
+  // SOCK_NONBLOCK is a no-op flag on Windows (winsock_compat.h) --
+  // winsock_set_nonblocking() right after creation is what actually
+  // makes this non-blocking there; harmless redundant no-op on Linux,
+  // where SOCK_NONBLOCK above already did it.
   welcome_socket = socket(PF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-  
+  winsock_set_nonblocking(welcome_socket);
+
   serverAddr.sin_family = AF_INET;
   serverAddr.sin_port = htons(4532);
   serverAddr.sin_addr.s_addr = inet_addr("127.0.0.1");
@@ -229,7 +230,7 @@ void hamlib_slice(){
     puts("Hamlib connected\n");
     incoming_ptr = 0;
     data_socket = e;
-    fcntl(data_socket, F_SETFL, fcntl(data_socket, F_GETFL) | O_NONBLOCK);
+    winsock_set_nonblocking(data_socket);
   }
   else { 
     len = recv(data_socket, buffer, sizeof(buffer), 0);

@@ -6,7 +6,12 @@
 #include <complex.h>
 #include <fftw3.h>
 #include <unistd.h>
+// Windows port sketch: linux/types.h is unused here (no __u8/__u16/
+// __u32/__u64/__le*/__be* anywhere in this file, confirmed via grep) --
+// same dead-include pattern found and guarded in sbitx_daemon.c.
+#ifndef _WIN32
 #include <linux/types.h>
+#endif
 #include <stdint.h>
 #include <pthread.h>
 #include <time.h>
@@ -15,11 +20,8 @@
 #include <stdint.h>
 #include <errno.h>
 #include <time.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <netinet/in.h>
 #include <ctype.h>
-#include <arpa/inet.h>
+#include "winsock_compat.h" // see its own top comment -- socket()/etc.
 #include "sdr.h"
 #include "sdr_ui.h"
 #include "sound.h"

@@ -7,7 +7,11 @@
 #include <math.h>
 #include <fftw3.h>
 #include <fcntl.h>
+// Windows port sketch: sys/mman.h (mmap/munmap) is unused here --
+// same dead-include pattern found and guarded in sbitx_daemon.c.
+#ifndef _WIN32
 #include <sys/mman.h>
+#endif
 #include <unistd.h>
 #include "sdr.h"
 #include "configure.h"

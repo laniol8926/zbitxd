@@ -60,6 +60,17 @@ have continuos waveform.
 
 */
 
+// Windows port sketch: sdr.h has no #include of its own at all (relies
+// entirely on whichever .c file includes it having already pulled in
+// stdint.h itself, for the int32_t below) -- happened to always work on
+// Linux since fftw3.h/complex.h transitively pull stdint.h in there, but
+// MinGW's own copies of those headers don't do the same, and queue.c
+// specifically never included it directly. Adding it here, at the
+// actual point of use, rather than patching every .c file that happens
+// to include sdr.h without it -- stdint.h has its own include guards, so
+// this is always safe/idempotent regardless of what a caller already did.
+#include <stdint.h>
+
 struct Queue
 {
   int id;

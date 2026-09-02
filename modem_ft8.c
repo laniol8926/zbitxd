@@ -5,7 +5,12 @@
 #include <math.h>
 #include <stdbool.h>
 #include <ctype.h>
+// Windows port sketch: arpa/inet.h (socket/inet_*/htons/sockaddr) is
+// unused here -- same dead-include pattern found and guarded in
+// sbitx_daemon.c.
+#ifndef _WIN32
 #include <arpa/inet.h>
+#endif
 #include <time.h>
 #include <math.h>
 #include <complex.h>

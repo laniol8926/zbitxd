@@ -3,7 +3,12 @@
 #include <time.h>
 #include <stdio.h>
 #include <stdint.h>
+// Windows port sketch: linux/types.h is unused here (no __u8/__u16/
+// __u32/__u64/__le*/__be* anywhere in this file, confirmed via grep) --
+// same dead-include pattern found and guarded in sbitx_daemon.c.
+#ifndef _WIN32
 #include <linux/types.h>
+#endif
 #include <complex.h>
 #include <fftw3.h>
 #include <unistd.h>

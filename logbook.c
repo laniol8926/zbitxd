@@ -7,7 +7,12 @@
 #include <complex.h>
 #include <fftw3.h>
 #include <unistd.h>
+// Windows port sketch: linux/types.h is unused here (no __u8/__u16/
+// __u32/__u64/__le*/__be* anywhere in this file, confirmed via grep) --
+// same dead-include pattern found and guarded in sbitx_daemon.c.
+#ifndef _WIN32
 #include <linux/types.h>
+#endif
 #include <stdint.h>
 #include <pthread.h>
 #include <time.h>
@@ -15,12 +20,8 @@
 #include <sys/types.h>
 #include <stdint.h>
 #include <errno.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <netinet/in.h>
 #include <ctype.h>
-#include <arpa/inet.h>
-#include <netdb.h>
+#include "winsock_compat.h" // see its own top comment -- socket()/etc.
 #include "sdr.h"
 #include "sdr_ui.h"
 #include "logbook.h"
@@ -423,7 +424,8 @@ static void udp_broadcast_qso_logged(const char *dx_call, const char *dx_grid,
 	uint64_t freq_hz, const char *mode, const char *rst_sent, const char *rst_recv,
 	const char *tx_power, const char *comments, struct tm *tmp,
 	const char *mycall, const char *my_grid_sent,
-	const char *exch_sent, const char *exch_recv){
+	const char *exch_sent, const char *exch_recv,
+	struct timespec *db_write_done_ts){
 
 	char host[64], port_s[8];
 	get_field_value("#udp_log_host", host);
@@ -440,6 +442,11 @@ static void udp_broadcast_qso_logged(const char *dx_call, const char *dx_grid,
 	if (getaddrinfo(host, port_s, &hints, &res) != 0)
 		return;
 
+	// `s < 0` for socket()'s own failure: see winsock_compat.h's own top
+	// comment -- correct for a 32-bit Windows build (confirmed via the
+	// bit representation, not assumed), not a generally-portable
+	// pattern (would need an explicit INVALID_SOCKET comparison for a
+	// 64-bit build).
 	int s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
 	if (s < 0){
 		freeaddrinfo(res);
@@ -487,7 +494,32 @@ static void udp_broadcast_qso_logged(const char *dx_call, const char *dx_grid,
 	udp_write_utf8(buf, &pos, exch_sent);
 	udp_write_utf8(buf, &pos, exch_recv);
 
-	sendto(s, buf, pos, 0, res->ai_addr, res->ai_addrlen);
+	// Real report, live (2026-09-01): "the send of the udp message to
+	// cqrlog is what appears to take a long time before cqrlog actually
+	// logs the QSO" -- this call previously had zero visibility, silent
+	// even on success, so there was no way to tell from the logs whether
+	// the delay was here (a stalled getaddrinfo()/sendto(), unlikely for
+	// a numeric IP but not ruled out without evidence) or downstream
+	// (cqrlog's own receive/UI-refresh timing). LOG_INFO here is cheap
+	// (once per logged QSO, not per-decode) and gives a real timestamp
+	// to correlate against when the entry actually appears in cqrlog.
+	// Real ask, live (2026-09-01): "what is the time from the sbitx.db
+	// logged qso and the udp request" -- measured directly rather than
+	// assumed. db_write_done_ts is captured in logbook_add() right after
+	// sqlite3_exec() returns; this is the elapsed time from there to
+	// right before this same sendto() call, in milliseconds.
+	// CLOCK_MONOTONIC (not wall-clock time()), since this is a pure
+	// elapsed-duration measurement, immune to any wall-clock adjustment.
+	struct timespec ts_now;
+	clock_gettime(CLOCK_MONOTONIC, &ts_now);
+	double elapsed_ms = (ts_now.tv_sec - db_write_done_ts->tv_sec) * 1000.0
+		+ (ts_now.tv_nsec - db_write_done_ts->tv_nsec) / 1e6;
+
+	int sent = sendto(s, buf, pos, 0, res->ai_addr, res->ai_addrlen);
+	if (sent < 0)
+		printf("udp_broadcast_qso_logged: sendto %s:%s failed: %s (%.2fms after db write)\n", host, port_s, strerror(errno), elapsed_ms);
+	else
+		printf("udp_broadcast_qso_logged: sent %d bytes to %s:%s for %s (%.2fms after db write)\n", sent, host, port_s, dx_call, elapsed_ms);
 	close(s);
 	freeaddrinfo(res);
 }
@@ -565,6 +597,10 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 		printf("logbook_add db: %d err=%s", res, err_msg);
 		if (err_msg) sqlite3_free(err_msg);
 	}
+	// Captured immediately after the sqlite3_exec() above returns -- see
+	// udp_broadcast_qso_logged()'s own comment on what this measures.
+	struct timespec db_write_done_ts;
+	clock_gettime(CLOCK_MONOTONIC, &db_write_done_ts);
 
 	// Live broadcast to a logger (cqrlog etc), after the real insert
 	// above -- best-effort, no-op if #udp_log_host isn't configured.
@@ -577,7 +613,7 @@ void logbook_add(char *contact_callsign, char *rst_sent, char *exchange_sent,
 	udp_broadcast_qso_logged(contact_callsign, exchange_recv,
 		(uint64_t)(atof(log_freq) * 1000.0 + 0.5), mode, rst_sent, rst_recv,
 		txpower, comments, tmp, mycallsign, mygrid,
-		exchange_sent, exchange_recv);
+		exchange_sent, exchange_recv, &db_write_done_ts);
 }
 
 // ADIF field headers, see note above -- must stay in the same order as

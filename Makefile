@@ -4,12 +4,31 @@ PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
 STATEDIR ?= /var/lib/$(OWNER)
 SHAREDIR ?= $(PREFIX)/share/$(OWNER)
-SOURCES = $(wildcard *.c)
+
+# SKETCH, unbuilt/untested (see sound_generic_win.c's own top comment) --
+# `make WINDOWS=1` (or `make WINDOWS=1 CC=i686-w64-mingw32-gcc LINK=...`
+# for a real cross-build) selects sound_generic_win.c (WinMM) instead of
+# sound_generic.c (ALSA), swaps -lasound/-lsystemd for -lwinmm, and drops
+# -DHAVE_SYSTEMD (see sbitx_daemon.c's own sd_notify()/sd_journal_*()
+# call sites -- 6 total, all startup/shutdown readiness+logging, not
+# used anywhere else -- these need '#ifdef HAVE_SYSTEMD' guards added
+# around themselves before this actually links; not done yet, this
+# Makefile change alone doesn't make sbitx_daemon.c build for Windows).
+ifdef WINDOWS
+SOUND_EXCLUDE = sound_generic.c
+AUDIO_LIBS = -lwinmm
+else
+SOUND_EXCLUDE = sound_generic_win.c
+AUDIO_LIBS = -lasound -lsystemd
+CFLAGS += -DHAVE_SYSTEMD
+endif
+
+SOURCES = $(filter-out $(SOUND_EXCLUDE),$(wildcard *.c))
 OBJECTS = $(SOURCES:.c=.o)
 FFTOBJ = ft8_lib/.build/fft/kiss_fft.o ft8_lib/.build/fft/kiss_fftr.o
 HEADERS = $(wildcard *.h)
-CFLAGS = -I.
-LIBS = -lasound -lm -lfftw3 -lfftw3f -pthread -lsqlite3 -lsystemd ft8_lib/libft8.a
+CFLAGS += -I.
+LIBS = $(AUDIO_LIBS) -lm -lfftw3 -lfftw3f -pthread -lsqlite3 ft8_lib/libft8.a
 ifdef SBITX_UNUSED
 ## remove and print unused code
 CFLAGS += -ffunction-sections -fdata-sections

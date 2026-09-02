@@ -1,18 +1,14 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <string.h>
-#include <arpa/inet.h>
 #include <stdlib.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <complex.h>
 #include <math.h>
-#include <fcntl.h>
-#include <complex.h>
 #include <fftw3.h>
+#include "winsock_compat.h" // see its own top comment -- socket()/etc.
 #include "sdr.h"
 #include "sdr_ui.h"
 
@@ -29,8 +25,12 @@ void remote_start() {
     struct sockaddr_storage serverStorage;
     socklen_t addr_size;
 
+    // See hamlib.c's own matching comment -- SOCK_NONBLOCK is a no-op
+    // on Windows (winsock_compat.h), winsock_set_nonblocking() is what
+    // actually applies it there.
     welcome_socket = socket(PF_INET, SOCK_STREAM | SOCK_NONBLOCK, 0);
-  
+    winsock_set_nonblocking(welcome_socket);
+
     serverAddr.sin_family = AF_INET;
     serverAddr.sin_port = htons(8081);
     serverAddr.sin_addr.s_addr = INADDR_ANY;
@@ -84,7 +84,7 @@ void remote_slice() {
         puts("Accepted telnet connection\n");
         incoming_ptr = 0;
         data_socket = e;
-        fcntl(data_socket, F_SETFL, fcntl(data_socket, F_GETFL) | O_NONBLOCK);
+        winsock_set_nonblocking(data_socket);
 
         // init the console
         remote_init();

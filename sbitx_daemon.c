@@ -7,33 +7,91 @@ The initial sync between the gui values, the core radio values, settings, et al 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
-#include <linux/types.h>
 #include <math.h>
 #include <fcntl.h>
 #include <complex.h>
 #include <fftw3.h>
-#include <linux/fb.h>
 #include <sys/types.h>
 #include <stdint.h>
 #include <ctype.h>
-#include <sys/mman.h>
 #include <sys/stat.h>
+#include <time.h>
+#include <errno.h>
+#include <signal.h>
+// Windows port sketch: bool/TRUE/FALSE all previously came in
+// incidentally through ncurses.h (which defines its own TRUE/FALSE, and
+// pulls in stdbool.h transitively on this system) -- this file never
+// actually used ncurses itself, so once ncurses.h is gone under _WIN32
+// (see the Linux-only include block below), bool/TRUE/FALSE need their
+// own real, direct source instead of an accidental one. stdbool.h is
+// C99, universally available including under MinGW, so this branch is
+// unconditional rather than another #ifndef _WIN32 case -- strictly more
+// correct on Linux too, not just a Windows workaround.
+#include <stdbool.h>
+#ifndef TRUE
+#define TRUE 1
+#endif
+#ifndef FALSE
+#define FALSE 0
+#endif
+// CLOCK_MONOTONIC_RAW (immune to NTP frequency slewing) isn't available
+// under MinGW -- its only use here (do_tuning()'s knob-acceleration
+// timer) measures millisecond-scale deltas between individual UI edit
+// events, where NTP's parts-per-million slewing is far below the noise
+// floor anyway, so falling back to plain CLOCK_MONOTONIC changes nothing
+// meaningful, not just papering over a missing symbol.
+#ifndef CLOCK_MONOTONIC_RAW
+#define CLOCK_MONOTONIC_RAW CLOCK_MONOTONIC
+#endif
+// POSIX mkdir() takes a permissions mode; Windows' mkdir() (io.h/
+// direct.h, via MinGW's unistd.h shim) takes only a path -- there's no
+// POSIX-style permission-bits concept for a Windows directory. One
+// small wrapper here instead of #ifdef'ing each of this file's two call
+// sites individually.
+static inline void zbitxd_mkdir(const char *path){
+#ifdef _WIN32
+	mkdir(path);
+#else
+	mkdir(path, 0755);
+#endif
+}
+// Windows port sketch: these nine were all Linux-only and, checked
+// directly (grep for mmap/ioctl/socket/bind/sockaddr_in/htons/inet_/
+// flock/opendir -- zero hits, every one), genuinely unused in this
+// file -- leftover from an earlier hardware-framebuffer-UI/terminal era
+// (ncurses.h/linux/fb.h) or just never-cleaned-up scaffolding
+// (linux/types.h, dirent.h, sys/mman.h, sys/ioctl.h, sys/socket.h,
+// netinet/in.h, arpa/inet.h, sys/file.h). The real networking (the web
+// server) goes through mongoose.c, which already has its own
+// cross-platform socket layer -- this file never touches a raw socket
+// directly. Guarded rather than deleted outright, so Linux behavior
+// stays byte-for-byte unchanged; worth actually deleting once this port
+// is far enough along to be sure nothing here was quietly relied upon.
+#ifndef _WIN32
+#include <dirent.h>
+#include <linux/types.h>
+#include <linux/fb.h>
+#include <sys/mman.h>
 #include <sys/ioctl.h>
 #include <ncurses.h>
-#include <time.h>
-#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <errno.h>
 #include <sys/file.h>
-#include <errno.h>
-#include <sys/file.h>
-#include <errno.h>
-#include <signal.h>
+#endif
+// Windows port sketch: systemd is Linux-only -- see sd_notify()/
+// sd_journal_*() call sites further down (stop(), main()) for the
+// portable fallback. HAVE_SYSTEMD is set by the Makefile's own
+// non-WINDOWS branch; the Windows branch leaves it undefined. SD_NOTICE
+// (a journal-priority string prefix, sd-daemon.h) is used directly in a
+// couple of plain fprintf() calls below regardless of HAVE_SYSTEMD, so
+// it needs its own portable fallback too, not just the function calls.
+#ifdef HAVE_SYSTEMD
 #include <systemd/sd-daemon.h>
 #include <systemd/sd-journal.h>
+#else
+#define SD_NOTICE ""
+#endif
 #include "sdr.h"
 #include "sound.h"
 #include "sdr_ui.h"
@@ -2024,16 +2082,34 @@ int do_status(struct field *f, int event, int a, int b, int c){
 	return 0;
 }
 
+// Windows port sketch: fork() has no equivalent at all on Windows (an
+// entirely different process model -- CreateProcess()/_spawn*(), not
+// fork+exec). The Linux side's fork()+system()+exit() is "run this
+// shell command, don't block the caller waiting for it" -- _spawnlp()
+// with _P_NOWAIT (process.h) gives the same non-blocking semantics
+// directly, no fork-equivalent needed, routed through cmd.exe /C the
+// same way system() itself is documented to route through /bin/sh.
+// Only actual caller is open_url() below, which -- on Windows -- uses
+// the much more direct ShellExecute() instead of this at all (see its
+// own comment), so this Windows branch exists for symmetry/future
+// callers rather than because anything currently exercises it.
+#ifdef _WIN32
+#include <process.h>
+void execute_app(char *app){
+	_spawnlp(_P_NOWAIT, "cmd.exe", "cmd.exe", "/C", app, NULL);
+}
+#else
 void execute_app(char *app){
 	char buff[1000];
 
-	sprintf(buff, "%s 0> /dev/null", app); 
+	sprintf(buff, "%s 0> /dev/null", app);
 	int pid = fork();
 	if (!pid){
 		system(buff);
-		exit(0);	
+		exit(0);
 	}
 }
+#endif
 
 int do_text(struct field *f, int event, int a, int b, int c){
 	int width, offset, text_length, line_start, y;	
@@ -2300,6 +2376,21 @@ int do_toggle_kbd(struct field *f, int event, int a, int b, int c){
 	return 0;
 }
 
+// Windows port sketch: xdg-open is the Linux desktop-portal convention
+// for "open this with whatever the user's default handler is" -- has no
+// existence on Windows at all, but Windows has its own, more direct
+// native equivalent for exactly this (shellapi.h, linked via -lshell32):
+// ShellExecute() opens a URL/file with the registered default handler
+// directly, no shelling out to an external launcher program needed at
+// all, so this bypasses execute_app() entirely on this path rather than
+// trying to make xdg-open's own invocation portable.
+#ifdef _WIN32
+#include <windows.h>
+#include <shellapi.h>
+void open_url(char *url){
+	ShellExecuteA(NULL, "open", url, NULL, NULL, SW_SHOWNORMAL);
+}
+#else
 void open_url(char *url){
 	char temp_line[200];
 
@@ -2307,6 +2398,7 @@ void open_url(char *url){
 	"  >/dev/null 2> /dev/null &", url);
 	execute_app(temp_line);
 }
+#endif
 
 void qrz(const char *callsign){
 	char 	url[1000];
@@ -3281,9 +3373,9 @@ void do_control_action(char *cmd){
 		// after the first recording ever made) is expected, not an
 		// error -- nothing here needs to check its return value.
 		sprintf(dirpath, "%s/sbitx", path);
-		mkdir(dirpath, 0755);
+		zbitxd_mkdir(dirpath);
 		sprintf(dirpath, "%s/sbitx/audio", path);
-		mkdir(dirpath, 0755);
+		zbitxd_mkdir(dirpath);
 		sprintf(fullpath, "%s/sbitx/audio/%04d%02d%02d-%02d%02d-%02d.wav", path,
 			tmp->tm_year + 1900, tmp->tm_mon + 1, tmp->tm_mday, tmp->tm_hour, tmp->tm_min, tmp->tm_sec);
 
@@ -3853,7 +3945,9 @@ void cmd_exec(char *cmd){
 }
 
 // a global variable for our journal
+#ifdef HAVE_SYSTEMD
 sd_journal *journal;
+#endif
 
 // A signal handler for stopping
 static void
@@ -3861,8 +3955,10 @@ stop(int sig)
 {
   save_user_settings(1);
   fprintf(stderr, SD_NOTICE "zbitx service is stopping\n");
+#ifdef HAVE_SYSTEMD
   sd_notify(0, "STOPPING=1");
   sd_journal_close(journal);
+#endif
   exit(0);
 }
 
@@ -3873,17 +3969,26 @@ int main( int argc, char* argv[] ) {
 	// Install our signal handlers
 	if(signal(SIGTERM, stop) == SIG_ERR)
 	{
+#ifdef HAVE_SYSTEMD
 		sd_notifyf(0, "STATUS=Failed to install signal handler for stopping service %s\n"
 			"ERRNO=%i",
 			strerror(errno),
 			errno);
+#else
+		fprintf(stderr, "Failed to install signal handler for stopping service %s (errno %i)\n",
+			strerror(errno), errno);
+#endif
 	}
 
+#ifdef HAVE_SYSTEMD
 	// open the journal
 	sd_journal_open(&journal, 0);
+#endif
 
 	fprintf(stderr, SD_NOTICE "zBitx service started\n");
+#ifdef HAVE_SYSTEMD
 	sd_journal_print(LOG_NOTICE, "zBitx service started\n");
+#endif
 
 	puts(VER_STR);
 	active_layout = main_controls;
@@ -4060,8 +4165,10 @@ int main( int argc, char* argv[] ) {
 //	sch.sched_priority = sched_get_priority_max(SCHED_FIFO);
 //	pthread_setschedparam(pthread_self(), SCHED_FIFO, &sch);
 
+#ifdef HAVE_SYSTEMD
 	// tell the service manager we're in the ready state
 	sd_notify(0, "READY=1");
+#endif
 
 	struct timespec loopms = {0 /*secs*/, 1000000 /*nanosecs*/};
 	while(1) {

@@ -10,21 +10,40 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <dirent.h>
-#include <sys/socket.h>
-#include <sys/wait.h>
-#include <netinet/tcp.h>
-#include <netdb.h>
 #include <signal.h>
 #include <errno.h>
 #include <complex.h>
 #include <math.h>
 #include <fftw3.h>
+#include "winsock_compat.h" // see its own top comment -- socket()/etc.
 #include "sdr.h"
 #include "rig_generic.h"
+// Windows port sketch: dirent.h (opendir/readdir, used by
+// rig_generic_list_serial_ports() below) and sys/wait.h (waitpid(),
+// used by rigctld_stop() below) are both genuinely used on Linux, but
+// neither applies on Windows at all -- COM ports aren't filesystem
+// entries (no opendir() to walk), and rigctld's own process lifecycle
+// is managed through CreateProcess()/TerminateProcess()/
+// WaitForSingleObject() there instead of fork()/waitpid(). Guarded
+// (not just silently dropped) so it's clear this isn't a dead-include
+// case like the others found tonight -- see both functions' own
+// Windows branches for the real replacements.
+#ifndef _WIN32
+#include <dirent.h>
+#include <sys/wait.h>
+#else
+#include <windows.h>
+#include <mmsystem.h> // WAVEINCAPS/WAVEOUTCAPS/waveIn|OutGetDevCaps() -- rig_generic_list_audio_devices() below
+#endif
 
 static int rig_sock = -1;
 static pid_t rigctld_pid = -1;
+#ifdef _WIN32
+// Windows needs the actual process HANDLE for TerminateProcess()/
+// WaitForSingleObject() -- rigctld_pid (the PID alone) isn't enough to
+// act on the process the way a POSIX pid_t is, only to log/identify it.
+static HANDLE rigctld_process_handle = NULL;
+#endif
 
 // hamlib model id of whichever rig is currently connected (set in
 // rig_generic_connect()) -- rig_generic_set_mode() needs this to know
@@ -84,7 +103,9 @@ static int rig_connect(void)
 	}
 	freeaddrinfo(res);
 
-	setsockopt(s, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+	// Windows' setsockopt() wants optval as const char*, not POSIX's
+	// const void* -- the cast is a no-op on Linux, required on Windows.
+	setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
 	return s;
 }
 
@@ -303,6 +324,28 @@ void rig_generic_list(char *out, size_t out_size)
 	pclose(pf);
 }
 
+#ifdef _WIN32
+static void rigctld_stop(void)
+{
+	if (rigctld_process_handle) {
+		// Real behavioral gap, not just a rename: TerminateProcess() is
+		// a hard kill -- rigctld gets no opportunity to close its
+		// listening socket/clean up the way SIGTERM's graceful-shutdown
+		// signal gives it on Linux. No equivalent of POSIX's "ask
+		// nicely first" exists for an arbitrary external process on
+		// Windows without cooperation from that process itself (e.g. a
+		// console-control-event handler rigctld would have to
+		// implement on its own end) -- worth knowing if rigctld ever
+		// turns out to need a clean-shutdown path on Windows, not
+		// something this side can provide alone.
+		TerminateProcess(rigctld_process_handle, 0);
+		WaitForSingleObject(rigctld_process_handle, INFINITE);
+		CloseHandle(rigctld_process_handle);
+		rigctld_process_handle = NULL;
+		rigctld_pid = -1;
+	}
+}
+#else
 static void rigctld_stop(void)
 {
 	if (rigctld_pid > 0) {
@@ -311,6 +354,7 @@ static void rigctld_stop(void)
 		rigctld_pid = -1;
 	}
 }
+#endif
 
 // /dev/serial/by-id/* gives stable, device-identity-based names (survive
 // reboots/replugging in a different order); /dev/ttyACM0-style names are
@@ -322,6 +366,52 @@ static void rigctld_stop(void)
 // completely invisible here the moment ANY other attached device does
 // get one, since the old code treated "by-id has ANY entries" as "by-id
 // covers everything").
+#ifdef _WIN32
+// Windows port sketch: COM ports aren't filesystem entries at all --
+// nothing to opendir()/readdir() the way /dev's device nodes work.
+// HKLM\HARDWARE\DEVICEMAP\SERIALCOMM is the standard place every COM
+// port currently present on the system is registered, one REG_SZ value
+// per port (the value's NAME is the underlying device's own driver
+// path, e.g. "\Device\VCP0" -- not meaningful here; the value's DATA is
+// the actual "COMn" name that matters). No by-id/raw distinction needed
+// the way /dev/serial/by-id vs /dev/ttyACM* has on Linux -- Windows'
+// own driver stack already keeps the same COM number assigned to the
+// same physical device across replugs/reboots for the overwhelming
+// majority of USB-serial hardware, the same real-world property
+// /dev/serial/by-id exists to provide on Linux.
+void rig_generic_list_serial_devices(char *out, size_t out_size)
+{
+	size_t used = 0;
+	out[0] = 0;
+
+	HKEY key;
+	if (RegOpenKeyExA(HKEY_LOCAL_MACHINE, "HARDWARE\\DEVICEMAP\\SERIALCOMM",
+			0, KEY_READ, &key) != ERROR_SUCCESS)
+		return;
+
+	char value_name[256], value_data[256];
+	for (DWORD i = 0; ; i++) {
+		DWORD name_len = sizeof(value_name);
+		DWORD data_len = sizeof(value_data);
+		DWORD type;
+		LONG res = RegEnumValueA(key, i, value_name, &name_len, NULL,
+			&type, (LPBYTE)value_data, &data_len);
+		if (res == ERROR_NO_MORE_ITEMS)
+			break;
+		if (res != ERROR_SUCCESS || type != REG_SZ)
+			continue;
+
+		char entry[280];
+		int n = snprintf(entry, sizeof(entry), "%s\n", value_data);
+		if (n <= 0 || used + (size_t)n >= out_size)
+			continue;
+		memcpy(out + used, entry, (size_t)n);
+		used += (size_t)n;
+	}
+	out[used] = 0;
+	RegCloseKey(key);
+}
+#else
 void rig_generic_list_serial_devices(char *out, size_t out_size)
 {
 	DIR *d;
@@ -391,7 +481,58 @@ void rig_generic_list_serial_devices(char *out, size_t out_size)
 	}
 	out[used] = 0;
 }
+#endif
 
+#ifdef _WIN32
+// Windows port sketch: `aplay -l` is pure ALSA, meaningless on Windows
+// (and would just silently return nothing there -- popen()/pclose()
+// themselves exist under MinGW, so this would still *compile*
+// unmodified, but never actually list anything real). sound_generic_win.c
+// already enumerates capture/playback devices via waveInGetDevCaps()/
+// waveOutGetDevCaps() for its own device-selection-by-name matching
+// (find_input_device()/find_output_device() there) -- same enumeration
+// here, listing each device's plain name (szPname) with no added prefix
+// or decoration, so a name copied straight from this list into the
+// Capture/Playback Device field substring-matches cleanly against what
+// those functions look for. Capture and playback are genuinely separate
+// device namespaces on Windows (unlike an ALSA card, which is usually
+// both at once) -- listed one after another rather than merged/paired,
+// same shared AUDIOLIST feeding both the Capture and Playback Device
+// pickers in the web UI (webserver.c's get_audiolist()) either way.
+void rig_generic_list_audio_devices(char *out, size_t out_size)
+{
+	size_t used = 0;
+	out[0] = 0;
+
+	UINT n_in = waveInGetNumDevs();
+	for (UINT i = 0; i < n_in; i++) {
+		WAVEINCAPS caps;
+		if (waveInGetDevCaps(i, &caps, sizeof(caps)) != MMSYSERR_NOERROR)
+			continue;
+		char entry[64];
+		int n = snprintf(entry, sizeof(entry), "%s\n", caps.szPname);
+		if (n <= 0 || used + (size_t)n >= out_size)
+			continue;
+		memcpy(out + used, entry, (size_t)n);
+		used += (size_t)n;
+	}
+
+	UINT n_out = waveOutGetNumDevs();
+	for (UINT i = 0; i < n_out; i++) {
+		WAVEOUTCAPS caps;
+		if (waveOutGetDevCaps(i, &caps, sizeof(caps)) != MMSYSERR_NOERROR)
+			continue;
+		char entry[64];
+		int n = snprintf(entry, sizeof(entry), "%s\n", caps.szPname);
+		if (n <= 0 || used + (size_t)n >= out_size)
+			continue;
+		memcpy(out + used, entry, (size_t)n);
+		used += (size_t)n;
+	}
+
+	out[used] = 0;
+}
+#else
 // `aplay -l`'s simple "card N: NAME [...]" listing turned into ready-to-use
 // plughw:NAME,0 device strings for the Capture/Playback Device fields.
 void rig_generic_list_audio_devices(char *out, size_t out_size)
@@ -457,6 +598,7 @@ void rig_generic_list_audio_devices(char *out, size_t out_size)
 
 	pclose(pf);
 }
+#endif
 
 void rig_generic_connect(const char *model, const char *device, const char *baud)
 {
@@ -499,6 +641,43 @@ void rig_generic_connect(const char *model, const char *device, const char *baud
 	argv[i++] = "write_delay=0,post_write_delay=0";
 	argv[i] = NULL;
 
+#ifdef _WIN32
+	// fork()+execv()/execvp() has no Windows equivalent at all (an
+	// entirely different process model) -- CreateProcess() takes one
+	// command-line STRING, not an argv array, so build one here
+	// (quoting every token -- device/model could plausibly contain a
+	// space) instead of trying to fake fork+exec. No equivalent of the
+	// RIGCTLD_PREFERRED_PATH special-case below either: that hardcoded
+	// path is specific to this project's own Linux dev/deploy
+	// convention (see its own comment), with no known-real Windows
+	// install-location equivalent to substitute -- always PATH-searches
+	// for rigctld.exe here instead (CreateProcess does that itself when
+	// lpApplicationName is NULL), same as the plain execvp() fallback
+	// already did on Linux for exactly this "no special build found"
+	// case.
+	char cmdline[1024];
+	int pos = snprintf(cmdline, sizeof(cmdline), "\"rigctld.exe\"");
+	for (int k = 1; k < i; k++)
+		pos += snprintf(cmdline + pos, sizeof(cmdline) - pos, " \"%s\"", argv[k]);
+
+	STARTUPINFOA si;
+	PROCESS_INFORMATION pi;
+	memset(&si, 0, sizeof(si));
+	si.cb = sizeof(si);
+	// CREATE_NO_WINDOW: rigctld is a console app; this backend launches
+	// it silently in the background, same intent as the Linux side's
+	// own "0> /dev/null"-style silent execution elsewhere in this
+	// project, not a visible console window popping up.
+	if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, CREATE_NO_WINDOW,
+			NULL, NULL, &si, &pi)) {
+		fprintf(stderr, "rig_generic: failed to start rigctld.exe (error %lu)\n", GetLastError());
+		rigctld_pid = -1;
+		return;
+	}
+	rigctld_process_handle = pi.hProcess;
+	rigctld_pid = (int)pi.dwProcessId;
+	CloseHandle(pi.hThread); // never needed again, only hProcess is
+#else
 	rigctld_pid = fork();
 	if (rigctld_pid == 0) {
 		if (access(RIGCTLD_PREFERRED_PATH, X_OK) == 0) {
@@ -515,6 +694,7 @@ void rig_generic_connect(const char *model, const char *device, const char *baud
 		rigctld_pid = -1;
 		return;
 	}
+#endif
 
 	// give rigctld a moment to open its listening socket rather than
 	// assuming a fixed delay is long enough
