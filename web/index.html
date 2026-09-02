@@ -3486,7 +3486,16 @@ function ft8_cq_message_callsign(text){
 // the hide-vs-show decision so FT8_stylize_message_item() can use it to
 // flag the row visually regardless of whether Hide B4 is on.
 function FT8_is_worked(text){
-    var call = ft8_cq_message_callsign(text);
+    // ft8_message_sender() (below FT8_stylize_message_item() -- JS
+    // hoisting means order doesn't matter), not ft8_cq_message_callsign()
+    // -- user's own ask (2026-09-01): flag worked-before stations in
+    // Band Activity too, not just CQ Panel. Band Activity shows every
+    // message shape (CQs, directed reports, RR73/73, not just CQs), and
+    // ft8_cq_message_callsign() only ever recognizes the CQ shape --
+    // ft8_message_sender() covers both (CQing station for a CQ, m2 for
+    // a directed message), with identical results for the CQ case CQ
+    // Panel already relied on.
+    var call = ft8_message_sender(text);
     var band = el("BAND") ? el("BAND").value : null;
     var mode = el("MODE") ? el("MODE").value : null;
     if (!call || !band || !mode)
@@ -3613,12 +3622,17 @@ function FT8_stylize_message_item(item, text, style, list_id, source) {
     // User's own ask (2026-08-28): with "Hide B4" off (worked stations
     // shown, not hidden), there was no visual way to tell one had
     // already been worked on this band/mode short of clicking it --
-    // see FT8_is_worked()'s own comment. CQ Panel only (list_id check)
-    // -- Band Activity/RX Frequency show every station regardless of
-    // worked status, this flag is specifically about which CQ to pick.
+    // see FT8_is_worked()'s own comment. CQ Panel/Band Activity only --
+    // RX Frequency is a live single-exchange view (you already know
+    // who you're talking to there), this flag is about spotting a
+    // worked-before station in a list of many.
+    // Real ask, live (2026-09-01): extended to Band Activity too --
+    // originally CQ Panel only, back when FT8_is_worked() could only
+    // recognize the CQ message shape at all (see its own comment on
+    // switching to ft8_message_sender()).
     // classList.add(), not part of the className= assignments above, so
     // it layers on top of whichever base class this item already got.
-    if (list_id === "wsjtx-cq" && FT8_is_worked(text))
+    if ((list_id === "wsjtx-cq" || list_id === "wsjtx-activity") && FT8_is_worked(text))
 	item.classList.add("wsjtx-worked-b4");
     // explicit single space -- .ft8-label no longer pads out to a
     // fixed column width (see its own CSS comment), so without this
@@ -6531,10 +6545,18 @@ set_band_activity_hidden(band_activity_manual_pref);
 // Waterfall visibility toggle -- same pattern as Band Activity above,
 // persisted the same way. Default visible (unset localStorage key ->
 // getItem returns null -> not hidden).
+//
+// User's own ask (2026-09-01): hiding the waterfall should hide the
+// spectrum too -- previously this only ever touched waterfall_wrap/
+// waterfall_scale, leaving the spectrum canvas sitting alone in
+// #pan_adapter. sync_pan_row_height()'s own MIN_PAN_ROW_HEIGHT floor
+// (see its own comment) already protects #pan_adapter/#ft8_list_column
+// from collapsing to near-zero now that both can be hidden at once.
 function set_waterfall_hidden(hide){
 	localStorage.setItem("hide_waterfall", hide ? "1" : "0");
 	el("waterfall_scale").style.display = hide ? "none" : "";
 	el("waterfall_wrap").style.display = hide ? "none" : "";
+	el("spectrum").style.display = hide ? "none" : "";
 	el("HIDE_WATERFALL_CHECK").checked = hide;
 }
 $("#HIDE_WATERFALL_CHECK").on("change", function(){
