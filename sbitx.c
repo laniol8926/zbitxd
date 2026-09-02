@@ -726,12 +726,33 @@ static int hw_settings_handler(void* user, const char* section,
 	char cmd[1000];
 	char new_value[200];
 
-	if (!strcmp(name, "f_start"))
-		band_power[hw_init_index].f_start = atoi(value);
-	if (!strcmp(name, "f_stop"))
-		band_power[hw_init_index].f_stop = atoi(value);
-	if (!strcmp(name, "scale"))
-		band_power[hw_init_index++].scale = atof(value);
+	// Real bug, found live (2026-09-02) porting to Windows: this is the
+	// first time default_hw_settings.ini's own fallback path (not just
+	// a real hw_settings.ini already sitting in STATEDIR, which is what
+	// every existing Pi install actually has) got genuinely exercised.
+	// default_hw_settings.ini has 10 [tx_band] sections; band_power[]
+	// (its own compile-time initializer list, above) only has 9 --
+	// hw_init_index reached 9 on the 10th section's "scale" key,
+	// writing one struct past the end of the array. Undefined behavior
+	// from there is exactly as unpredictable as it sounds: silently
+	// corrupted whatever static/global data happened to sit right after
+	// band_power[] in memory on this specific build/platform, with no
+	// crash Windows would even log -- the process just stopped. Same
+	// class of bug regardless of platform; simply never triggered
+	// before because every real Pi install already has its own
+	// hw_settings.ini and never falls back to this file at all.
+	// Bounds-checked here rather than just fixing the current 10-vs-9
+	// mismatch, so a future edit to either side of this pairing can't
+	// silently reintroduce the exact same corruption.
+	const int band_power_max = sizeof(band_power) / sizeof(band_power[0]);
+	if (hw_init_index < band_power_max) {
+		if (!strcmp(name, "f_start"))
+			band_power[hw_init_index].f_start = atoi(value);
+		if (!strcmp(name, "f_stop"))
+			band_power[hw_init_index].f_stop = atoi(value);
+		if (!strcmp(name, "scale"))
+			band_power[hw_init_index++].scale = atof(value);
+	}
 
 	if (!strcmp(name, "bfo_freq"))
 		bfo_freq = atoi(value);
