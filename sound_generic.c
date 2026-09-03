@@ -368,11 +368,39 @@ static snd_pcm_t *open_pcm(const char *device, snd_pcm_stream_t stream, unsigned
 	// after a restart, then succeeding on a bare retry a few seconds
 	// later. A few short retries absorbs that race without making a
 	// genuinely wrong/missing device silently hang.
-	for (int attempt = 0; attempt < 10; attempt++) {
+	// Real gap, found live (2026-09-02/03): this retry loop never
+	// checked `running` between attempts. If sound_generic_stop() sets
+	// running=0 while a thread is mid-retry here (e.g. right after
+	// snd_pcm_close() on the *previous* handle, the exact race this
+	// loop exists to absorb), it used to keep retrying uselessly for
+	// up to the full 10*200ms=2s before ever returning -- and since
+	// this call happens inside the very thread pthread_join() in
+	// sound_generic_stop() is waiting on, that blocked the *entire*
+	// main command-processing thread for up to 2 extra seconds on
+	// every single AUDIO_CONNECT-triggered restart. Confirmed live:
+	// caught a playback thread genuinely spinning near 90% CPU in this
+	// state (`ps -T`, wchan=0 -- not blocked in the kernel, just
+	// looping), correlating with the browser's websocket connection
+	// dropping ("Operator's connection closed/errored") within
+	// seconds of nearly every Connect Audio click. Bailing out the
+	// instant `running` goes false -- same signal every other loop in
+	// this file already checks -- costs nothing in the normal case and
+	// removes this as blocking time entirely in the stop case.
+	for (int attempt = 0; attempt < 10 && running; attempt++) {
 		err = snd_pcm_open(&handle, device, stream, 0);
 		if (err != -EBUSY)
 			break;
 		usleep(200000);
+	}
+	if (!running) {
+		// Stopping -- if the loop above happened to land a valid
+		// handle in the same instant `running` went false, close it
+		// rather than leaking it; either way there's no point
+		// continuing hw_params negotiation for a stream about to be
+		// torn down.
+		if (err >= 0)
+			snd_pcm_close(handle);
+		return NULL;
 	}
 	if (err < 0) {
 		fprintf(stderr, "sound_generic: cannot open %s (%s): %s\n",
@@ -429,7 +457,14 @@ static void *capture_thread_fn(void *arg)
 		snd_pcm_t *pcm = open_pcm(generic_capture_device, SND_PCM_STREAM_CAPTURE, GENERIC_SAMPLE_RATE);
 		if (!pcm) {
 			capture_open = 0;
-			sleep(2);
+			// Same class of bug as open_pcm()'s own retry loop (see
+			// its comment) -- a bare sleep(2) here doesn't notice
+			// running going false mid-sleep, adding up to 2 more
+			// seconds of pthread_join() blocking time in
+			// sound_generic_stop() on top of whatever open_pcm()
+			// itself already cost. Short polling interval instead.
+			for (int waited = 0; waited < 2000 && running; waited += 100)
+				usleep(100000);
 			continue;
 		}
 		capture_open = 1;
@@ -502,7 +537,9 @@ static void *playback_thread_fn(void *arg)
 		snd_pcm_t *pcm = open_pcm(generic_playback_device, SND_PCM_STREAM_PLAYBACK, GENERIC_PLAYBACK_RATE);
 		if (!pcm) {
 			playback_open = 0;
-			sleep(2);
+			// See capture_thread_fn()'s matching comment/fix.
+			for (int waited = 0; waited < 2000 && running; waited += 100)
+				usleep(100000);
 			continue;
 		}
 		playback_open = 1;
@@ -571,8 +608,21 @@ void sound_generic_start(void)
 {
 	gen_spectrum_init();
 	running = 1;
-	pthread_create(&capture_thread, NULL, capture_thread_fn, NULL);
-	pthread_create(&playback_thread, NULL, playback_thread_fn, NULL);
+	// Real gap, found live (2026-09-02/03): pthread_create()'s return
+	// value was never checked here at all -- a failure (e.g. after many
+	// repeated AUDIO_CONNECT restart cycles in one long session, if
+	// something's leaking thread-adjacent resources) left that thread's
+	// handle undefined and the thread simply never running, with zero
+	// log output either way (no open attempt was ever made to succeed
+	// or fail) -- exactly the "Capture only, no error" symptom seen
+	// live. Logging the failure at least surfaces it instead of silent
+	// nothing; still leaves capture_open/playback_open correctly 0 for
+	// that side.
+	int err;
+	if ((err = pthread_create(&capture_thread, NULL, capture_thread_fn, NULL)) != 0)
+		fprintf(stderr, "sound_generic: pthread_create(capture) failed: %s\n", strerror(err));
+	if ((err = pthread_create(&playback_thread, NULL, playback_thread_fn, NULL)) != 0)
+		fprintf(stderr, "sound_generic: pthread_create(playback) failed: %s\n", strerror(err));
 }
 
 void sound_generic_stop(void)

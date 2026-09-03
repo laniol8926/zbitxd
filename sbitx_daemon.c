@@ -28,6 +28,7 @@ The initial sync between the gui values, the core radio values, settings, et al 
 // unconditional rather than another #ifndef _WIN32 case -- strictly more
 // correct on Linux too, not just a Windows workaround.
 #include <stdbool.h>
+#include <pthread.h>
 #ifndef TRUE
 #define TRUE 1
 #endif
@@ -111,6 +112,45 @@ void change_band(char *request);
 /* command  buffer for commands received from the remote */
 struct Queue q_remote_commands;
 struct Queue q_zbitx_console;
+
+// q_remote_commands is a genuine cross-thread structure, not just a
+// same-thread convenience buffer: webserver_thread_function() (its own
+// pthread, webserver.c) writes into it byte-by-byte via
+// remote_execute() every time a websocket message arrives, while
+// ui_tick() (main thread) drains it byte-by-byte in its own loop below
+// -- and queue.c's q_write()/q_read()/q_length() have zero
+// synchronization of their own (no mutex, no atomics). remote.c's own
+// telnet-port path also calls remote_execute(), but that one runs on
+// the main thread itself (called from ui_tick()-adjacent code), so it
+// was never actually racing the reader -- only the websocket path,
+// i.e. every command the real web UI sends, was exposed.
+//
+// Real, live-confirmed symptom (2026-09-02/03, generic-rig backend on
+// the Quadra): the web UI's "Connect Audio" button (connect_audio(),
+// web/index.html) sends 4 separate commands in one call
+// (CAPTUREDEV/PLAYBACKDEV/SETTINGS_SAVE/AUDIO_CONNECT) -- each one
+// written character-by-character by the websocket thread while the
+// main thread could simultaneously be mid-read on the very same
+// queue. Under real system load (confirmed live: zbitxd's main thread
+// sustained 25-55% CPU from FT8/spectrum work), a q_read() on the main
+// thread could interleave with an in-progress q_write() from the
+// websocket thread, hit q_read()'s underflow path (returns 0, which
+// the reader's own "c >= ' '" loop treats as end-of-command) before
+// the writer had finished, and silently truncate or corrupt whatever
+// command was mid-flight -- consistent with the intermittent,
+// load-correlated pattern actually observed (AUDIO_CONNECT sometimes
+// worked cleanly, sometimes silently vanished before ever reaching
+// cmd_exec()/do_control_action(), no error either way since a torn
+// read isn't a detectable error condition to either side).
+//
+// Fix: one mutex, held by remote_execute() for the whole time it's
+// writing one command, and by the drain loop below for the whole time
+// it's checking for and reading one complete command -- makes each
+// command atomic from the other thread's point of view, matching this
+// project's own established pattern for a prior real cross-thread bug
+// (ft8_process_mutex, modem_ft8.c, task #25/e121819 -- see project
+// memory) rather than inventing a new synchronization style.
+pthread_mutex_t q_remote_commands_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 /* Front Panel controls */
 char pins[15] = {0, 2, 3, 6, 7, 
@@ -1962,11 +2002,16 @@ int do_waterfall(struct field *f, int event, int a, int b, int c){
 }
 
 void remote_execute(const char *cmd){
+	// See q_remote_commands_mutex's own comment (this file, near
+	// q_remote_commands' declaration) -- held for this whole command,
+	// not per-byte, so the reader never observes a partial write.
+	pthread_mutex_lock(&q_remote_commands_mutex);
 	if (q_remote_commands.overflow)
 		q_empty(&q_remote_commands);
 	while (*cmd)
 		q_write(&q_remote_commands, *cmd++);
 	q_write(&q_remote_commands, 0);
+	pthread_mutex_unlock(&q_remote_commands_mutex);
 }
 
 
@@ -2851,19 +2896,32 @@ bool ui_tick(){
 		do_control_action("TUNE OFF");
 	}
 
-	while (q_length(&q_remote_commands) > 0){
-		//read each command until the 
+	for (;;){
+		// Lock covers only the queue read itself (checking q_length()
+		// and pulling out one complete command), not cmd_exec() below
+		// -- see q_remote_commands_mutex's own comment. Keeping
+		// cmd_exec() (which can genuinely block for a while, e.g.
+		// sound_generic_restart()'s pthread_join()s) outside the lock
+		// means a slow command doesn't also stall the websocket
+		// thread from enqueueing new ones in the meantime.
+		pthread_mutex_lock(&q_remote_commands_mutex);
+		if (q_length(&q_remote_commands) <= 0){
+			pthread_mutex_unlock(&q_remote_commands_mutex);
+			break;
+		}
+		//read each command until the
 		char remote_cmd[1000];
 		int c, i;
 		for (i = 0; i < sizeof(remote_cmd)-2 &&  (c = q_read(&q_remote_commands)) >= ' '; i++){
 			remote_cmd[i] = c;
 		}
 		remote_cmd[i] = 0;
+		pthread_mutex_unlock(&q_remote_commands_mutex);
 
 		//echo the keystrokes for chatty modes like cw/rtty/psk31/etc
 		if (!strncmp(remote_cmd, "key ", 4))
 			for (int i = 4; remote_cmd[i] > 0; i++)
-				edit_field(get_field("#text_in"), remote_cmd[i]);	
+				edit_field(get_field("#text_in"), remote_cmd[i]);
 		else if (strlen(remote_cmd)){
 			cmd_exec(remote_cmd);
 			settings_updated = 1; //save the settings

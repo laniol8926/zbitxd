@@ -76,6 +76,16 @@ static int rig_generic_model_id = 0;
 // box that only has the system package.
 #define RIGCTLD_PREFERRED_PATH "/usr/local/bin/rigctld"
 #define RIGCTLD_PREFERRED_LIBDIR "/usr/local/lib"
+// Same SONAME-collision problem as RIGCTLD_PREFERRED_PATH above, but for
+// `rigctl --list` (rig_generic_list() below) -- that call was still doing
+// a bare popen("rigctl --list", ...), so it kept resolving to whatever
+// `rigctl` happened to be first on PATH and silently falling back to an
+// old/incomplete rig catalog (e.g. no QMX at all) even on a box where the
+// rigctld spawn path above was already correctly forced to the newer
+// from-source build. Confirmed live: the QMX (model 2057) was missing
+// from the web UI's rig picker on a box where rigctld itself connected
+// to the QMX fine, because only rigctld's own spawn had this fix.
+#define RIGCTL_PREFERRED_PATH "/usr/local/bin/rigctl"
 
 static int rig_connect(void)
 {
@@ -106,6 +116,30 @@ static int rig_connect(void)
 	// Windows' setsockopt() wants optval as const char*, not POSIX's
 	// const void* -- the cast is a no-op on Linux, required on Windows.
 	setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof(one));
+
+	// Real gap, found live (2026-09-02/03): this socket had no receive
+	// timeout at all, ever -- a plain blocking recv(). Every SET-style
+	// CAT command (rig_send_command()) is called synchronously from
+	// autogain_update(), which runs inline inside capture_thread_fn()'s
+	// real-time audio read loop. Caught live via gdb: the capture
+	// thread stuck inside exactly this recv() (autogain_update() ->
+	// rig_generic_set_rf_gain() -> rig_send_command()), which in turn
+	// stalled sound_generic_stop()'s pthread_join(capture_thread, ...)
+	// -- blocking the *entire* main thread, and with it the websocket,
+	// for however long rigctld/the rig took to answer that one command.
+	// A bounded timeout can't make a slow rig fast, but it turns
+	// "possibly forever" into "at worst half a second," which is what
+	// actually matters here -- the real, correct fix (getting autogain's
+	// CAT calls off the real-time audio thread entirely) is a bigger
+	// change than tonight's session should attempt.
+#ifdef _WIN32
+	DWORD rcv_timeout_ms = 500;
+	setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&rcv_timeout_ms, sizeof(rcv_timeout_ms));
+#else
+	struct timeval rcv_timeout = { .tv_sec = 0, .tv_usec = 500000 };
+	setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &rcv_timeout, sizeof(rcv_timeout));
+#endif
+
 	return s;
 }
 
@@ -252,7 +286,19 @@ void rig_generic_list(char *out, size_t out_size)
 	int first = 1;
 
 	out[0] = 0;
-	pf = popen("rigctl --list", "r");
+	// Scoped to just this one shell invocation (a leading VAR=value
+	// prefix in the popen()'d command line, not setenv() on our own
+	// process) -- avoids leaking LD_LIBRARY_PATH into zbitxd's own
+	// environment for the rest of its life, which would affect every
+	// other subprocess it ever spawns, not just this one lookup.
+	if (access(RIGCTL_PREFERRED_PATH, X_OK) == 0) {
+		char cmd[160];
+		snprintf(cmd, sizeof(cmd), "LD_LIBRARY_PATH=%s %s --list",
+			RIGCTLD_PREFERRED_LIBDIR, RIGCTL_PREFERRED_PATH);
+		pf = popen(cmd, "r");
+	} else {
+		pf = popen("rigctl --list", "r");
+	}
 	if (!pf)
 		return;
 
